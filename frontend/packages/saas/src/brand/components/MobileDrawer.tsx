@@ -11,23 +11,26 @@
 import { useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useSaasAuthStore } from "../../features/auth/authStore";
+import { useBrand } from "../useBrand";
+import BrandMark from "./BrandMark";
+import SaasIcon, { type SaasIconName } from "../ui/SaasIcon";
 
 interface NavItem {
   path: string;
   label: string;
-  icon: string;
+  icon: SaasIconName;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { path: "/", label: "首页", icon: "📊" },
-  { path: "/query", label: "AI 对话", icon: "💬" },
-  { path: "/poetry", label: "诗意空间", icon: "📝" },
-  { path: "/jobs", label: "职位匹配", icon: "🎯" },
-  { path: "/resume", label: "简历解析", icon: "📄" },
-  { path: "/candidates", label: "候选人", icon: "👥" },
-  { path: "/reports", label: "报表", icon: "📈" },
-  { path: "/pricing", label: "定价", icon: "💎" },
-  { path: "/settings/consent", label: "隐私设置", icon: "🔒" },
+  { path: "/", label: "首页", icon: "dashboard" },
+  { path: "/query", label: "AI 对话", icon: "chat" },
+  { path: "/poetry", label: "诗意空间", icon: "poetry" },
+  { path: "/jobs", label: "职位匹配", icon: "match" },
+  { path: "/resume", label: "简历解析", icon: "resume" },
+  { path: "/candidates", label: "候选人", icon: "candidates" },
+  { path: "/reports", label: "报表", icon: "report" },
+  { path: "/pricing", label: "定价", icon: "pricing" },
+  { path: "/settings/consent", label: "隐私设置", icon: "consent" },
 ];
 
 interface MobileDrawerProps {
@@ -37,6 +40,7 @@ interface MobileDrawerProps {
 
 export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
   const { user, logout } = useSaasAuthStore();
+  const brand = useBrand();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -104,25 +108,30 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
             borderBottom: "1px solid var(--color-border-light)",
           }}
         >
-          <h2
-            style={{
-              fontSize: "var(--font-size-xl)",
-              fontWeight: "var(--font-weight-bold)",
-              color: "var(--color-primary)",
-              margin: 0,
-            }}
-          >
-            T 空间
-          </h2>
-          <p
-            style={{
-              fontSize: "var(--font-size-xs)",
-              color: "var(--color-text-muted)",
-              margin: "4px 0 0",
-            }}
-          >
-            {user?.email || "未登录"}
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <BrandMark size={36} title={brand.name} />
+            <div style={{ minWidth: 0 }}>
+              <h2
+                style={{
+                  fontSize: "var(--font-size-xl)",
+                  fontWeight: "var(--font-weight-bold)",
+                  color: "var(--color-primary)",
+                  margin: 0,
+                }}
+              >
+                {brand.name}
+              </h2>
+              <p
+                style={{
+                  fontSize: "var(--font-size-xs)",
+                  color: "var(--color-text-muted)",
+                  margin: "4px 0 0",
+                }}
+              >
+                {user?.email || brand.slogan}
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Nav items */}
@@ -165,9 +174,7 @@ export default function MobileDrawer({ open, onClose }: MobileDrawerProps) {
                   width: "100%",
                 }}
               >
-                <span style={{ fontSize: "18px", flexShrink: 0 }}>
-                  {item.icon}
-                </span>
+                <SaasIcon name={item.icon} size={18} style={{ flexShrink: 0 }} />
                 <span>{item.label}</span>
               </button>
             );

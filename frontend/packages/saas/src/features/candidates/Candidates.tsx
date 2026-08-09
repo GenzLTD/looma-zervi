@@ -1,8 +1,11 @@
 /**
  * Enterprise candidates list — import from PlanetX share codes.
  * Requires supporter+ (aligned with backend `@require_tier("supporter")`).
+ *
+ * Pilot UI: Untitled UI TableCard layout + existing Saas* primitives + brand tokens
+ * (`--color-*` / Tailwind `t-*`). No default Untitled purple skin.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -16,10 +19,57 @@ import {
 } from "@looma/shared-core";
 import { createSaasApiClient } from "../../api/saasApiClient";
 import { useSaasAuthStore } from "../auth/authStore";
+import BrandEmptyArt from "../../brand/components/BrandEmptyArt";
 import TierGatePanel from "../../brand/components/TierGatePanel";
+import SaasButton from "../../brand/ui/SaasButton";
+import SaasDataTable from "../../brand/ui/SaasDataTable";
+import SaasInput from "../../brand/ui/SaasInput";
+import { SaasEmptyState, SaasErrorState } from "../../brand/ui/SaasEmptyState";
+import type { DataTableColumn } from "../../brand/ui/types";
+
+type CandidateRow = Candidate & Record<string, unknown>;
+
+type ProfileSlice = {
+  personality_type?: string;
+  personality_detail?: { emoji?: string; name?: string };
+};
 
 function getEnterpriseApi() {
   return createEnterpriseApi(createSaasApiClient());
+}
+
+function getProfile(c: Candidate): ProfileSlice | undefined {
+  return c.profile_data as ProfileSlice | undefined;
+}
+
+function CandidateAvatar({ name }: { name: string }) {
+  const initial = name.trim().charAt(0).toUpperCase() || "?";
+  return (
+    <span
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
+      style={{
+        backgroundColor: "var(--color-primary-light)",
+        color: "var(--color-primary)",
+      }}
+      aria-hidden
+    >
+      {initial}
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize"
+      style={{
+        backgroundColor: "var(--color-primary-light)",
+        color: "var(--color-primary)",
+      }}
+    >
+      {status}
+    </span>
+  );
 }
 
 export default function Candidates() {
@@ -50,7 +100,6 @@ export default function Candidates() {
         setListError(null);
         return;
       }
-      // Keep enterprise shell; never bounce back to the create panel.
       const detail =
         err instanceof ApiError
           ? (typeof err.body?.message === "string" && err.body.message) || err.message
@@ -85,7 +134,6 @@ export default function Candidates() {
         setEnterprise(null);
         setCandidates([]);
       } else {
-        // Unknown/network errors must not force the create-enterprise panel.
         setMessage(t("candidates.loadEnterpriseFailed"));
       }
     } finally {
@@ -98,7 +146,7 @@ export default function Candidates() {
   }, [loadData]);
 
   const handleCreateEnterprise = async () => {
-    const name = user?.name || user?.email?.split("@")[0] || "我的企业";
+    const name = user?.name || user?.email?.split("@")[0] || "Workspace";
     setCreating(true);
     setMessage(null);
     try {
@@ -126,7 +174,11 @@ export default function Candidates() {
     setMessage(null);
     try {
       const result = await getEnterpriseApi().importFromShare(code);
-      setMessage(result.imported === false ? "该候选人已在列表中" : "导入成功");
+      setMessage(
+        result.imported === false
+          ? t("candidates.importAlreadyExists")
+          : t("candidates.importSuccess"),
+      );
       setShareCode("");
       await loadData();
     } catch (err) {
@@ -134,12 +186,85 @@ export default function Candidates() {
         setTierBlocked(true);
         setMessage(null);
       } else {
-        setMessage("导入失败：分享码无效或用户未完成测试");
+        setMessage(t("candidates.importFailed"));
       }
     } finally {
       setImporting(false);
     }
   };
+
+  const columns = useMemo<DataTableColumn<CandidateRow>[]>(
+    () => [
+      {
+        key: "name",
+        title: t("candidates.colName"),
+        render: (row) => {
+          const profile = getProfile(row);
+          const typeName =
+            profile?.personality_detail?.name ??
+            profile?.personality_type ??
+            t("candidates.unknownType");
+          return (
+            <Link
+              to={`/candidates/${row.id}`}
+              className="flex items-center gap-3 no-underline"
+              style={{ color: "inherit" }}
+            >
+              <CandidateAvatar name={row.name} />
+              <span className="min-w-0">
+                <span
+                  className="block truncate text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  {row.name}
+                </span>
+                <span
+                  className="block truncate text-xs sm:hidden"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {typeName}
+                </span>
+              </span>
+            </Link>
+          );
+        },
+      },
+      {
+        key: "type",
+        title: t("candidates.colType"),
+        render: (row) => {
+          const profile = getProfile(row);
+          return (
+            profile?.personality_detail?.name ??
+            profile?.personality_type ??
+            t("candidates.unknownType")
+          );
+        },
+      },
+      {
+        key: "status",
+        title: t("candidates.colStatus"),
+        width: 120,
+        render: (row) => <StatusBadge status={row.status ?? "new"} />,
+      },
+      {
+        key: "actions",
+        title: t("candidates.colActions"),
+        width: 100,
+        align: "right",
+        render: (row) => (
+          <Link
+            to={`/candidates/${row.id}`}
+            className="text-sm font-medium no-underline"
+            style={{ color: "var(--color-primary)" }}
+          >
+            {t("candidates.view")}
+          </Link>
+        ),
+      },
+    ],
+    [t],
+  );
 
   if (!canUseCandidates || tierBlocked) {
     return (
@@ -152,27 +277,34 @@ export default function Candidates() {
   }
 
   if (loading) {
-    return <p style={{ color: "var(--color-text-muted)" }}>{t("candidates.loading")}</p>;
+    return (
+      <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+        {t("candidates.loading")}
+      </p>
+    );
   }
 
   if (needsEnterprise) {
     return (
-      <div className="max-w-xl">
-        <h1 className="text-2xl font-bold mb-4" style={{ color: "var(--color-text-primary)" }}>
+      <div className="mx-auto w-full max-w-xl animate-fade-in">
+        <h1 className="text-display mb-2" style={{ color: "var(--color-text-primary)" }}>
           {t("candidates.title")}
         </h1>
-        <p className="text-sm mb-4" style={{ color: "var(--color-text-secondary)" }}>
+        <p className="mb-6 text-sm" style={{ color: "var(--color-text-secondary)" }}>
           {t("candidates.needsEnterprise")}
         </p>
-        <button
+        <SaasButton
           onClick={() => void handleCreateEnterprise()}
+          loading={creating}
           disabled={creating}
-          className="px-4 py-2 rounded-lg text-sm text-white disabled:opacity-50"
-          style={{ backgroundColor: "var(--color-primary)" }}
         >
           {creating ? t("candidates.creating") : t("candidates.createEnterprise")}
-        </button>
-        {message && <p className="text-sm mt-3" style={{ color: "var(--color-text-muted)" }}>{message}</p>}
+        </SaasButton>
+        {message && (
+          <p className="mt-3 text-sm" style={{ color: "var(--color-text-muted)" }}>
+            {message}
+          </p>
+        )}
       </div>
     );
   }
@@ -183,82 +315,110 @@ export default function Candidates() {
       ? CANDIDATE_LIMITS[tier as keyof typeof CANDIDATE_LIMITS]
       : CANDIDATE_LIMITS.free;
   const atCap = limit !== null && candidates.length >= limit;
+  const rows = candidates as CandidateRow[];
 
   return (
-    <div className="max-w-3xl">
-      <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--color-text-primary)" }}>
-        {t("candidates.title")}
-      </h1>
-      <p className="text-sm mb-2" style={{ color: "var(--color-text-muted)" }}>
-        {enterprise?.name} · {t("candidates.importHint")}
-      </p>
-      <p className="text-xs mb-6" style={{ color: atCap ? "var(--color-warning)" : "var(--color-text-muted)" }}>
-        {t("candidates.capacity", {
-          used: candidates.length,
-          limit: limit === null ? t("tier.unlimited") : String(limit),
-        })}
-        {atCap ? ` · ${t("candidates.capacityFull")}` : ""}
-      </p>
+    <div className="mx-auto w-full max-w-5xl animate-fade-in">
+      {/* Untitled-style page header */}
+      <div className="mb-6 flex flex-col gap-1">
+        <h1 className="text-display" style={{ color: "var(--color-text-primary)" }}>
+          {t("candidates.title")}
+        </h1>
+        <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+          {enterprise?.name ? `${enterprise.name} · ` : ""}
+          {t("candidates.importHint")}
+        </p>
+        <p
+          className="text-xs"
+          style={{ color: atCap ? "var(--color-warning)" : "var(--color-text-muted)" }}
+        >
+          {t("candidates.capacity", {
+            used: candidates.length,
+            limit: limit === null ? t("tier.unlimited") : String(limit),
+          })}
+          {atCap ? ` · ${t("candidates.capacityFull")}` : ""}
+        </p>
+      </div>
 
+      {/* Import toolbar */}
       <div
-        className="flex gap-2 mb-6 p-4 rounded-xl"
-        style={{ backgroundColor: "var(--color-bg-card)", boxShadow: "var(--shadow-sm)" }}
+        className="mb-6 flex flex-col gap-3 rounded-xl border p-4 shadow-sm sm:flex-row sm:items-end"
+        style={{
+          backgroundColor: "var(--color-bg-card)",
+          borderColor: "var(--color-border)",
+        }}
       >
-        <input
-          type="text"
-          value={shareCode}
-          onChange={(e) => setShareCode(e.target.value.toUpperCase())}
-          placeholder={t("candidates.shareCodePlaceholder")}
-          className="flex-1 px-3 py-2 rounded-lg text-sm border"
-          style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-bg-surface)" }}
-        />
-        <button
+        <div className="min-w-0 flex-1">
+          <SaasInput
+            value={shareCode}
+            onChange={(v) => setShareCode(v.toUpperCase())}
+            placeholder={t("candidates.shareCodePlaceholder")}
+            label={t("candidates.shareCodeLabel")}
+            disabled={importing || atCap}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleImport();
+            }}
+          />
+        </div>
+        <SaasButton
           onClick={() => void handleImport()}
-          disabled={importing || !shareCode.trim()}
-          className="px-4 py-2 rounded-lg text-sm text-white disabled:opacity-50"
-          style={{ backgroundColor: "var(--color-primary)" }}
+          loading={importing}
+          disabled={importing || !shareCode.trim() || atCap}
         >
           {importing ? t("candidates.importing") : t("candidates.import")}
-        </button>
+        </SaasButton>
       </div>
 
       {message && (
-        <p className="text-sm mb-4" style={{ color: "var(--color-success)" }}>{message}</p>
-      )}
-      {listError && (
-        <p className="text-sm mb-4" style={{ color: "var(--color-warning)" }}>{listError}</p>
+        <p className="mb-4 text-sm" style={{ color: "var(--color-success)" }}>
+          {message}
+        </p>
       )}
 
-      {candidates.length === 0 && !listError ? (
-        <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-          {t("candidates.empty")}
-        </p>
-      ) : (
-        <ul className="space-y-3">
-          {candidates.map((c) => {
-            const profile = c.profile_data as { personality_type?: string; personality_detail?: { emoji?: string; name?: string } } | undefined;
-            const emoji = profile?.personality_detail?.emoji ?? "🪐";
-            const typeName = profile?.personality_detail?.name ?? profile?.personality_type ?? t("candidates.unknownType");
-            return (
-              <li key={c.id}>
-                <Link
-                  to={`/candidates/${c.id}`}
-                  className="flex items-center gap-4 p-4 rounded-xl no-underline transition-shadow hover:shadow-md"
-                  style={{ backgroundColor: "var(--color-bg-card)", boxShadow: "var(--shadow-sm)" }}
-                >
-                  <span className="text-3xl">{emoji}</span>
-                  <div>
-                    <p className="font-medium" style={{ color: "var(--color-text-primary)" }}>{c.name}</p>
-                    <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                      {typeName} · {c.status ?? "new"}
-                    </p>
-                  </div>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {/* TableCard shell (Untitled pattern) */}
+      <div
+        className="overflow-hidden rounded-xl border shadow-sm"
+        style={{
+          backgroundColor: "var(--color-bg-card)",
+          borderColor: "var(--color-border)",
+        }}
+      >
+        <div
+          className="flex flex-col gap-1 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <div>
+            <h2 className="text-base font-semibold" style={{ color: "var(--color-text-primary)" }}>
+              {t("candidates.tableTitle")}
+            </h2>
+            <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+              {t("candidates.tableCount", { count: candidates.length })}
+            </p>
+          </div>
+        </div>
+
+        {listError ? (
+          <SaasErrorState
+            title={t("candidates.listLoadFailed")}
+            message={listError}
+            onRetry={() => void loadCandidates()}
+          />
+        ) : candidates.length === 0 ? (
+          <SaasEmptyState
+            icon={<BrandEmptyArt variant="candidates" size={140} />}
+            title={t("candidates.emptyTitle")}
+            description={t("candidates.empty")}
+          />
+        ) : (
+          <SaasDataTable<CandidateRow>
+            columns={columns}
+            data={rows}
+            rowKey="id"
+            compact
+            emptyText={t("candidates.empty")}
+          />
+        )}
+      </div>
     </div>
   );
 }

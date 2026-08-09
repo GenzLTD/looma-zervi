@@ -33,12 +33,15 @@ import { Outlet, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSaasAuthStore } from "../../features/auth/authStore";
 import { LanguageSwitcher } from "../../components/LanguageSwitcher";
+import { useBrand } from "../useBrand";
+import BrandMark from "./BrandMark";
 import Sidebar from "./Sidebar";
 import MobileDrawer from "./MobileDrawer";
 import MobileBottomNav from "./MobileBottomNav";
 
 export function AppLayout() {
   const { t } = useTranslation();
+  const brand = useBrand();
   const { user, logout } = useSaasAuthStore();
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -87,12 +90,15 @@ export function AppLayout() {
             >
               ☰
             </button>
-            {/* Mobile brand name */}
-            <span
-              className="md:hidden text-base font-semibold"
-              style={{ color: "var(--color-primary)" }}
-            >
-              T 空间
+            {/* Mobile brand */}
+            <span className="md:hidden inline-flex items-center gap-2">
+              <BrandMark size={28} title={brand.name} />
+              <span
+                className="text-base font-semibold"
+                style={{ color: "var(--color-primary)" }}
+              >
+                {brand.name}
+              </span>
             </span>
           </div>
 

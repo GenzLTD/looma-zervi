@@ -1,7 +1,7 @@
 {
   "brand": {
-    "name": "PlanetX",
-    "slogan": "AI Career Growth Partner"
+    "name": "TSpace",
+    "slogan": "AI as your recruiting partner"
   },
   "auth": {
     "emailPasswordRequired": "Please enter your email and password",
@@ -183,10 +183,22 @@
     "listLoadFailed": "Workspace is ready, but the candidate list is unavailable",
     "loadEnterpriseFailed": "Could not load workspace. Please try again.",
     "importHint": "Paste a PlanetX candidate share code (8-char uppercase — not a trust verify sc_… code)",
+    "shareCodeLabel": "Candidate share code",
     "shareCodePlaceholder": "Paste candidate share code, e.g. A1B2C3D4",
     "import": "Import",
     "importing": "Importing…",
+    "importSuccess": "Candidate imported",
+    "importAlreadyExists": "This candidate is already in your list",
+    "importFailed": "Import failed — invalid candidate share code or profile incomplete",
     "empty": "No candidates yet. Ask applicants to finish the PlanetX quiz, then share a candidate share code with you.",
+    "emptyTitle": "No candidates yet",
+    "tableTitle": "Candidates",
+    "tableCount": "{{count}} in pool",
+    "colName": "Name",
+    "colType": "Profile type",
+    "colStatus": "Status",
+    "colActions": "",
+    "view": "View",
     "unknownType": "Unknown",
     "upgradeForMore": "Upgrade to Pro for deeper matching →",
     "capacity": "Pool capacity {{used}} / {{limit}}",

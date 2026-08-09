@@ -5,19 +5,20 @@
  * Shows 5 core nav items with icons.
  */
 import { useLocation, useNavigate } from "react-router-dom";
+import SaasIcon, { type SaasIconName } from "../ui/SaasIcon";
 
 interface NavItem {
   path: string;
   label: string;
-  icon: string;
+  icon: SaasIconName;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { path: "/", label: "首页", icon: "📊" },
-  { path: "/query", label: "对话", icon: "💬" },
-  { path: "/candidates", label: "候选人", icon: "👥" },
-  { path: "/resume", label: "简历", icon: "📄" },
-  { path: "/pricing", label: "定价", icon: "💎" },
+  { path: "/", label: "首页", icon: "dashboard" },
+  { path: "/query", label: "对话", icon: "chat" },
+  { path: "/candidates", label: "候选人", icon: "candidates" },
+  { path: "/resume", label: "简历", icon: "resume" },
+  { path: "/pricing", label: "定价", icon: "pricing" },
 ];
 
 export default function MobileBottomNav() {
@@ -58,7 +59,7 @@ export default function MobileBottomNav() {
               transition: "color var(--transition-fast)",
             }}
           >
-            <span style={{ fontSize: "20px", lineHeight: 1 }}>{item.icon}</span>
+            <SaasIcon name={item.icon} size={20} />
             <span
               style={{
                 fontSize: "10px",

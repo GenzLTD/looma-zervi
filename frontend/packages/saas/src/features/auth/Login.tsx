@@ -7,6 +7,7 @@ import { useNavigate, Navigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSaasAuthStore } from "./authStore";
 import { useBrand } from "../../brand/useBrand";
+import BrandMark from "../../brand/components/BrandMark";
 import { LanguageSwitcher } from "../../components/LanguageSwitcher";
 import SaasButton from "../../brand/ui/SaasButton";
 import SaasInput from "../../brand/ui/SaasInput";
@@ -57,7 +58,8 @@ export default function Login() {
           <LanguageSwitcher />
         </div>
 
-        <div className="text-center mb-6">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <BrandMark size={48} title={brand.name} className="mb-3" />
           <h1 className="text-2xl font-bold" style={{ color: "var(--color-primary)" }}>
             {brand.name}
           </h1>

@@ -20,11 +20,13 @@ import { hasMinTier, isAdmin, isPaidTier, type Tier } from "@looma/shared-core";
 import { useSaasAuthStore } from "../../features/auth/authStore";
 import { useBrand } from "../useBrand";
 import { IS_OVERSEAS } from "../../config/region";
+import BrandMark from "./BrandMark";
+import SaasIcon, { type SaasIconName } from "../ui/SaasIcon";
 
 interface NavItem {
   path: string;
   labelKey: string;
-  icon: string;
+  icon: SaasIconName;
   overseasHidden?: boolean;
   mainlandHidden?: boolean;
   /** Minimum tier to unlock; free users see a lock badge. */
@@ -46,24 +48,24 @@ export default function Sidebar() {
 
   const navItems: NavItem[] = useMemo(() => {
     const items: NavItem[] = [
-      { path: "/", labelKey: "nav.dashboard", icon: "◉" },
-      { path: "/trust", labelKey: "nav.trust", icon: "✦" },
-      { path: "/query", labelKey: "nav.query", icon: "◈" },
-      { path: "/poetry", labelKey: "nav.poetry", icon: "◇" },
-      { path: "/poetry/challenge", labelKey: "nav.challenge", icon: "✧", mainlandHidden: true },
+      { path: "/", labelKey: "nav.dashboard", icon: "dashboard" },
+      { path: "/trust", labelKey: "nav.trust", icon: "trust" },
+      { path: "/query", labelKey: "nav.query", icon: "query" },
+      { path: "/poetry", labelKey: "nav.poetry", icon: "poetry" },
+      { path: "/poetry/challenge", labelKey: "nav.challenge", icon: "challenge", mainlandHidden: true },
       {
         path: "/candidates",
         labelKey: IS_OVERSEAS ? "nav.profile" : "nav.candidates",
-        icon: "◎",
+        icon: "candidates",
         minTier: "supporter",
       },
-      { path: "/jobs", labelKey: IS_OVERSEAS ? "nav.jobsOverseas" : "nav.jobs", icon: "◈" },
-      { path: "/resume", labelKey: "nav.resume", icon: "◈" },
-      { path: "/reports", labelKey: "nav.reports", icon: "◆" },
-      { path: "/settings/consent", labelKey: "nav.consent", icon: "🛡" },
+      { path: "/jobs", labelKey: IS_OVERSEAS ? "nav.jobsOverseas" : "nav.jobs", icon: "jobs" },
+      { path: "/resume", labelKey: "nav.resume", icon: "resume" },
+      { path: "/reports", labelKey: "nav.reports", icon: "report" },
+      { path: "/settings/consent", labelKey: "nav.consent", icon: "consent" },
     ];
     if (isAdmin(user?.role)) {
-      items.push({ path: "/admin", labelKey: "nav.admin", icon: "⚙" });
+      items.push({ path: "/admin", labelKey: "nav.admin", icon: "admin" });
     }
     return items.filter(
       (item) =>
@@ -96,18 +98,23 @@ export default function Sidebar() {
       }}
     >
       <div className="px-5 py-5 border-b border-[var(--color-border)]">
-        <h1
-          className="text-lg font-bold tracking-wide"
-          style={{ color: "var(--color-text-primary)" }}
-        >
-          {brand.name}
-        </h1>
-        <p
-          className="text-xs mt-1"
-          style={{ color: "var(--color-text-sidebar-muted)" }}
-        >
-          {brand.slogan}
-        </p>
+        <div className="flex items-center gap-3">
+          <BrandMark size={36} title={brand.name} />
+          <div className="min-w-0">
+            <h1
+              className="text-lg font-bold tracking-wide truncate"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              {brand.name}
+            </h1>
+            <p
+              className="text-xs mt-0.5 leading-snug"
+              style={{ color: "var(--color-text-sidebar-muted)" }}
+            >
+              {brand.slogan}
+            </p>
+          </div>
+        </div>
       </div>
 
       <nav className="flex-1 py-4 space-y-0.5 overflow-y-auto">
@@ -137,7 +144,7 @@ export default function Sidebar() {
                   : "transparent",
               })}
             >
-              <span className="text-base">{item.icon}</span>
+              <SaasIcon name={item.icon} size={18} />
               <span className="flex-1 truncate">{t(item.labelKey)}</span>
               {locked && (
                 <span
@@ -248,7 +255,7 @@ export default function Sidebar() {
             style={{ color: "var(--color-text-sidebar-muted)" }}
             title={t("auth.logout")}
           >
-            ⏻
+            <SaasIcon name="logout" size={16} />
           </button>
         </div>
       )}
