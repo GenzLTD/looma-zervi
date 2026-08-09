@@ -438,3 +438,15 @@ export type {
   AdminNarrativeResponse,
   AdminHealthResponse,
 } from "./types/admin";
+
+// ============================================================
+// Asset Registry (品牌资源清单 — 设计师交付后按路径替换)
+// ============================================================
+export {
+  PLANETX_ASSETS,
+  TSPACE_ASSETS,
+  getAssetPath,
+  getAssetsByType,
+  getPendingAssets,
+} from "./tokens/assetRegistry";
+export type { AssetEntry } from "./tokens/assetRegistry";

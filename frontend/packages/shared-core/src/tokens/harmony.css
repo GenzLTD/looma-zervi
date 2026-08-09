@@ -1,0 +1,72 @@
+/**
+ * HarmonyOS Brand Token — 鸿蒙元服务主题
+ * =========================================
+ * 设计来源：Figma 第一期风格设计 (2026-08-08)
+ * 主色系：鸿蒙生态蓝 + 系统原生灰白
+ *
+ * 使用场景：负一屏卡片、原子化服务、HarmonyOS 原生控件
+ * 对齐 HM Design System 语义层
+ */
+
+:root {
+  /* ========================================================
+   * BRAND PRIMARY
+   * ======================================================== */
+  --hm-brand-primary: #0A59F7;
+  --hm-brand-primary-light: #3D7BF7;
+  --hm-brand-primary-dark: #0740C4;
+  --hm-brand-secondary: #FF6B35;
+
+  /* ========================================================
+   * COLOR — Surface
+   * ======================================================== */
+  --hm-color-surface-root: #F1F3F5;
+  --hm-color-surface-page: #FFFFFF;
+  --hm-color-surface-card: #FFFFFF;
+  --hm-color-surface-card-hover: #F7F8FA;
+
+  /* ========================================================
+   * COLOR — Text
+   * ======================================================== */
+  --hm-color-text-primary: #182431;
+  --hm-color-text-secondary: #70737F;
+  --hm-color-text-tertiary: #999BA6;
+  --hm-color-text-brand: #0A59F7;
+
+  /* ========================================================
+   * COLOR — Border
+   * ======================================================== */
+  --hm-color-border-subtle: #E5E6EA;
+  --hm-color-border-default: #D1D3D9;
+  --hm-color-border-focus: #0A59F7;
+
+  /* ========================================================
+   * COLOR — Accent
+   * ======================================================== */
+  --hm-color-success: #00B42A;
+  --hm-color-warning: #FF7D00;
+  --hm-color-danger: #F53F3F;
+  --hm-color-info: #0A59F7;
+
+  /* ========================================================
+   * SHADOW — 鸿蒙系统卡片阴影
+   * ======================================================== */
+  --hm-shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.04);
+  --hm-shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --hm-shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+  /* ========================================================
+   * TYPOGRAPHY — 鸿蒙推荐字体栈
+   * ======================================================== */
+  --hm-font-family: 'HarmonyOS Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* ========================================================
+   * COMPONENT — 服务卡片 Token
+   * ======================================================== */
+  --hm-card-radius: 16px;
+  --hm-card-padding: 16px;
+  --hm-card-bg: linear-gradient(135deg, #FFFFFF 0%, #F7F8FA 100%);
+  --hm-card-shadow: var(--hm-shadow-card);
+  --hm-card-tag-radius: 4px;      /* 圆角服务标签 */
+  --hm-card-hover-scale: 1.02;    /* 按压反馈 */
+}

@@ -1,0 +1,100 @@
+/**
+ * TSpace Brand Token — 企业 SaaS 主题
+ * ======================================
+ * 设计来源：Figma 第一期风格设计 (2026-08-08)
+ * 主色系：科技蓝 + 无彩灰白工作台
+ *
+ * 使用场景：候选人管理、配额监控、团队协作
+ * 语义层：surface / text / border / accent / shadow
+ */
+
+:root {
+  /* ========================================================
+   * BRAND PRIMARY — 核心品牌色
+   * ======================================================== */
+  --tsp-brand-primary: #2563EB;
+  --tsp-brand-primary-light: #3B82F6;
+  --tsp-brand-primary-dark: #1D4ED8;
+  --tsp-brand-primary-bg: rgba(37, 99, 235, 0.08);
+  --tsp-brand-primary-bg-hover: rgba(37, 99, 235, 0.14);
+
+  /* ========================================================
+   * COLOR — Surface（背景层级）
+   * ======================================================== */
+  --tsp-color-surface-root: #F8FAFC;
+  --tsp-color-surface-page: #FFFFFF;
+  --tsp-color-surface-card: #FFFFFF;
+  --tsp-color-surface-card-hover: #F1F5F9;
+  --tsp-color-surface-elevated: #FFFFFF;
+  --tsp-color-surface-sidebar: #0F172A;
+  --tsp-color-surface-glass: rgba(255, 255, 255, 0.7);
+  --tsp-color-surface-glass-hover: rgba(255, 255, 255, 0.9);
+
+  /* ========================================================
+   * COLOR — Text（文字层级）
+   * ======================================================== */
+  --tsp-color-text-primary: #0F172A;
+  --tsp-color-text-secondary: #475569;
+  --tsp-color-text-tertiary: #94A3B8;
+  --tsp-color-text-disabled: #CBD5E1;
+  --tsp-color-text-inverse: #FFFFFF;
+  --tsp-color-text-brand: #2563EB;
+  --tsp-color-text-link: #3B82F6;
+
+  /* ========================================================
+   * COLOR — Border（描边）
+   * ======================================================== */
+  --tsp-color-border-subtle: #E2E8F0;
+  --tsp-color-border-default: #CBD5E1;
+  --tsp-color-border-strong: #94A3B8;
+  --tsp-color-border-focus: #2563EB;
+
+  /* ========================================================
+   * COLOR — Accent（功能色）
+   * ======================================================== */
+  --tsp-color-success: #10B981;
+  --tsp-color-success-bg: rgba(16, 185, 129, 0.1);
+  --tsp-color-warning: #F59E0B;
+  --tsp-color-warning-bg: rgba(245, 158, 11, 0.1);
+  --tsp-color-danger: #EF4444;
+  --tsp-color-danger-bg: rgba(239, 68, 68, 0.1);
+  --tsp-color-info: #3B82F6;
+  --tsp-color-info-bg: rgba(59, 130, 246, 0.1);
+
+  /* ========================================================
+   * GRADIENT — 渐变（TSpace 偏克制，仅少量使用）
+   * ======================================================== */
+  --tsp-gradient-hero: linear-gradient(135deg, #2563EB 0%, #7C3AED 100%);
+  --tsp-gradient-card: linear-gradient(135deg, rgba(37, 99, 235, 0.04) 0%, rgba(124, 58, 237, 0.02) 100%);
+  --tsp-gradient-overlay: linear-gradient(180deg, transparent 0%, rgba(15, 23, 42, 0.6) 100%);
+
+  /* ========================================================
+   * SHADOW — 阴影
+   * ======================================================== */
+  --tsp-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --tsp-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --tsp-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
+  --tsp-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
+  --tsp-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.08);
+
+  /* ========================================================
+   * TYPOGRAPHY — 品牌字体
+   * ======================================================== */
+  --tsp-font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --tsp-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ========================================================
+   * COMPONENT — 组件级 Token
+   * ======================================================== */
+  --tsp-card-bg: var(--tsp-color-surface-card);
+  --tsp-card-border: 1px solid var(--tsp-color-border-subtle);
+  --tsp-card-radius: var(--lo-radius-lg);
+  --tsp-card-shadow: var(--tsp-shadow-sm);
+  --tsp-card-hover-shadow: var(--tsp-shadow-md);
+
+  --tsp-btn-height: 40px;
+  --tsp-btn-radius: var(--lo-radius-sm);
+  --tsp-btn-padding: 0 var(--lo-space-lg);
+  --tsp-btn-font-size: var(--lo-font-size-sm);
+  --tsp-btn-font-weight: var(--lo-font-medium);
+}

@@ -1,0 +1,117 @@
+/**
+ * PlanetX Brand Token — 深空游戏主题
+ * ======================================
+ * 设计来源：Figma 第一期风格设计 (2026-08-08)
+ * 主色系：紫蓝渐变深空 + 荧光青高亮
+ *
+ * 语义层映射：
+ *   color-surface-*   → 卡片/面板背景
+ *   color-border-*    → 描边/分隔
+ *   color-gradient-*  → Hero / CTA 渐变
+ *   color-accent-*    → 功能色（success/warning/danger）
+ */
+
+:root {
+  /* ========================================================
+   * BRAND PRIMARY — 核心品牌色
+   * ======================================================== */
+  --px-brand-primary: #6C63FF;
+  --px-brand-primary-light: #8B85FF;
+  --px-brand-primary-dark: #4A42D4;
+  --px-brand-secondary: #00D4FF;
+  --px-brand-accent: #FF6B9D;
+
+  /* ========================================================
+   * COLOR — Surface（背景层级）
+   * ======================================================== */
+  --px-color-surface-root: #0A0A1A;
+  --px-color-surface-page: #0F0F28;
+  --px-color-surface-card: rgba(16, 16, 40, 0.8);
+  --px-color-surface-card-hover: rgba(24, 24, 56, 0.9);
+  --px-color-surface-elevated: rgba(20, 20, 48, 0.95);
+  --px-color-surface-glass: rgba(108, 99, 255, 0.08);
+  --px-color-surface-glass-hover: rgba(108, 99, 255, 0.14);
+
+  /* ========================================================
+   * COLOR — Text（文字层级）
+   * ======================================================== */
+  --px-color-text-primary: #F0F0FF;
+  --px-color-text-secondary: #A0A0C8;
+  --px-color-text-tertiary: #6060A0;
+  --px-color-text-disabled: #404070;
+  --px-color-text-inverse: #0A0A1A;
+  --px-color-text-brand: #6C63FF;
+  --px-color-text-link: #00D4FF;
+
+  /* ========================================================
+   * COLOR — Border（描边）
+   * ======================================================== */
+  --px-color-border-subtle: rgba(108, 99, 255, 0.12);
+  --px-color-border-default: rgba(108, 99, 255, 0.2);
+  --px-color-border-strong: rgba(108, 99, 255, 0.35);
+  --px-color-border-glow: rgba(108, 99, 255, 0.5);
+  --px-color-border-accent: rgba(0, 212, 255, 0.4);
+
+  /* ========================================================
+   * COLOR — Accent（功能色）
+   * ======================================================== */
+  --px-color-success: #00E676;
+  --px-color-success-bg: rgba(0, 230, 118, 0.1);
+  --px-color-warning: #FFD600;
+  --px-color-warning-bg: rgba(255, 214, 0, 0.1);
+  --px-color-danger: #FF5252;
+  --px-color-danger-bg: rgba(255, 82, 82, 0.1);
+  --px-color-info: #00D4FF;
+  --px-color-info-bg: rgba(0, 212, 255, 0.1);
+
+  /* ========================================================
+   * GRADIENT — 渐变色
+   * ======================================================== */
+  --px-gradient-hero: linear-gradient(135deg, #6C63FF 0%, #00D4FF 50%, #FF6B9D 100%);
+  --px-gradient-card: linear-gradient(135deg, rgba(108, 99, 255, 0.15) 0%, rgba(0, 212, 255, 0.08) 100%);
+  --px-gradient-glow: linear-gradient(180deg, rgba(108, 99, 255, 0.3) 0%, transparent 100%);
+  --px-gradient-btn-primary: linear-gradient(135deg, #6C63FF 0%, #00D4FF 100%);
+  --px-gradient-btn-primary-hover: linear-gradient(135deg, #8B85FF 0%, #33D9FF 100%);
+  --px-gradient-xp-bar: linear-gradient(90deg, #6C63FF 0%, #00D4FF 100%);
+  --px-gradient-primary: var(--px-gradient-btn-primary);
+  --px-gradient-overlay: linear-gradient(180deg, transparent 0%, rgba(10, 10, 26, 0.8) 100%);
+
+  /* ========================================================
+   * SHADOW — 阴影
+   * ======================================================== */
+  --px-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --px-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --px-shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5);
+  --px-shadow-glow: 0 0 20px rgba(108, 99, 255, 0.3);
+  --px-shadow-glow-strong: 0 0 40px rgba(108, 99, 255, 0.4), 0 0 80px rgba(0, 212, 255, 0.15);
+
+  /* ========================================================
+   * SPACING — 沿用 shared base，品牌特定间距
+   * ======================================================== */
+  --px-space-page-padding: var(--lo-space-md);
+  --px-space-section-gap: var(--lo-space-lg);
+  --px-space-card-padding: var(--lo-space-md);
+  --px-space-card-gap: 12px;
+
+  /* ========================================================
+   * TYPOGRAPHY — 品牌字体
+   * ======================================================== */
+  --px-font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  --px-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ========================================================
+   * COMPONENT — 组件级 Token
+   * ======================================================== */
+  --px-card-bg: var(--px-color-surface-card);
+  --px-card-border: 1px solid var(--px-color-border-subtle);
+  --px-card-radius: var(--lo-radius-lg);
+  --px-card-shadow: var(--px-shadow-sm);
+  --px-card-hover-transform: translateY(-2px);
+  --px-card-hover-shadow: var(--px-shadow-md);
+
+  --px-btn-height: 44px;
+  --px-btn-radius: var(--lo-radius-md);
+  --px-btn-padding: 0 var(--lo-space-lg);
+  --px-btn-font-size: var(--lo-font-size-base);
+  --px-btn-font-weight: var(--lo-font-semibold);
+}

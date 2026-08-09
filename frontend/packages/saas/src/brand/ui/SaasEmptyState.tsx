@@ -1,6 +1,7 @@
 /**
  * SaaS EmptyState + ErrorState — pure UI components.
  */
+import type { ReactNode } from "react";
 import type { SaasEmptyStateProps, SaasErrorStateProps } from "./types";
 
 export function SaasEmptyState({
@@ -10,6 +11,9 @@ export function SaasEmptyState({
   actionLabel,
   onAction,
 }: SaasEmptyStateProps) {
+  const iconNode: ReactNode = icon;
+  const iconIsGraphic = typeof icon !== "string";
+
   return (
     <div style={{
       display: "flex",
@@ -19,7 +23,9 @@ export function SaasEmptyState({
       padding: "48px 24px",
       gap: "var(--radius-md)",
     }}>
-      <div style={{ fontSize: 48, opacity: 0.6 }}>{icon}</div>
+      <div style={iconIsGraphic ? undefined : { fontSize: 48, opacity: 0.6 }}>
+        {iconNode}
+      </div>
       <div style={{
         fontSize: "var(--font-size-base)",
         fontWeight: "var(--font-weight-medium)",

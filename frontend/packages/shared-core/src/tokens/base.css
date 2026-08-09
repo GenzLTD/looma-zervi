@@ -1,0 +1,97 @@
+/**
+ * Looma Design Token — Shared Foundation
+ * =========================================
+ * 所有品牌共用的基础 Token：间距、圆角、字体层级、动效、Z-index。
+ * 品牌色/阴影/主题在各自的 brand.css 中定义。
+ *
+ * Token taxonomy:
+ *   --lo-space-*    Spacing scale (6 steps)
+ *   --lo-radius-*   Border radius (5 steps)
+ *   --lo-font-*     Typography scale (size / weight / line-height)
+ *   --lo-anim-*     Animation timing
+ *   --lo-z-*        Z-index scale
+ */
+
+:root {
+  /* ========================================================
+   * SPACING — 6-step scale (4-48px)
+   * ======================================================== */
+  --lo-space-xs: 4px;
+  --lo-space-sm: 8px;
+  --lo-space-md: 16px;
+  --lo-space-lg: 24px;
+  --lo-space-xl: 32px;
+  --lo-space-2xl: 48px;
+  --lo-space-3xl: 64px;
+
+  /* ========================================================
+   * RADIUS — 5-step scale
+   * ======================================================== */
+  --lo-radius-xs: 4px;
+  --lo-radius-sm: 8px;
+  --lo-radius-md: 12px;
+  --lo-radius-lg: 16px;
+  --lo-radius-xl: 24px;
+  --lo-radius-full: 9999px;
+
+  /* ========================================================
+   * TYPOGRAPHY — Font Size
+   * ======================================================== */
+  --lo-font-size-xs: 0.75rem;     /* 12px */
+  --lo-font-size-sm: 0.875rem;    /* 14px */
+  --lo-font-size-base: 1rem;      /* 16px */
+  --lo-font-size-lg: 1.125rem;    /* 18px */
+  --lo-font-size-xl: 1.25rem;     /* 20px */
+  --lo-font-size-2xl: 1.5rem;     /* 24px */
+  --lo-font-size-3xl: 2rem;       /* 32px */
+  --lo-font-size-hero: 2.5rem;    /* 40px */
+  --lo-font-size-4xl: 3rem;       /* 48px */
+
+  /* ========================================================
+   * TYPOGRAPHY — Font Weight
+   * ======================================================== */
+  --lo-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --lo-font-normal: 400;
+  --lo-font-medium: 500;
+  --lo-font-semibold: 600;
+  --lo-font-bold: 700;
+  --lo-font-extrabold: 800;
+  --lo-font-black: 900;
+
+  /* ========================================================
+   * TYPOGRAPHY — Line Height
+   * ======================================================== */
+  --lo-leading-tight: 1.2;
+  --lo-leading-snug: 1.375;
+  --lo-leading-normal: 1.5;
+  --lo-leading-relaxed: 1.625;
+
+  /* ========================================================
+   * TYPOGRAPHY — Letter Spacing
+   * ======================================================== */
+  --lo-tracking-wide: 1px;
+  --lo-tracking-wider: 2px;
+
+  /* ========================================================
+   * ANIMATION — Timing Presets
+   * ======================================================== */
+  --lo-anim-fast: 150ms ease;
+  --lo-anim-normal: 250ms ease;
+  --lo-anim-slow: 400ms ease;
+  --lo-anim-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --lo-anim-enter: 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  --lo-anim-exit: 200ms cubic-bezier(0.4, 0, 1, 1);
+
+  /* ========================================================
+   * Z-INDEX — Layering Scale
+   * ======================================================== */
+  --lo-z-base: 0;
+  --lo-z-content: 10;
+  --lo-z-dropdown: 50;
+  --lo-z-sticky: 80;
+  --lo-z-overlay: 100;
+  --lo-z-modal: 200;
+  --lo-z-tooltip: 300;
+  --lo-z-toast: 400;
+}
