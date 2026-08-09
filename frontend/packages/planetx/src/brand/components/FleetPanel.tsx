@@ -13,7 +13,7 @@ export interface FleetMember {
 export interface FleetData {
   id: string
   name: string
-  code: string       // 邀请码
+  code: string       // 舰队加入码（fleets.invite_code，非候选人/信任码）
   members: FleetMember[]
   maxMembers: number
   totalMatches: number
@@ -257,7 +257,7 @@ export default function FleetPanel({
             </div>
           </div>
 
-          {/* Invite code */}
+          {/* Fleet join code */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <code style={{
               padding: '4px 10px',

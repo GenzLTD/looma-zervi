@@ -49,7 +49,7 @@ function tierLabel(tier: string): string {
 
 const FUNNEL_STEP_LABELS: Record<string, string> = {
   quiz_complete: "答题完成",
-  share_code_created: "创建分享码",
+  share_code_created: "创建信任核验码",
   share_link_copied: "复制分享链接",
   profile_view_public: "公开档案浏览",
   hr_register_from_share: "HR 从分享注册",

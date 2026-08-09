@@ -72,7 +72,7 @@ export default function MatchScreen() {
       const friendlyByCode: Record<string, string> = {
         personality_required: '请先完成星际人格测试',
         fleet_required: '请先创建或加入舰队（舰队 Tab）',
-        fleet_too_small: '舰队内需要至少另一名成员。复制邀请链接给队友后再试',
+        fleet_too_small: '舰队内需要至少另一名成员。复制加入链接给队友后再试',
       }
       setErrorMessage(
         (code && friendlyByCode[code]) ||
@@ -137,7 +137,7 @@ export default function MatchScreen() {
       setToast('📋 传播文案已复制！分享到微信扩大验证池')
       setScreen('result')
     } catch {
-      setToast('复制失败，请手动分享邀请链接')
+      setToast('复制失败，请手动分享邀请好友链接')
     } finally {
       setSharing(false)
     }

@@ -108,8 +108,8 @@ test.describe("closed loop @live", () => {
       name: /创建企业（一键）|Create workspace/,
     });
     const shareInput = page
-      .getByPlaceholder("粘贴分享码，如 A1B2C3D4")
-      .or(page.getByPlaceholder(/Paste share code/i));
+      .getByPlaceholder(/粘贴(候选人)?分享码/)
+      .or(page.getByPlaceholder(/Paste (candidate )?share code/i));
 
     await expect(createEnterprise.or(shareInput)).toBeVisible({ timeout: 15_000 });
 

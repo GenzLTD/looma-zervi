@@ -23,7 +23,7 @@ export default function CandidateShare() {
 
   useEffect(() => {
     if (!code) {
-      setError("无效的分享链接");
+      setError("无效的候选人分享链接");
       setLoading(false);
       return;
     }
@@ -32,7 +32,7 @@ export default function CandidateShare() {
     api
       .profileView(code.toUpperCase())
       .then(setData)
-      .catch(() => setError("分享码无效或该用户尚未完成测试"))
+      .catch(() => setError("候选人分享码无效或该用户尚未完成测试"))
       .finally(() => setLoading(false));
   }, [code]);
 

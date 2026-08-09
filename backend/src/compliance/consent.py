@@ -75,7 +75,7 @@ SCOPE_LABELS_ZH = {
     "report_generate": "生成并保存匹配报告",
     "application_submit": "投递简历到职位",
     "credit_analyze": "征信文本分析",
-    "profile_share": "分享人格分析结果",
+    "profile_share": "候选人分享码（人格画像）",
     "ask_rag": "AI 知识库问答",
     "mbti_analyze": "MBTI 性格测评",
     "navigator_memory": "对话记忆持久化",

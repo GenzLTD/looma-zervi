@@ -2,7 +2,8 @@
 
 > **日期：** 2026-08-08  
 > **目标：** 分轨落地——DemoPeter 持本地 resume/RAG；looma/T-space 只做摘要级「匹配后接着问」+ 修 `resume_id`；**不做**用户文档进 Chroma。  
-> **关联记录：** [SESSION_RECORD_2026-08-08.md](./SESSION_RECORD_2026-08-08.md)
+> **关联记录：** [SESSION_RECORD_2026-08-08.md](./SESSION_RECORD_2026-08-08.md)  
+> **后续线（日记→授权众议）：** [IMPL_PLAN_EMPLOYER_DIARY_CROWD_FEEDBACK.md](./IMPL_PLAN_EMPLOYER_DIARY_CROWD_FEEDBACK.md)
 
 ---
 

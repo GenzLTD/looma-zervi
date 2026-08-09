@@ -10,7 +10,7 @@ export const CONSENT_SCOPE_LABELS: Record<ConsentScope, string> = {
   job_match: "职位智能匹配",
   report_generate: "生成并保存匹配报告",
   credit_analyze: "征信文本分析",
-  profile_share: "分享人格分析结果",
+  profile_share: "候选人分享码（人格画像）",
   ask_rag: "AI 知识库问答",
   mbti_analyze: "MBTI 性格测评",
   navigator_memory: "对话记忆持久化",
@@ -33,7 +33,8 @@ export const CONSENT_SCOPE_DESCRIPTIONS: Record<ConsentScope, string> = {
     "（已并入「求职核心处理」）允许将匹配结果持久化为报告，供您后续查看。",
   credit_analyze:
     "（已并入「企业风险查询」）允许分析您粘贴的企业/征信文本并生成摘要。",
-  profile_share: "允许生成可分享的公开人格画像链接，供 HR 查看（不含敏感联系方式）。",
+  profile_share:
+    "允许生成候选人分享码/链接（TSpace /candidate/share/…），供 HR 查看公开人格画像。这不是信任核验码（sc_…），也不用于好友裂变邀请。",
   ask_rag: "允许将您的问题发送至 AI 知识库助手，可能结合检索片段生成回答。",
   mbti_analyze: "允许分析您输入的文字以推断性格倾向（娱乐/参考用途）。",
   navigator_memory: "允许 Navigator 在会话间记住您的域选择与关键决策，以延续叙事体验。",

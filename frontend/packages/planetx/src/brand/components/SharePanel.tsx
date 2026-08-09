@@ -13,7 +13,10 @@ const PLATFORMS: { id: SharePlatform; icon: string; name: string; tag: string }[
 ]
 
 /**
- * 多平台分享面板 + HR 画像分享链接
+ * 多平台分享面板：
+ *   - 邀请好友码（?ref=，invite_codes / tier_grant≠profile_share）
+ *   - 候选人分享链接（TSpace /candidate/share/，tier_grant=profile_share）
+ * 信任核验码（sc_…）在 TSpace Trust，不在此面板。
  */
 export default function SharePanel() {
   const [show, setShow] = useState(false)
@@ -59,7 +62,7 @@ export default function SharePanel() {
   const handleCopyHrLink = useCallback(async () => {
     const allowed = await ensureConsent('profile_share')
     if (!allowed) {
-      setToast('需要授权后才能分享 HR 画像链接')
+      setToast('需要授权后才能复制候选人分享链接')
       return
     }
     await ensureProfileShareCode()
@@ -70,7 +73,7 @@ export default function SharePanel() {
       return
     }
     navigator.clipboard?.writeText(url).then(() => {
-      setToast('🔗 HR 画像链接已复制！发送给招聘负责人即可查看')
+      setToast('🔗 候选人分享链接已复制！发送给 HR 即可在 TSpace 查看画像')
       const code = url.split('/candidate/share/')[1]?.split(/[?#]/)[0]
       trackEvent(CLOSED_LOOP_EVENTS.SHARE_LINK_COPIED, {
         share_code: code,
@@ -97,7 +100,7 @@ export default function SharePanel() {
             cursor: 'pointer',
           }}
         >
-          📡 分享到星际频道
+          📡 邀请好友（裂变链接）
         </button>
         <button
           onClick={async () => {
@@ -114,7 +117,7 @@ export default function SharePanel() {
             cursor: 'pointer',
           }}
         >
-          👔 分享给 HR（画像链接）
+          👔 候选人分享码（给 HR）
         </button>
       </div>
       </>
@@ -134,7 +137,7 @@ export default function SharePanel() {
       }}
     >
       <h3 style={{ fontSize: '14px', color: '#B8B8C8', textAlign: 'center', marginBottom: '12px' }}>
-        📡 选择星际频道发送信号
+        📡 选择频道发送邀请好友链接
       </h3>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
@@ -163,7 +166,9 @@ export default function SharePanel() {
       </div>
 
       <div style={{ marginBottom: '12px', padding: '10px', borderRadius: '8px', background: '#1A1A2E', border: '1px solid rgba(167,139,250,0.2)' }}>
-        <p style={{ fontSize: '11px', color: '#A78BFA', marginBottom: '6px' }}>👔 HR 专属画像链接（T-space）</p>
+        <p style={{ fontSize: '11px', color: '#A78BFA', marginBottom: '6px' }}>
+          👔 候选人分享链接（TSpace · 非信任核验码）
+        </p>
         <p style={{ fontSize: '11px', color: '#888', wordBreak: 'break-all', marginBottom: '8px' }}>
           {hrUrl || '生成中…'}
         </p>
@@ -180,7 +185,7 @@ export default function SharePanel() {
             cursor: 'pointer',
           }}
         >
-          复制 HR 链接
+          复制候选人分享链接
         </button>
       </div>
 

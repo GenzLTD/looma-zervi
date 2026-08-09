@@ -527,7 +527,7 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
       )
       if (data) {
         set({ fleet: data, teamSize: data.team_size ?? 1, fleetMembers: [data.captain_id] })
-        get().setToast(`舰队创建成功！邀请码 ${data.invite_code}`)
+        get().setToast(`舰队创建成功！舰队加入码 ${data.invite_code}`)
       }
     } catch (e) {
       get().setToast('创建舰队失败: ' + ((e as { message?: string }).message ?? '未知错误'))
