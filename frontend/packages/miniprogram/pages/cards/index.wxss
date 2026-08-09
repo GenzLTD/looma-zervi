@@ -1,0 +1,311 @@
+/**
+ * HarmonyOS Service Cards — WXSS
+ * ===============================
+ * Token 来源：shared-core/tokens/harmony.css
+ * 所有颜色使用 --hm-* CSS 变量，设计师调整 harmony.css 后全局生效
+ * 转换规则：px * 2 → rpx（1px ≈ 2rpx on iPhone 6）
+ */
+
+/* ── Token 内联（因小程序的 @import 路径限制，手动内联 harmony 核心 Token） ── */
+page {
+  --hm-brand-primary: #0A59F7;
+  --hm-brand-primary-light: #3D7BF7;
+  --hm-color-surface-root: #F1F3F5;
+  --hm-color-surface-page: #FFFFFF;
+  --hm-color-surface-card: #FFFFFF;
+  --hm-color-text-primary: #182431;
+  --hm-color-text-secondary: #70737F;
+  --hm-color-text-tertiary: #999BA6;
+  --hm-color-text-brand: #0A59F7;
+  --hm-color-border-subtle: #E5E6EA;
+  --hm-color-border-default: #D1D3D9;
+  --hm-color-success: #00B42A;
+  --hm-color-warning: #FF7D00;
+  --hm-color-danger: #F53F3F;
+  --hm-color-info: #0A59F7;
+  --hm-shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --hm-card-radius: 16px;
+  --hm-card-padding: 16px;
+  --hm-font-family: 'HarmonyOS Sans', -apple-system, sans-serif;
+}
+
+/* ── Page / Header ────────────────────────────────── */
+.hm-page {
+  min-height: 100vh;
+  padding: 32rpx;
+}
+
+.hm-header {
+  text-align: center;
+  margin-bottom: 40rpx;
+}
+
+.hm-header-title {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: var(--hm-color-text-primary);
+  display: block;
+}
+
+.hm-header-sub {
+  font-size: 22rpx;
+  color: var(--hm-color-text-tertiary);
+  margin-top: 8rpx;
+  display: block;
+}
+
+/* ── Section Labels ───────────────────────────────── */
+.hm-section-label {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: var(--hm-color-text-secondary);
+  margin: 32rpx 0 16rpx;
+  padding-left: 8rpx;
+}
+
+/* ── Base Card ────────────────────────────────────── */
+.hm-card {
+  background: var(--hm-color-surface-card);
+  border-radius: 32rpx;
+  box-shadow: var(--hm-shadow-card);
+  padding: 32rpx;
+  box-sizing: border-box;
+}
+
+/* ── Status Card Grid ─────────────────────────────── */
+.hm-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+}
+
+.hm-card-status {
+  text-align: center;
+  padding: 28rpx 20rpx;
+}
+
+.hm-card-emoji {
+  font-size: 48rpx;
+}
+
+.hm-card-icon {
+  width: 48rpx;
+  height: 48rpx;
+  margin: 0 auto;
+}
+
+.hm-card-value {
+  font-size: 56rpx;
+  font-weight: 800;
+  color: var(--hm-color-text-primary);
+  margin: 12rpx 0 4rpx;
+}
+
+.hm-card-label {
+  font-size: 24rpx;
+  color: var(--hm-color-text-secondary);
+}
+
+.hm-card-trend {
+  font-size: 22rpx;
+  margin-top: 8rpx;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4rpx;
+}
+
+.hm-card-trend.up {
+  color: var(--hm-color-success);
+}
+
+.hm-card-trend.down {
+  color: var(--hm-color-danger);
+}
+
+.hm-card-trend.flat {
+  color: var(--hm-color-text-tertiary);
+}
+
+/* ── Action Card Grid ─────────────────────────────── */
+.hm-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+}
+
+.hm-card-action {
+  text-align: center;
+  padding: 36rpx 20rpx;
+}
+
+.hm-action-icon {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 32rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16rpx;
+  font-size: 44rpx;
+}
+
+.hm-action-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: var(--hm-color-text-primary);
+  display: block;
+}
+
+.hm-action-desc {
+  font-size: 20rpx;
+  color: var(--hm-color-text-tertiary);
+  margin-top: 4rpx;
+  display: block;
+}
+
+/* ── Info Card List ────────────────────────────────── */
+.hm-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.hm-card-info {
+  padding: 28rpx;
+}
+
+.hm-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+}
+
+.hm-info-tag {
+  font-size: 20rpx;
+  padding: 4rpx 16rpx;
+  border-radius: 8rpx;
+  font-weight: 500;
+}
+
+.hm-info-time {
+  font-size: 20rpx;
+  color: var(--hm-color-text-tertiary);
+}
+
+.hm-info-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--hm-color-text-primary);
+  display: block;
+  margin-bottom: 8rpx;
+}
+
+.hm-info-detail {
+  font-size: 24rpx;
+  color: var(--hm-color-text-secondary);
+  display: block;
+  line-height: 1.6;
+}
+
+.hm-info-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid var(--hm-color-border-subtle);
+}
+
+.hm-info-footer-title {
+  font-size: 22rpx;
+  color: var(--hm-color-text-tertiary);
+}
+
+.hm-info-footer-value {
+  font-size: 22rpx;
+  color: var(--hm-color-text-brand);
+  font-weight: 600;
+}
+
+/* ── Timeline Card ─────────────────────────────────── */
+.hm-card-timeline {
+  padding: 28rpx 28rpx 20rpx;
+}
+
+.hm-timeline-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--hm-color-text-primary);
+  display: block;
+  margin-bottom: 24rpx;
+}
+
+.hm-timeline-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.hm-timeline-item {
+  display: flex;
+  gap: 20rpx;
+  padding-bottom: 24rpx;
+  position: relative;
+}
+
+.hm-timeline-item:last-child {
+  padding-bottom: 0;
+}
+
+.hm-timeline-dot {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.hm-timeline-dot-inner {
+  font-size: 24rpx;
+  color: var(--hm-color-surface-page);
+}
+
+.hm-timeline-line {
+  position: absolute;
+  left: 28rpx;
+  top: 56rpx;
+  width: 2rpx;
+  height: calc(100% - 32rpx);
+  background: var(--hm-color-border-subtle);
+  transform: translateX(-1rpx);
+}
+
+.hm-timeline-content {
+  flex: 1;
+  min-width: 0;
+  padding-top: 6rpx;
+}
+
+.hm-timeline-item-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: var(--hm-color-text-primary);
+  display: block;
+}
+
+.hm-timeline-item-desc {
+  font-size: 22rpx;
+  color: var(--hm-color-text-secondary);
+  display: block;
+  margin: 4rpx 0;
+}
+
+.hm-timeline-item-time {
+  font-size: 20rpx;
+  color: var(--hm-color-text-tertiary);
+  display: block;
+}

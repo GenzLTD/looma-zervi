@@ -29,7 +29,10 @@ const IS_PRODUCTION =
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "**/overseas-closed-loop.live.spec.ts",
+  testMatch: [
+    "**/overseas-closed-loop.live.spec.ts",
+    "**/candidates-overseas.live.spec.ts",
+  ],
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,

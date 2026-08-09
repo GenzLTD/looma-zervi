@@ -1,0 +1,70 @@
+<view class="hm-page safe-bottom">
+  <!-- Header -->
+  <view class="hm-header">
+    <text class="hm-header-title">元服务 · 系统卡片</text>
+    <text class="hm-header-sub">HarmonyOS Atomic Service Cards Preview</text>
+  </view>
+
+  <!-- Card Type 1: Status Card -->
+  <view class="hm-section-label">状态卡片</view>
+  <view class="hm-status-grid">
+    <view class="hm-card hm-card-status" wx:for="{{statusCards}}" wx:key="id">
+      <image class="hm-card-icon" src="{{item.icon}}" mode="aspectFit" wx:if="{{item.icon}}"/>
+      <text wx:else class="hm-card-emoji">{{item.emoji}}</text>
+      <view class="hm-card-value">{{item.value}}</view>
+      <view class="hm-card-label">{{item.label}}</view>
+      <view class="hm-card-trend {{item.trendDirection}}">
+        <text>{{item.trendIcon}}</text>
+        <text>{{item.trendText}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- Card Type 2: Action Card -->
+  <view class="hm-section-label">快捷服务</view>
+  <view class="hm-action-grid">
+    <view class="hm-card hm-card-action" wx:for="{{actionCards}}" wx:key="id" bindtap="onActionTap" data-action="{{item.action}}">
+      <view class="hm-action-icon" style="background: {{item.colorBg}}">
+        <text>{{item.emoji}}</text>
+      </view>
+      <text class="hm-action-title">{{item.title}}</text>
+      <text class="hm-action-desc">{{item.desc}}</text>
+    </view>
+  </view>
+
+  <!-- Card Type 3: Info Card (Scannable) -->
+  <view class="hm-section-label">信息卡片</view>
+  <view class="hm-info-list">
+    <view class="hm-card hm-card-info" wx:for="{{infoCards}}" wx:key="id">
+      <view class="hm-info-header">
+        <view class="hm-info-tag" wx:if="{{item.tag}}" style="background: {{item.tagColor}}; color: {{item.tagTextColor}}">{{item.tag}}</view>
+        <text class="hm-info-time">{{item.time}}</text>
+      </view>
+      <text class="hm-info-title">{{item.title}}</text>
+      <text class="hm-info-detail">{{item.detail}}</text>
+      <view class="hm-info-footer" wx:if="{{item.footerTitle || item.footerValue}}">
+        <text class="hm-info-footer-title">{{item.footerTitle}}</text>
+        <text class="hm-info-footer-value">{{item.footerValue}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- Card Type 4: Timeline Card -->
+  <view class="hm-section-label">时间线卡片</view>
+  <view class="hm-card hm-card-timeline">
+    <text class="hm-timeline-title">候选人决策时间线</text>
+    <view class="hm-timeline-list">
+      <view class="hm-timeline-item" wx:for="{{timelineItems}}" wx:key="id">
+        <view class="hm-timeline-dot" style="background: {{item.color}}">
+          <text class="hm-timeline-dot-inner">{{item.dotText}}</text>
+        </view>
+        <view class="hm-timeline-line" wx:if="{{index < timelineItems.length - 1}}"></view>
+        <view class="hm-timeline-content">
+          <text class="hm-timeline-item-title">{{item.title}}</text>
+          <text class="hm-timeline-item-desc">{{item.desc}}</text>
+          <text class="hm-timeline-item-time">{{item.time}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

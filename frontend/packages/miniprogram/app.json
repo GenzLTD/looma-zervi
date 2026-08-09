@@ -9,7 +9,8 @@
     "pages/result/index",
     "pages/match/index",
     "pages/pricing/index",
-    "pages/auth/index"
+    "pages/auth/index",
+    "pages/cards/index"
   ],
   "window": {
     "backgroundTextStyle": "dark",
