@@ -18,6 +18,8 @@ Endpoints (HarmonyOS 元服务 - 答题游戏):
   GET  /v1/game/result          - Get quiz result by session_id
   GET  /v1/game/history         - Get user's quiz history
 """
+import hashlib
+import hmac
 import json as _json
 import math
 from flask import Blueprint, request, jsonify, current_app, g
@@ -25,6 +27,7 @@ from flask import Blueprint, request, jsonify, current_app, g
 from src.api.auth.decorators import require_auth, optional_auth
 from src.agents.trust_agent import generate_attestations
 from src.timeline.events import record_mission_completed
+from src.signal_bridge.gfcc_fanout import send_gfcc_personality_beacon
 import logging
 
 logger = logging.getLogger("looma.game_routes")
@@ -121,6 +124,12 @@ def sync_personality():
         db.update_game_identity(g.user_id, identity)
     if personality_type:
         db.upsert_game_profile(g.user_id, personality_type, personality_detail)
+
+        # ── Signal Bridge egress (best-effort, non-blocking) ──
+        try:
+            _send_personality_beacon(db, g.user_id, personality_type, personality_detail)
+        except Exception as e:
+            logger.warning("personality_beacon: egress hook failed for %s: %s", g.user_id, e)
 
         from src.analytics.events import log_product_event, platform_from_request
         log_product_event(
@@ -988,3 +997,110 @@ def quiz_history():
     db = _get_db()
     records = db.get_quiz_history(g.user_id)
     return jsonify(sessions=records, total=len(records))
+
+
+# ── Signal Bridge 3 outbound (personality_beacon egress) ──
+
+def _parse_personality_detail(detail):
+    """Extract (traits, score) from personality_detail if it carries JSON.
+
+    Seed-phase contract: PlanetX has no standalone traits/score dimensions, so
+    those are only forwarded when the detail payload already contains them
+    (dict with a ``traits`` list and/or numeric ``score``); otherwise ([], None).
+    """
+    parsed = None
+    if detail:
+        if isinstance(detail, str):
+            try:
+                parsed = _json.loads(detail)
+            except (ValueError, TypeError):
+                parsed = None
+        elif isinstance(detail, dict):
+            parsed = detail
+
+    traits, score = [], None
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("traits"), list):
+            traits = parsed["traits"]
+        if isinstance(parsed.get("score"), (int, float)):
+            score = parsed["score"]
+    return traits, score
+
+
+def _build_personality_beacon_envelope(
+    email_hash, personality_type, traits, score, nonce=None, timestamp=None
+):
+    """Build the personality_beacon envelope per guide §4.4 (chain A)."""
+    import uuid
+    from datetime import datetime, timezone
+    return {
+        "signal_type": "personality_beacon",
+        "user_email_hash": email_hash,
+        "data": {
+            "personality_type": personality_type,
+            "traits": traits,
+            "score": score,
+        },
+        "timestamp": timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "nonce": nonce or str(uuid.uuid4()),
+    }
+
+
+def _send_personality_beacon(db, user_id, personality_type, personality_detail):
+    """T3 egress: DemoPPI (chain A, skip if URL empty) + GFCC (chain B, skip if URL empty).
+
+    Failures only log, never block profile-sync. The two chains are independent.
+    """
+    user = db.get_user_by_id(user_id) if user_id else None
+    email_hash = (user or {}).get("email_hash") or ""
+
+    if not email_hash:
+        logger.info("personality_beacon: user %s has no email_hash, skip", user_id)
+        return
+
+    traits, score = _parse_personality_detail(personality_detail)
+    envelope = _build_personality_beacon_envelope(
+        email_hash, personality_type, traits, score
+    )
+
+    url = (current_app.config.get("DEMOPPI_SIGNAL_INGEST_URL") or "").strip()
+    secret = current_app.config.get("SIGNAL_BRIDGE_SECRET") or ""
+
+    if not url:
+        logger.info("personality_beacon: no DEMOPPI_SIGNAL_INGEST_URL configured, skip chain A")
+    elif not secret:
+        logger.warning("personality_beacon: SIGNAL_BRIDGE_SECRET not configured, skip chain A")
+    else:
+        body = _json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        signature = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={"Content-Type": "application/json", "X-Signal-Signature": signature},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=5)
+            logger.info(
+                "personality_beacon: sent for user %s (type=%s)", user_id, personality_type
+            )
+        except Exception as e:
+            logger.warning("personality_beacon: egress failed for user %s: %s", user_id, e)
+
+    gfcc = send_gfcc_personality_beacon(
+        email_hash=email_hash,
+        personality_type=personality_type,
+        traits=traits,
+        score=score,
+        nonce=envelope["nonce"],
+        timestamp=envelope["timestamp"],
+        url=(current_app.config.get("GFCC_SIGNAL_INGEST_URL") or "").strip(),
+        secret=current_app.config.get("SIGNAL_INGEST_SECRET") or "",
+    )
+    if gfcc.get("skipped"):
+        logger.info("gfcc personality_beacon skip: %s", gfcc.get("reason"))
+    elif gfcc.get("ok"):
+        logger.info("gfcc personality_beacon sent for user %s", user_id)
+    else:
+        logger.warning("gfcc personality_beacon failed for user %s: %s", user_id, gfcc)

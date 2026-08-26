@@ -168,6 +168,13 @@ class Config:
     QCC_LEGAL_CASE_URL = os.getenv("QCC_LEGAL_CASE_URL", "https://agent.qcc.com/mcp/case/stream")
     QCC_DOCUMENT_URL = os.getenv("QCC_DOCUMENT_URL", "https://agent.qcc.com/mcp/document/stream")
 
+    # Signal Bridge — chain A (PlanetX ↔ DemoPPI). Empty URL = skip.
+    SIGNAL_BRIDGE_SECRET = os.getenv("SIGNAL_BRIDGE_SECRET", "")
+    DEMOPPI_SIGNAL_INGEST_URL = os.getenv("DEMOPPI_SIGNAL_INGEST_URL", "")
+    # Chain B fan-out — PlanetX → gfcc_kernel /v1/signal-ingest. Empty = skip.
+    GFCC_SIGNAL_INGEST_URL = os.getenv("GFCC_SIGNAL_INGEST_URL", "")
+    SIGNAL_INGEST_SECRET = os.getenv("SIGNAL_INGEST_SECRET", "")
+
     @property
     def is_production(self):
         return self.FLASK_ENV == "production"
@@ -297,3 +304,7 @@ def _refresh_config():
     Config.QCC_LEGAL_REGULATION_URL = os.getenv("QCC_LEGAL_REGULATION_URL", "https://agent.qcc.com/mcp/regulation/stream")
     Config.QCC_LEGAL_CASE_URL = os.getenv("QCC_LEGAL_CASE_URL", "https://agent.qcc.com/mcp/case/stream")
     Config.QCC_DOCUMENT_URL = os.getenv("QCC_DOCUMENT_URL", "https://agent.qcc.com/mcp/document/stream")
+    Config.SIGNAL_BRIDGE_SECRET = os.getenv("SIGNAL_BRIDGE_SECRET", "")
+    Config.DEMOPPI_SIGNAL_INGEST_URL = os.getenv("DEMOPPI_SIGNAL_INGEST_URL", "")
+    Config.GFCC_SIGNAL_INGEST_URL = os.getenv("GFCC_SIGNAL_INGEST_URL", "")
+    Config.SIGNAL_INGEST_SECRET = os.getenv("SIGNAL_INGEST_SECRET", "")

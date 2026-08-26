@@ -17,6 +17,7 @@ Tables:
   - trust_attestations (joint — verifiable claim cards)
 """
 from __future__ import annotations
+import hashlib
 import json
 import logging
 import os
@@ -33,6 +34,21 @@ def _dt_now():
     return datetime.now()
 
 
+def email_hash(email: str | None) -> str | None:
+    """Canonical email hash shared with DemoPPI / GFCC (Bridge 2/3).
+
+    Both sides compute sha256 of the lowercased, trimmed email as lowercase hex
+    so PlanetX (Python) and DemoPPI (TypeScript) yield identical digests for the
+    same mailbox. Returns None for empty email (miniprogram-only users).
+    """
+    if not email:
+        return None
+    normalized = email.lower().strip()
+    if not normalized:
+        return None
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 SCHEMA_SQL = """
 -- ============================================
 -- Core: users (joint ownership - dual review)
@@ -40,6 +56,7 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id              TEXT PRIMARY KEY,          -- looma uuid4
     email           TEXT UNIQUE,               -- Web registration (nullable for miniprogram-only)
+    email_hash      TEXT,                      -- sha256(lower(trim(email))) for chain B user_id_hash
     password_hash   TEXT,                      -- bcrypt hash (nullable for miniprogram-only)
     wechat_openid   TEXT UNIQUE,               -- WeChat miniprogram login
     name            TEXT DEFAULT '',
@@ -51,6 +68,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_email_hash ON users(email_hash);
 CREATE INDEX IF NOT EXISTS idx_users_wechat_openid ON users(wechat_openid);
 
 -- ============================================
@@ -1057,6 +1075,29 @@ class DatabaseManager:
                 logger.warning(
                     "Migration UNIQUE INDEX trust_attestations_claim failed: %s", e
                 )
+            # Migration: email_hash for GFCC chain B / DemoPPI match
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN email_hash TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE users ADD COLUMN email_hash failed: %s", e
+                    )
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_users_email_hash ON users(email_hash)"
+                )
+            except sqlite3.OperationalError as e:
+                logger.warning(
+                    "Migration INDEX idx_users_email_hash failed: %s", e
+                )
+            for uid, em in conn.execute(
+                "SELECT id, email FROM users WHERE email IS NOT NULL AND email_hash IS NULL"
+            ).fetchall():
+                conn.execute(
+                    "UPDATE users SET email_hash = ?, updated_at = datetime('now') WHERE id = ?",
+                    (email_hash(em), uid),
+                )
 
     # ============================================
     # User operations (joint)
@@ -1066,15 +1107,23 @@ class DatabaseManager:
         user_id = str(uuid.uuid4())
         with self.get_conn() as conn:
             conn.execute(
-                """INSERT INTO users (id, email, password_hash, wechat_openid, name)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (user_id, email, password_hash, wechat_openid, name)
+                """INSERT INTO users (id, email, email_hash, password_hash, wechat_openid, name)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, email, email_hash(email), password_hash, wechat_openid, name)
             )
         return user_id
 
     def get_user_by_email(self, email: str):
         with self.get_conn() as conn:
             row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_email_hash(self, email_hash_value: str):
+        """Resolve a user by canonical email hash (chain B / DemoPPI match)."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE email_hash = ?", (email_hash_value,)
+            ).fetchone()
         return dict(row) if row else None
 
     def get_user_by_openid(self, openid: str):
@@ -1163,8 +1212,8 @@ class DatabaseManager:
         user_id = str(uuid.uuid4())
         with self.get_conn() as conn:
             conn.execute(
-                """INSERT INTO users (id, email, name) VALUES (?, ?, ?)""",
-                (user_id, email or None, name)
+                """INSERT INTO users (id, email, email_hash, name) VALUES (?, ?, ?, ?)""",
+                (user_id, email or None, email_hash(email or None), name)
             )
             conn.execute(
                 """INSERT INTO user_identities (id, user_id, provider, provider_uid,
@@ -2433,11 +2482,12 @@ class DatabaseManager:
                 ).decode("utf-8")
 
                 conn.execute(
-                    """INSERT INTO users (id, email, password_hash, name, tier, role, is_early_adopter)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO users (id, email, email_hash, password_hash, name, tier, role, is_early_adopter)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         user_id,
                         u["email"],
+                        email_hash(u["email"]),
                         password_hash,
                         u["name"],
                         u["tier"],
