@@ -18,12 +18,15 @@ Endpoints (HarmonyOS 元服务 - 答题游戏):
   GET  /v1/game/result          - Get quiz result by session_id
   GET  /v1/game/history         - Get user's quiz history
 """
+import hashlib
+import hmac
 import json as _json
 import math
 from flask import Blueprint, request, jsonify, current_app, g
 
 from src.api.auth.decorators import require_auth, optional_auth
 from src.agents.trust_agent import generate_attestations
+from src.signal_bridge.gfcc_fanout import send_gfcc_personality_beacon
 import logging
 
 logger = logging.getLogger("looma.game_routes")
@@ -120,6 +123,12 @@ def sync_personality():
         db.update_game_identity(g.user_id, identity)
     if personality_type:
         db.upsert_game_profile(g.user_id, personality_type, personality_detail)
+
+        # ── Signal Bridge 3 egress (best-effort, non-blocking) ──
+        try:
+            _send_personality_beacon(db, g.user_id, personality_type, personality_detail)
+        except Exception as e:
+            logger.warning("personality_beacon: egress hook failed for %s: %s", g.user_id, e)
 
         from src.analytics.events import log_product_event, platform_from_request
         log_product_event(
@@ -753,3 +762,209 @@ def quiz_history():
     db = _get_db()
     records = db.get_quiz_history(g.user_id)
     return jsonify(sessions=records, total=len(records))
+
+
+# ── Signal Bridge 2/3 inbound (HMAC + idempotency) ──
+
+_MATCH_MISSION_ID = "match"
+_MATCH_MISSION_XP = 50  # 种子期固定奖励；后续可改从 data.match_score 推导
+
+
+def _verify_signal_signature() -> bool:
+    """Verify X-Signal-Signature = HMAC-SHA256(raw_body, SIGNAL_BRIDGE_SECRET).
+
+    Uses raw request body bytes (not re-serialized JSON) so the digest matches
+    exactly what the sender computed over the transmitted payload.
+    """
+    secret = current_app.config.get("SIGNAL_BRIDGE_SECRET", "")
+    if not secret:
+        logger.warning("SIGNAL_BRIDGE_SECRET not configured; rejecting signal ingest")
+        return False
+    body = request.get_data()
+    signature = request.headers.get("X-Signal-Signature", "")
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+@game_bp.route("/signal-ingest", methods=["POST"])
+def signal_ingest():
+    """Bridge 2/3 inbound endpoint (no JWT — service-to-service HMAC only).
+
+    Envelope:
+      { "signal_type": "consensus_match", "user_email_hash": "<sha256 hex>",
+        "data": { "match_score": 0.87, "shared_tags": [...], "peer_email_hash": "..." },
+        "timestamp": "<iso8601>", "nonce": "<uuid>" }
+
+    Header:
+      X-Signal-Signature: HMAC-SHA256(raw_body, SIGNAL_BRIDGE_SECRET) as lowercase hex
+    """
+    if not _verify_signal_signature():
+        return jsonify(error="unauthorized", message="invalid or missing signature"), 401
+
+    data = request.get_json(silent=True) or {}
+    signal_type = (data.get("signal_type") or "").strip()
+    user_email_hash = (data.get("user_email_hash") or "").strip()
+    nonce = (data.get("nonce") or "").strip()
+
+    if not signal_type or not user_email_hash or not nonce:
+        return jsonify(
+            error="bad_request",
+            message="signal_type, user_email_hash, nonce are required",
+        ), 400
+
+    db = _get_db()
+
+    # Idempotency gate: at-most-once per (signal_type, user_email_hash, nonce)
+    payload_json = _json.dumps(data.get("data"), ensure_ascii=False)
+    if not db.record_signal_ingest(signal_type, user_email_hash, nonce, payload_json):
+        logger.info("duplicate signal ignored: type=%s nonce=%s", signal_type, nonce)
+        return jsonify(status="ok", duplicate=True)
+
+    if signal_type != "consensus_match":
+        # 种子期仅处理 consensus_match；未知类型幂等记录后忽略
+        logger.info("unknown signal_type ignored: %s", signal_type)
+        return jsonify(status="ok", ignored=True, reason="unknown_signal_type")
+
+    # consensus_match: resolve user → 若有进行中 match mission → mission-complete
+    user = db.get_user_by_email_hash(user_email_hash)
+    if not user:
+        logger.info("consensus_match: no user for hash %s", user_email_hash)
+        return jsonify(status="ok", matched=False)
+
+    # 确保有 game profile（complete_mission 依赖 profile 行累加 XP）
+    if not db.get_game_profile(user["id"]):
+        db.upsert_game_profile(user["id"], "", "")
+
+    # 种子期捷径：以 mission_completions 的 UNIQUE(user_id, mission_id) 幂等，
+    # 「进行中 match mission」≈「尚未完成过 match mission」；已完成则幂等忽略。
+    completion_id, was_new = db.complete_mission(
+        user["id"], _MATCH_MISSION_ID, _MATCH_MISSION_XP
+    )
+    if was_new:
+        logger.info(
+            "consensus_match: mission %s completed for user %s (+%d XP)",
+            _MATCH_MISSION_ID, user["id"], _MATCH_MISSION_XP,
+        )
+        return jsonify(
+            status="ok", matched=True, mission_completed=True,
+            mission_id=_MATCH_MISSION_ID, xp_earned=_MATCH_MISSION_XP,
+        )
+
+    logger.info(
+        "consensus_match: match mission already completed for user %s, ignore",
+        user["id"],
+    )
+    return jsonify(status="ok", matched=True, mission_completed=False)
+
+
+# ── Signal Bridge 3 outbound (personality_beacon egress) ──
+
+def _parse_personality_detail(detail):
+    """Extract (traits, score) from personality_detail if it carries JSON.
+
+    Seed-phase contract: PlanetX has no standalone traits/score dimensions, so
+    those are only forwarded when the detail payload already contains them
+    (dict with a ``traits`` list and/or numeric ``score``); otherwise ([], None).
+    """
+    parsed = None
+    if detail:
+        if isinstance(detail, str):
+            try:
+                parsed = _json.loads(detail)
+            except (ValueError, TypeError):
+                parsed = None
+        elif isinstance(detail, dict):
+            parsed = detail
+
+    traits, score = [], None
+    if isinstance(parsed, dict):
+        if isinstance(parsed.get("traits"), list):
+            traits = parsed["traits"]
+        if isinstance(parsed.get("score"), (int, float)):
+            score = parsed["score"]
+    return traits, score
+
+
+def _build_personality_beacon_envelope(
+    email_hash, personality_type, traits, score, nonce=None, timestamp=None
+):
+    """Build the personality_beacon envelope per guide §4.4.
+
+    Field order matters for cross-language HMAC agreement — keep the sender
+    compact (separators=(",", ":")) to match Node's JSON.stringify output.
+    """
+    import uuid
+    from datetime import datetime, timezone
+    return {
+        "signal_type": "personality_beacon",
+        "user_email_hash": email_hash,
+        "data": {
+            "personality_type": personality_type,
+            "traits": traits,
+            "score": score,
+        },
+        "timestamp": timestamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "nonce": nonce or str(uuid.uuid4()),
+    }
+
+
+def _send_personality_beacon(db, user_id, personality_type, personality_detail):
+    """T3 egress: push a persisted personality result to DemoPPI (chain A)
+    and fan-out a frozen signal.envelope.v1 to GFCC (chain B).
+
+    Best-effort — failures only log, never block the profile-sync response.
+    Chain A and chain B are independent: either may skip without blocking the other.
+    """
+    user = db.get_user_by_id(user_id) if user_id else None
+    email_hash = (user or {}).get("email_hash") or ""
+
+    if not email_hash:
+        logger.info("personality_beacon: user %s has no email_hash, skip", user_id)
+        return
+
+    traits, score = _parse_personality_detail(personality_detail)
+    envelope = _build_personality_beacon_envelope(
+        email_hash, personality_type, traits, score
+    )
+
+    url = (current_app.config.get("DEMOPPI_SIGNAL_INGEST_URL") or "").strip()
+    secret = current_app.config.get("SIGNAL_BRIDGE_SECRET") or ""
+
+    if not url:
+        logger.info("personality_beacon: no DEMOPPI_SIGNAL_INGEST_URL configured, skip chain A")
+    elif not secret:
+        logger.warning("personality_beacon: SIGNAL_BRIDGE_SECRET not configured, skip chain A")
+    else:
+        body = _json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        signature = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={"Content-Type": "application/json", "X-Signal-Signature": signature},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=5)
+            logger.info(
+                "personality_beacon: sent for user %s (type=%s)", user_id, personality_type
+            )
+        except Exception as e:
+            logger.warning("personality_beacon: egress failed for user %s: %s", user_id, e)
+
+    gfcc = send_gfcc_personality_beacon(
+        email_hash=email_hash,
+        personality_type=personality_type,
+        traits=traits,
+        score=score,
+        nonce=envelope["nonce"],
+        timestamp=envelope["timestamp"],
+        url=(current_app.config.get("GFCC_SIGNAL_INGEST_URL") or "").strip(),
+        secret=current_app.config.get("SIGNAL_INGEST_SECRET") or "",
+    )
+    if gfcc.get("skipped"):
+        logger.info("gfcc personality_beacon skip: %s", gfcc.get("reason"))
+    elif gfcc.get("ok"):
+        logger.info("gfcc personality_beacon sent for user %s", user_id)
+    else:
+        logger.warning("gfcc personality_beacon failed for user %s: %s", user_id, gfcc)

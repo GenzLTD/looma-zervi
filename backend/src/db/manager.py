@@ -17,6 +17,7 @@ Tables:
   - trust_attestations (joint — verifiable claim cards)
 """
 from __future__ import annotations
+import hashlib
 import json
 import os
 import sqlite3
@@ -30,6 +31,21 @@ def _dt_now():
     return datetime.now()
 
 
+def email_hash(email: str | None) -> str | None:
+    """Canonical email hash shared with DemoPPI (Bridge 2/3 cross-service match).
+
+    Both sides compute sha256 of the lowercased, trimmed email as lowercase hex
+    so PlanetX (Python) and DemoPPI (TypeScript) yield identical digests for the
+    same mailbox. Returns None for empty email (miniprogram-only users).
+    """
+    if not email:
+        return None
+    normalized = email.lower().strip()
+    if not normalized:
+        return None
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 SCHEMA_SQL = """
 -- ============================================
 -- Core: users (joint ownership - dual review)
@@ -37,6 +53,7 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id              TEXT PRIMARY KEY,          -- looma uuid4
     email           TEXT UNIQUE,               -- Web registration (nullable for miniprogram-only)
+    email_hash      TEXT,                      -- sha256(lower(trim(email))) for cross-service match (Bridge 2/3)
     password_hash   TEXT,                      -- bcrypt hash (nullable for miniprogram-only)
     wechat_openid   TEXT UNIQUE,               -- WeChat miniprogram login
     name            TEXT DEFAULT '',
@@ -107,6 +124,18 @@ CREATE TABLE IF NOT EXISTS mission_completions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_missions_user ON mission_completions(user_id);
+
+-- ============================================
+-- Signal bridge ingest (Bridge 2/3 inbound idempotency)
+-- ============================================
+CREATE TABLE IF NOT EXISTS signal_ingest (
+    signal_type      TEXT NOT NULL,
+    user_email_hash  TEXT NOT NULL,
+    nonce            TEXT NOT NULL,
+    payload_json     TEXT,
+    created_at       TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (signal_type, user_email_hash, nonce)
+);
 
 -- ============================================
 -- Enterprise: enterprises (szbenyx owns)
@@ -780,6 +809,25 @@ class DatabaseManager:
                 conn.execute("ALTER TABLE game_profiles ADD COLUMN identity TEXT")
             except sqlite3.OperationalError:
                 pass
+            # Migration: email_hash for cross-service signal matching (Bridge 2/3)
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN email_hash TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_users_email_hash ON users(email_hash)"
+                )
+            except sqlite3.OperationalError:
+                pass
+            # Backfill email_hash for existing users with an email (idempotent)
+            for uid, em in conn.execute(
+                "SELECT id, email FROM users WHERE email IS NOT NULL AND email_hash IS NULL"
+            ).fetchall():
+                conn.execute(
+                    "UPDATE users SET email_hash = ?, updated_at = datetime('now') WHERE id = ?",
+                    (email_hash(em), uid),
+                )
 
     # ============================================
     # User operations (joint)
@@ -789,9 +837,9 @@ class DatabaseManager:
         user_id = str(uuid.uuid4())
         with self.get_conn() as conn:
             conn.execute(
-                """INSERT INTO users (id, email, password_hash, wechat_openid, name)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (user_id, email, password_hash, wechat_openid, name)
+                """INSERT INTO users (id, email, email_hash, password_hash, wechat_openid, name)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, email, email_hash(email), password_hash, wechat_openid, name)
             )
         return user_id
 
@@ -799,6 +847,33 @@ class DatabaseManager:
         with self.get_conn() as conn:
             row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         return dict(row) if row else None
+
+    def get_user_by_email_hash(self, email_hash_value: str):
+        """Resolve a user by canonical email hash (cross-service match, Bridge 2/3)."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE email_hash = ?", (email_hash_value,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def record_signal_ingest(
+        self, signal_type: str, user_email_hash: str, nonce: str, payload_json: str
+    ) -> bool:
+        """Record an inbound signal for idempotency. Returns True if new, False if duplicate.
+
+        PRIMARY KEY (signal_type, user_email_hash, nonce) guarantees at-most-once
+        processing per signal instance (Bridge 2/3 envelope).
+        """
+        with self.get_conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO signal_ingest (signal_type, user_email_hash, nonce, payload_json)
+                       VALUES (?, ?, ?, ?)""",
+                    (signal_type, user_email_hash, nonce, payload_json),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False
 
     def get_user_by_openid(self, openid: str):
         with self.get_conn() as conn:
@@ -1449,11 +1524,12 @@ class DatabaseManager:
                 ).decode("utf-8")
 
                 conn.execute(
-                    """INSERT INTO users (id, email, password_hash, name, tier, role, is_early_adopter)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO users (id, email, email_hash, password_hash, name, tier, role, is_early_adopter)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         user_id,
                         u["email"],
+                        email_hash(u["email"]),
                         password_hash,
                         u["name"],
                         u["tier"],

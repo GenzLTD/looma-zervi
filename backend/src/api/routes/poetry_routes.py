@@ -29,8 +29,15 @@ def _get_db():
 @poetry_bp.route("/search", methods=["GET"])
 @optional_auth
 def search_poems():
-    """Semantic search poems via ChromaDB vector.
+    """Search poems.
+
     Query param: q (required), n (optional, default 3).
+
+    Strategy (default "auto"): literal keyword match first (after s2t
+    normalization, since the corpus is Traditional), then fall back to
+    ChromaDB vector search. The prebuilt poetry vector index uses the default
+    all-MiniLM-L6-v2 embedder, which is weak for Chinese, so the literal path
+    gives far better recall for short-phrase queries.
     """
     query = request.args.get("q", "").strip()
     n_results = int(request.args.get("n", 3))
@@ -38,20 +45,19 @@ def search_poems():
     if not query:
         return jsonify(error="bad_request", message="q parameter required"), 400
 
-    search_backend = "chroma"
-    try:
-        from src.agents.poetry_search import search_poems as _search_poems
-        poems = _search_poems(query, n_results=n_results)
-    except Exception as e:
-        logger.warning(f"Poetry search failed: {e}")
-        poems = []
+    mode = current_app.config.get("POETRY_SEARCH_MODE", "auto")
 
-    # SQLite keyword fallback if ChromaDB returns nothing or times out
-    if not poems:
-        search_backend = "sqlite"
+    # Normalize Simplified -> Traditional so literal match aligns with corpus.
+    from src.utils.textnorm import to_traditional
+    normalized = to_traditional(query)
+
+    poems: list[dict] = []
+    search_backend: str | None = None
+
+    # 1) Literal keyword match (s2t-normalized) — best recall for short phrases.
+    if mode in ("auto", "sqlite"):
         db = _get_db()
-        result = db.get_poems(keyword=query, per_page=n_results)
-        poems = result["items"]
+        result = db.get_poems(keyword=normalized, per_page=n_results)
         poems = [
             {
                 "title": p["title"],
@@ -60,12 +66,18 @@ def search_poems():
                 "content": p.get("content_preview", ""),
                 "theme": p["theme"],
             }
-            for p in poems
+            for p in result["items"]
         ]
-
-    mode = current_app.config.get("POETRY_SEARCH_MODE", "auto")
-    if mode == "sqlite":
         search_backend = "sqlite"
+
+    # 2) Fall back to ChromaDB vector search when literal match yields nothing.
+    if not poems and mode in ("auto", "chroma"):
+        try:
+            from src.agents.poetry_search import search_poems as _search_poems
+            poems = _search_poems(query, n_results=n_results)
+            search_backend = "chroma"
+        except Exception as e:
+            logger.warning(f"Poetry vector search failed: {e}")
 
     return jsonify(
         results=poems, query=query, count=len(poems), search_backend=search_backend

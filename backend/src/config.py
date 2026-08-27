@@ -102,6 +102,14 @@ class Config:
     WECHAT_PRIVATE_KEY_PATH = os.getenv("WECHAT_PRIVATE_KEY_PATH", "")
     WECHAT_NOTIFY_URL = os.getenv("WECHAT_NOTIFY_URL", "")
 
+    # Signal Bridge — HMAC shared secret for cross-service Bridge 2/3 (PlanetX ↔ DemoPPI)
+    SIGNAL_BRIDGE_SECRET = os.getenv("SIGNAL_BRIDGE_SECRET", "")
+    # PlanetX → DemoPPI personality_beacon egress target (T3, service-to-service)
+    DEMOPPI_SIGNAL_INGEST_URL = os.getenv("DEMOPPI_SIGNAL_INGEST_URL", "")
+    # Chain B fan-out — PlanetX → GFCC /v1/signal-ingest (independent of SIGNAL_BRIDGE_SECRET)
+    GFCC_SIGNAL_INGEST_URL = os.getenv("GFCC_SIGNAL_INGEST_URL", "")
+    SIGNAL_INGEST_SECRET = os.getenv("SIGNAL_INGEST_SECRET", "")
+
     @property
     def is_production(self):
         return self.FLASK_ENV == "production"
@@ -172,3 +180,7 @@ def _refresh_config():
     Config.WECHAT_SERIAL_NO = os.getenv("WECHAT_SERIAL_NO", "")
     Config.WECHAT_PRIVATE_KEY_PATH = os.getenv("WECHAT_PRIVATE_KEY_PATH", "")
     Config.WECHAT_NOTIFY_URL = os.getenv("WECHAT_NOTIFY_URL", "")
+    Config.SIGNAL_BRIDGE_SECRET = os.getenv("SIGNAL_BRIDGE_SECRET", "")
+    Config.DEMOPPI_SIGNAL_INGEST_URL = os.getenv("DEMOPPI_SIGNAL_INGEST_URL", "")
+    Config.GFCC_SIGNAL_INGEST_URL = os.getenv("GFCC_SIGNAL_INGEST_URL", "")
+    Config.SIGNAL_INGEST_SECRET = os.getenv("SIGNAL_INGEST_SECRET", "")
