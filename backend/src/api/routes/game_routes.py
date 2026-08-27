@@ -26,6 +26,7 @@ from flask import Blueprint, request, jsonify, current_app, g
 
 from src.api.auth.decorators import require_auth, optional_auth
 from src.agents.trust_agent import generate_attestations
+from src.timeline.events import record_mission_completed
 from src.signal_bridge.gfcc_fanout import send_gfcc_personality_beacon
 import logging
 
@@ -124,7 +125,7 @@ def sync_personality():
     if personality_type:
         db.upsert_game_profile(g.user_id, personality_type, personality_detail)
 
-        # ── Signal Bridge 3 egress (best-effort, non-blocking) ──
+        # ── Signal Bridge egress (best-effort, non-blocking) ──
         try:
             _send_personality_beacon(db, g.user_id, personality_type, personality_detail)
         except Exception as e:
@@ -156,6 +157,19 @@ def sync_personality():
         except Exception as e:
             logger.warning("trust_agent: quiz memory skipped for %s: %s", g.user_id, e)
 
+        # ── Timeline: quiz fact + initial_hypothesis (additive; not trust) ──
+        try:
+            from src.timeline.events import record_quiz_hypothesis
+            record_quiz_hypothesis(
+                db,
+                g.user_id,
+                personality_type,
+                personality_detail=personality_detail,
+                source_ref=f"profile_sync_{g.user_id}",
+            )
+        except Exception as e:
+            logger.warning("timeline: quiz hypothesis skipped for %s: %s", g.user_id, e)
+
     # Return the full profile after sync (so frontend gets XP/level too)
     profile = db.get_game_profile(g.user_id)
     return jsonify(
@@ -184,6 +198,10 @@ def get_game_profile():
             members = db.get_fleet_members(fleet["id"])
             team_size = len(members)
             fleet_members = [m["user_id"] for m in members]
+        try:
+            empty_spread = db.count_spread_signals(g.user_id)
+        except Exception:
+            empty_spread = 0
         return jsonify(
             id=None,
             user_id=g.user_id,
@@ -199,6 +217,7 @@ def get_game_profile():
             fleet=fleet,
             team_size=team_size,
             fleet_members=fleet_members,
+            spread_count=empty_spread,
         )
 
     # Compute current level from XP (level column may be stale)
@@ -225,6 +244,12 @@ def get_game_profile():
         team_size = len(members)
         fleet_members = [m["user_id"] for m in members]
 
+    spread_count = 0
+    try:
+        spread_count = db.count_spread_signals(g.user_id)
+    except Exception:
+        logger.warning("spread_count failed for %s", g.user_id)
+
     return jsonify(
         id=profile["id"],
         user_id=profile["user_id"],
@@ -240,6 +265,8 @@ def get_game_profile():
         fleet=fleet,
         team_size=team_size,
         fleet_members=fleet_members,
+        # 完成首任务（personality）的被邀请人数；Hub「信号传播」真源
+        spread_count=spread_count,
     )
 
 
@@ -282,6 +309,12 @@ def complete_mission():
     new_level = _calculate_level(profile["xp"])
     if new_level != profile["level"]:
         db.update_level(g.user_id, new_level)
+
+    # Timeline record (best-effort, non-blocking)
+    try:
+        record_mission_completed(db, g.user_id, mission_id=mission_id, xp_reward=xp_reward)
+    except Exception:
+        logger.warning("timeline record failed for mission %s", mission_id)
 
     return jsonify(
         message="mission completed",
@@ -355,6 +388,59 @@ def fleet_match():
     scored.sort(key=lambda x: (-x["match_score"], x["user_id"]))
     best = scored[0]
 
+    # Determine match mode
+    if best["match_score"] >= 95:
+        match_mode = "complementary"
+    elif best["match_score"] >= 72:
+        match_mode = "same_type"
+    else:
+        match_mode = "best_available"
+
+    threshold = 85
+    score = int(best["match_score"])
+    if score >= threshold:
+        consensus_status = "consensus_passed"
+    elif score >= 60:
+        consensus_status = "consensus_weak"
+    else:
+        consensus_status = "consensus_failed"
+
+    pending_consensus_id = None
+    # 阶段二：落库待确认共识（不阻塞 v0 mission-complete）
+    if score >= 60:
+        try:
+            consensus = db.create_match_consensus(
+                fleet_id=fleet["id"],
+                initiator_id=g.user_id,
+                candidate_id=best["user_id"],
+                match_score=score,
+                reason=best.get("reason") or "",
+            )
+            pending_consensus_id = consensus.get("id")
+            if consensus.get("status") == "verified":
+                consensus_status = "consensus_verified"
+        except Exception as e:
+            logger.warning("create_match_consensus failed: %s", e)
+
+    # 若已有 verified 记录，升级状态
+    if db.has_verified_match_consensus(g.user_id):
+        # 当前配对若已 verified，标记可增强凭证
+        for row in db.list_match_consensus_for_user(g.user_id):
+            if (
+                row.get("status") == "verified"
+                and {row.get("initiator_id"), row.get("candidate_id")}
+                == {g.user_id, best["user_id"]}
+            ):
+                consensus_status = "consensus_verified"
+                pending_consensus_id = row.get("id")
+                break
+
+    spread_count = 0
+    try:
+        spread_count = db.count_spread_signals(g.user_id)
+    except Exception:
+        pass
+
     return jsonify({
         "matched": True,
         "match": best,
@@ -366,7 +452,138 @@ def fleet_match():
         "fleet_id": fleet["id"],
         "fleet_name": fleet["name"],
         "candidates_considered": len(scored),
+        "match_mode": match_mode,
+        # v0：舰队内算出配对 + 用户确认即可完成任务（阶段二共识为增强，不阻塞）
+        "can_complete_mission": True,
+        "consensus_threshold": threshold,
+        "consensus_status": consensus_status,
+        "pending_consensus_id": pending_consensus_id,
+        "spread_hint": {
+            "show_share_cta": consensus_status != "consensus_verified" and score < threshold,
+            "message": (
+                None
+                if score >= threshold
+                else "契合度未达共识阈值，邀请更多舰员扩大验证池"
+            ),
+            "spread_count": spread_count,
+            "spread_target": 3,
+        },
     })
+
+
+@game_bp.route("/match/acknowledge", methods=["POST"])
+@require_auth
+def match_acknowledge():
+    """双向共识确认（阶段二）。v0 mission-complete 不依赖此接口。"""
+    data = request.get_json() or {}
+    consensus_id = (data.get("consensus_id") or "").strip()
+    action = (data.get("action") or "accept").strip().lower()
+    if not consensus_id:
+        return jsonify(error="bad_request", message="consensus_id required"), 400
+    if action not in ("accept", "reject"):
+        return jsonify(error="bad_request", message="action must be accept or reject"), 400
+
+    db = _get_db()
+    row, err = db.acknowledge_match_consensus(consensus_id, g.user_id, action)
+    if err == "not_found":
+        return jsonify(error="not_found", message="共识记录不存在"), 404
+    if err == "forbidden":
+        return jsonify(error="forbidden", message="无权确认该共识"), 403
+    if err == "expired":
+        return jsonify(error="expired", message="共识已过期"), 410
+    if err == "not_pending":
+        return jsonify(error="not_pending", message="共识已结束"), 409
+    if not row:
+        return jsonify(error="server_error", message="确认失败"), 500
+
+    # 写入信任记忆 + 刷新 attestation（协作类声明）
+    if row.get("status") == "verified":
+        try:
+            peer_id = (
+                row["candidate_id"]
+                if row["initiator_id"] == g.user_id
+                else row["initiator_id"]
+            )
+            db.insert_trust_memory(
+                user_id=g.user_id,
+                session_type="match",
+                session_id=consensus_id,
+                memory_content={
+                    "consensus_confirmed": True,
+                    "match_score": row.get("match_score"),
+                    "peer_id": peer_id,
+                    "fleet_id": row.get("fleet_id"),
+                },
+            )
+            db.insert_trust_memory(
+                user_id=peer_id,
+                session_type="match",
+                session_id=consensus_id,
+                memory_content={
+                    "consensus_confirmed": True,
+                    "match_score": row.get("match_score"),
+                    "peer_id": g.user_id,
+                    "fleet_id": row.get("fleet_id"),
+                },
+            )
+            generate_attestations(g.user_id, db)
+            generate_attestations(peer_id, db)
+        except Exception as e:
+            logger.warning("trust memory on acknowledge failed: %s", e)
+
+    return jsonify(
+        consensus_id=row["id"],
+        status=row["status"],
+        consensus_status=(
+            "consensus_verified" if row["status"] == "verified" else row["status"]
+        ),
+        match_score=row["match_score"],
+        initiator_id=row["initiator_id"],
+        candidate_id=row["candidate_id"],
+        verified_at=row.get("verified_at"),
+    )
+
+
+@game_bp.route("/match/consensus", methods=["GET"])
+@require_auth
+def list_match_consensus():
+    """列出当前用户待处理 / 已验证共识。"""
+    db = _get_db()
+    rows = db.list_match_consensus_for_user(g.user_id)
+    pending = []
+    verified = []
+    for r in rows:
+        item = {
+            "id": r["id"],
+            "candidate_name": "",
+            "match_score": r["match_score"],
+            "status": (
+                "consensus_verified"
+                if r["status"] == "verified"
+                else "consensus_passed"
+            ),
+            "is_incoming": r["candidate_id"] == g.user_id,
+        }
+        peer = r["initiator_id"] if item["is_incoming"] else r["candidate_id"]
+        try:
+            profiles = db.get_game_profiles_for_users([peer])
+            if profiles:
+                item["candidate_name"] = (
+                    profiles[0].get("display_name")
+                    or profiles[0].get("personality_type")
+                    or "星际公民"
+                )
+            else:
+                item["candidate_name"] = "星际公民"
+        except Exception:
+            item["candidate_name"] = "星际公民"
+
+        if r["status"] == "pending":
+            pending.append(item)
+        elif r["status"] == "verified":
+            verified.append(item)
+
+    return jsonify(pending=pending, verified=verified)
 
 
 # ── Fleet ──
@@ -742,6 +959,24 @@ def quiz_result():
             generate_attestations(g.user_id, db)
         except Exception as e:
             logger.warning("trust_agent: harmonyos quiz memory skipped for %s: %s", g.user_id, e)
+
+        # Timeline: learning_activity (HarmonyOS quiz completion)
+        try:
+            from src.timeline.events import record_learning_activity
+            record_learning_activity(
+                db,
+                g.user_id,
+                source_ref=session_id,
+                activity_type="harmony_quiz",
+                title="完成鸿蒙答题",
+                summary=f"{result_type} · {session['correct_count']}/{session['total_questions']}",
+                score=session["total_score"],
+                total=session["total_questions"],
+                correct_count=session["correct_count"],
+                result_type=result_type,
+            )
+        except Exception as e:
+            logger.warning("timeline: learning_activity skipped for %s: %s", g.user_id, e)
     import json as _json
     insights = _json.loads(session.get("insights_json") or "[]")
 
@@ -888,11 +1123,7 @@ def _parse_personality_detail(detail):
 def _build_personality_beacon_envelope(
     email_hash, personality_type, traits, score, nonce=None, timestamp=None
 ):
-    """Build the personality_beacon envelope per guide §4.4.
-
-    Field order matters for cross-language HMAC agreement — keep the sender
-    compact (separators=(",", ":")) to match Node's JSON.stringify output.
-    """
+    """Build the personality_beacon envelope per guide §4.4 (chain A)."""
     import uuid
     from datetime import datetime, timezone
     return {
@@ -909,11 +1140,9 @@ def _build_personality_beacon_envelope(
 
 
 def _send_personality_beacon(db, user_id, personality_type, personality_detail):
-    """T3 egress: push a persisted personality result to DemoPPI (chain A)
-    and fan-out a frozen signal.envelope.v1 to GFCC (chain B).
+    """T3 egress: DemoPPI (chain A, skip if URL empty) + GFCC (chain B, skip if URL empty).
 
-    Best-effort — failures only log, never block the profile-sync response.
-    Chain A and chain B are independent: either may skip without blocking the other.
+    Failures only log, never block profile-sync. The two chains are independent.
     """
     user = db.get_user_by_id(user_id) if user_id else None
     email_hash = (user or {}).get("email_hash") or ""

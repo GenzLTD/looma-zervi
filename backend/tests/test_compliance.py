@@ -56,7 +56,9 @@ class TestConsentManager:
         assert r["revoked"] is True
 
     def test_all_scopes_count(self):
-        assert len(ALL_SCOPES) == 9
+        # 3 primary tiers + 10 fine-grained / legacy scopes (incl. application_submit)
+        assert len(ALL_SCOPES) == 13
+        assert {"jobseeker_core", "credit_query", "report_share", "application_submit"} <= ALL_SCOPES
 
 
 class TestRedaction:

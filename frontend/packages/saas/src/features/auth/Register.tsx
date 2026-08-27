@@ -1,17 +1,18 @@
 /**
  * Register - SaaS registration page (MVP simplified).
  * Owner: szbenyx
- *
- * MVP: Direct register via /v1/auth/register (no invite code, no Supabase).
- * Pure CSS + Tailwind (no tdesign-react).
- * Brand: T空间.
  */
 import { useState } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
-import { BRAND_SAAS, CLOSED_LOOP_EVENTS, trackEvent } from "@looma/shared-core";
+import { useTranslation } from "react-i18next";
+import { CLOSED_LOOP_EVENTS, trackEvent } from "@looma/shared-core";
 import { useSaasAuthStore } from "./authStore";
+import { useBrand } from "../../brand/useBrand";
+import { LanguageSwitcher } from "../../components/LanguageSwitcher";
 
 export default function Register() {
+  const { t } = useTranslation();
+  const brand = useBrand();
   const [searchParams] = useSearchParams();
   const fromShare = searchParams.get("from") === "share";
   const shareCode = searchParams.get("code") || undefined;
@@ -31,15 +32,15 @@ export default function Register() {
 
   const handleRegister = async () => {
     if (!email.trim() || !password) {
-      setErrorMsg("请输入邮箱和密码");
+      setErrorMsg(t("auth.emailPasswordRequired"));
       return;
     }
     if (password !== confirmPassword) {
-      setErrorMsg("两次密码不一致");
+      setErrorMsg(t("auth.passwordMismatch"));
       return;
     }
     if (password.length < 6) {
-      setErrorMsg("密码至少6位");
+      setErrorMsg(t("auth.passwordMinLength"));
       return;
     }
 
@@ -55,7 +56,7 @@ export default function Register() {
       }
       navigate("/", { replace: true });
     } catch (err) {
-      const msg = (err as { detail?: string })?.detail ?? "注册失败，请稍后再试";
+      const msg = (err as { detail?: string })?.detail ?? t("auth.registerFailed");
       setErrorMsg(msg);
     } finally {
       setLoading(false);
@@ -71,17 +72,19 @@ export default function Register() {
           boxShadow: "var(--shadow-lg)",
         }}
       >
-        {/* 品牌 */}
+        <div className="flex justify-end mb-2">
+          <LanguageSwitcher />
+        </div>
+
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold" style={{ color: "var(--color-primary)" }}>
-            {BRAND_SAAS.name}
+            {brand.name}
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--color-text-muted)" }}>
-            创建账号
+            {t("auth.createAccount")}
           </p>
         </div>
 
-        {/* 表单 */}
         <div className="space-y-4">
           <div>
             <input
@@ -91,7 +94,7 @@ export default function Register() {
                 setName(e.target.value);
                 setErrorMsg("");
               }}
-              placeholder="姓名（选填）"
+              placeholder={t("auth.nameOptional")}
               className="w-full px-4 py-3 text-sm rounded-lg border outline-none transition-colors"
               style={{
                 borderColor: "#e0e0e0",
@@ -113,7 +116,7 @@ export default function Register() {
                 setEmail(e.target.value);
                 setErrorMsg("");
               }}
-              placeholder="邮箱地址"
+              placeholder={t("auth.emailPlaceholder")}
               className="w-full px-4 py-3 text-sm rounded-lg border outline-none transition-colors"
               style={{
                 borderColor: "#e0e0e0",
@@ -135,7 +138,7 @@ export default function Register() {
                 setPassword(e.target.value);
                 setErrorMsg("");
               }}
-              placeholder="密码（至少6位）"
+              placeholder={t("auth.passwordMinPlaceholder")}
               className="w-full px-4 py-3 text-sm rounded-lg border outline-none transition-colors"
               style={{
                 borderColor: "#e0e0e0",
@@ -157,7 +160,7 @@ export default function Register() {
                 setConfirmPassword(e.target.value);
                 setErrorMsg("");
               }}
-              placeholder="确认密码"
+              placeholder={t("auth.confirmPassword")}
               className="w-full px-4 py-3 text-sm rounded-lg border outline-none transition-colors"
               style={{
                 borderColor: "#e0e0e0",
@@ -187,20 +190,19 @@ export default function Register() {
             className="w-full py-3 text-sm rounded-lg text-white border-none cursor-pointer disabled:opacity-60 transition-colors font-medium"
             style={{ backgroundColor: "var(--color-primary)" }}
           >
-            {loading ? "注册中..." : "注册"}
+            {loading ? t("auth.registering") : t("auth.register")}
           </button>
         </div>
 
-        {/* 登录链接 */}
         <div className="text-center mt-6">
           <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-            已有账号？{" "}
+            {t("auth.hasAccount")}{" "}
             <Link
               to="/login"
               className="no-underline hover:underline"
               style={{ color: "var(--color-primary)" }}
             >
-              登录
+              {t("auth.login")}
             </Link>
           </p>
         </div>

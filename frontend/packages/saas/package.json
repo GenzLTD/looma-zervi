@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "@looma/shared-core": "workspace:*",
+    "i18next": "^24.2.3",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
+    "react-i18next": "^15.4.1",
     "react-router-dom": "^6.24.0",
     "zustand": "^4.5.0"
   },

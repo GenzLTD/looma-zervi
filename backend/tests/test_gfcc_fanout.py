@@ -23,7 +23,7 @@ from src.signal_bridge.gfcc_fanout import (  # noqa: E402
 
 HASH_A = "b4c9a289323b21a01c3e940f150eb9b8c542587f1abfd8f0e1cc1ffc5e475514"
 SECRET = "dev-signal-secret-20260824"
-GFCC_URL = "http://192.168.110.188:5211/v1/signal-ingest"
+GFCC_URL = "http://127.0.0.1:5211/v1/signal-ingest"
 
 
 def test_map_planetx_labels_to_mbti():

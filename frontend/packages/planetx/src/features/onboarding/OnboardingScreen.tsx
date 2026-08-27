@@ -57,6 +57,17 @@ export default function OnboardingScreen() {
         <p style={{ fontSize: '12px', color: 'var(--px-color-text-muted)', letterSpacing: '0.2em', marginTop: '4px' }}>
           选择你的星际身份
         </p>
+        <p
+          style={{
+            fontSize: '12px',
+            color: 'var(--px-color-text-muted)',
+            lineHeight: 1.65,
+            margin: '12px auto 0',
+            maxWidth: 320,
+          }}
+        >
+          这里不是投简历的地方。先看清你在做什么、和谁共事过；画像会随着记录变准，机会是后面的事。
+        </p>
       </div>
 
       <p style={{ textAlign: 'center', fontSize: '18px', fontWeight: 'bold', marginBottom: 'var(--px-spacing-lg)' }}>

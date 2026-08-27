@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>P3 · PlanetX 个人中心</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{--o:#FF6B35;--p:#8B5CF6;--t2:#A0AEC0;--t3:#6B7280}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:390px;height:844px;overflow:hidden;font-family:'Noto Sans SC',sans-serif;background:linear-gradient(160deg,#0A0E27,#1C2550);color:#fff}
+.phone{width:390px;height:844px;padding:0 16px;position:relative}
+.status{height:44px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 8px 6px;font-size:14px;font-weight:600}
+.top{height:40px;display:flex;justify-content:flex-end;align-items:center;font-size:18px;opacity:.8}
+.profile{text-align:center;padding:8px 0 16px}
+.av{width:84px;height:84px;margin:0 auto 12px;border-radius:50%;padding:3px;background:linear-gradient(135deg,var(--o),var(--p))}
+.av i{display:grid;place-items:center;width:100%;height:100%;border-radius:50%;background:#131A3A;font-size:28px;font-weight:700}
+.name{font-size:18px;font-weight:500;margin-bottom:8px}
+.badge{display:inline-block;background:var(--o);border-radius:999px;padding:4px 12px;font-size:12px;font-weight:700;box-shadow:0 0 14px rgba(255,107,53,.4);margin-bottom:12px}
+.xp{font-size:12px;color:var(--t2);margin-bottom:6px}
+.bar{height:8px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden;margin:0 24px}
+.bar i{display:block;height:100%;width:71%;background:linear-gradient(90deg,var(--o),var(--p))}
+.sec{margin-top:18px}
+.sec-h{display:flex;justify-content:space-between;margin-bottom:10px;font-size:14px;font-weight:500}
+.sec-h span:last-child{color:var(--t2);font-size:12px;font-weight:400}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.ach{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px 8px;text-align:center}
+.ach.lock{opacity:.4}
+.ach .ico{font-size:22px;margin-bottom:6px}
+.ach .n{font-size:11px;margin-bottom:2px}
+.ach .d{font-size:10px;color:var(--t3)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.stat{background:rgba(255,255,255,.05);border-radius:12px;padding:12px;text-align:center}
+.stat .v{font-size:20px;font-weight:700;color:var(--o)}
+.stat .l{font-size:11px;color:var(--t2);margin-top:4px}
+.log{display:flex;flex-direction:column;gap:8px}
+.log .row{background:rgba(255,255,255,.05);border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;gap:8px}
+.log .t{font-size:12px}
+.log .time{font-size:11px;color:var(--t3);white-space:nowrap}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:83px;background:rgba(10,14,39,.92);border-top:1px solid rgba(255,255,255,.08);display:grid;grid-template-columns:repeat(4,1fr);padding:10px 8px 24px}
+.tab{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--t3)}
+.tab.active{color:var(--o)}
+.tab .i{font-size:18px}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="status"><span>09:41</span><span>▮▮▮ ▾ 🔋</span></div>
+  <div class="top">⚙</div>
+  <div class="profile">
+    <div class="av"><i>J</i></div>
+    <div class="name">Jason · 星际探索者</div>
+    <div class="badge">Lv.12 探索者</div>
+    <div class="xp">2,840 / 4,000 XP · 下一级 Lv.13</div>
+    <div class="bar"><i></i></div>
+  </div>
+  <div class="sec">
+    <div class="sec-h"><span>成就墙</span><span>12/36 已解锁</span></div>
+    <div class="grid">
+      <div class="ach"><div class="ico">🌟</div><div class="n">首次测试</div><div class="d">2026-03-12</div></div>
+      <div class="ach"><div class="ico">🔥</div><div class="n">连续7天</div><div class="d">2026-06-01</div></div>
+      <div class="ach"><div class="ico">🎤</div><div class="n">面试达人</div><div class="d">昨天</div></div>
+      <div class="ach"><div class="ico">🚀</div><div class="n">舰队指挥官</div><div class="d">2026-07-10</div></div>
+      <div class="ach lock"><div class="ico">🔒</div><div class="n">???</div><div class="d">未解锁</div></div>
+      <div class="ach lock"><div class="ico">🔒</div><div class="n">???</div><div class="d">未解锁</div></div>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="v">24</div><div class="l">测试次数</div></div>
+    <div class="stat"><div class="v">8</div><div class="l">匹配成功</div></div>
+    <div class="stat"><div class="v">3</div><div class="l">舰队成员</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-h"><span>星际日志</span></div>
+    <div class="log">
+      <div class="row"><div class="t">完成AI模拟面试 · 获得150 XP</div><div class="time">2小时前</div></div>
+      <div class="row"><div class="t">解锁成就：面试达人</div><div class="time">昨天</div></div>
+      <div class="row"><div class="t">舰队升级：探索者号 Lv.12</div><div class="time">3天前</div></div>
+    </div>
+  </div>
+  <div class="tabbar">
+    <div class="tab"><div class="i">⌂</div>首页</div>
+    <div class="tab"><div class="i">✦</div>测试</div>
+    <div class="tab"><div class="i">🚀</div>舰队</div>
+    <div class="tab active"><div class="i">☺</div>我的</div>
+  </div>
+</div>
+</body>
+</html>

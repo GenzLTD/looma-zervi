@@ -100,7 +100,12 @@ export const QuizOptionCorrect: StoryObj<typeof PlanetXQuizOptionCard> = {
 // AchievementPopup
 // ============================================================
 export const Achievement: StoryObj<typeof PlanetXAchievementPopup> = {
-  args: { visible: true, title: "首次升空！", description: "完成第一次人格测试", icon: "🚀" },
+  args: {
+    visible: true,
+    title: "首次升空！",
+    description: "完成第一次人格测试",
+    icon: undefined,
+  },
 };
 
 // ============================================================

@@ -368,3 +368,54 @@
   color: #B8B8C8;
   margin-top: 8rpx;
 }
+
+/* ============ Trust Entry Card ============ */
+.trust-entry-card {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  padding: 28rpx;
+  margin-top: 24rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid rgba(200, 255, 80, 0.15);
+  background: linear-gradient(135deg, rgba(200, 255, 80, 0.05), rgba(0, 229, 255, 0.03));
+}
+
+.trust-entry-card:active {
+  background: rgba(200, 255, 80, 0.1);
+}
+
+.trust-entry-icon {
+  font-size: 48rpx;
+  width: 88rpx;
+  height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(200, 255, 80, 0.1);
+  border-radius: 20rpx;
+}
+
+.trust-entry-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.trust-entry-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #C8FF50;
+}
+
+.trust-entry-desc {
+  font-size: 22rpx;
+  color: #B8B8C8;
+  margin-top: 4rpx;
+}
+
+.trust-entry-arrow {
+  font-size: 32rpx;
+  color: #C8FF50;
+  flex-shrink: 0;
+}

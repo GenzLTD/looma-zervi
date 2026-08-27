@@ -308,6 +308,7 @@ looma 生成 trust_attestations
 | LLM（大陆） | DeepSeek-chat | 中文极致优化，性价比最优 |
 | LLM（海外） | OpenAI gpt-4o-mini | 全球可用，中文良好 |
 | Embedding | Ollama (nomic) / OpenAI | 按区域选用 |
+| 推理/匹配可替换性 | 见 [INFERENCE_MATCH_SCORER_REPLACEABILITY.md](./INFERENCE_MATCH_SCORER_REPLACEABILITY.md) | 卡脖子应对：InferencePort + JobMatchScorer；M0–M3 可验收 |
 | 认证 | PyJWT + bcrypt | 无状态，多端兼容 |
 | 支付 | 微信支付 v3 / Stripe / PayPal / Airwallex | 双端合规 |
 | MCP | Python FastMCP Sidecar | 内测验证，后续迁移 Rust |

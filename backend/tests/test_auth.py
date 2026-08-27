@@ -36,11 +36,22 @@ def client(app):
 
 
 def test_health(client):
-    """Health check should return 200."""
+    """Health check should return 200 and provider config booleans (no secrets)."""
     resp = client.get("/health")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["status"] == "ok"
+    assert data["status"] in ("ok", "degraded")
+    assert "providers_configured" in data
+    assert set(data["providers_configured"]) >= {"openai", "deepseek", "ollama"}
+    assert isinstance(data["providers_configured"]["openai"], bool)
+    assert isinstance(data["providers_configured"]["deepseek"], bool)
+    assert "qcc_configured" in data
+    assert isinstance(data["qcc_configured"], bool)
+    assert "llm_provider_order" in data
+    # Must never leak key material
+    blob = str(data).lower()
+    assert "sk-" not in blob
+    assert "bearer " not in blob
 
 
 def test_register_missing_fields(client):

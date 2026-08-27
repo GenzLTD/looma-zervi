@@ -43,25 +43,25 @@ export default function SaasTooltip({
       bottom: "100%",
       left: "50%",
       transform: "translateX(-50%)",
-      marginBottom: "8px",
+      marginBottom: "var(--spacing-sm)",
     },
     bottom: {
       top: "100%",
       left: "50%",
       transform: "translateX(-50%)",
-      marginTop: "8px",
+      marginTop: "var(--spacing-sm)",
     },
     left: {
       right: "100%",
       top: "50%",
       transform: "translateY(-50%)",
-      marginRight: "8px",
+      marginRight: "var(--spacing-sm)",
     },
     right: {
       left: "100%",
       top: "50%",
       transform: "translateY(-50%)",
-      marginLeft: "8px",
+      marginLeft: "var(--spacing-sm)",
     },
   };
 
@@ -137,6 +137,7 @@ export default function SaasTooltip({
               height: 0,
               borderStyle: "solid",
               borderWidth: "var(--tooltip-arrow-size)",
+              borderColor: "transparent",
               ...arrowStyles[position],
             }}
           />

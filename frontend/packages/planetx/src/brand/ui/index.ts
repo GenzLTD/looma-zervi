@@ -23,6 +23,10 @@ export { default as PlanetXStarBackground } from "./PlanetXStarBackground";
 export { default as PlanetXModal } from "./PlanetXModal";
 export { default as PlanetXDropdown } from "./PlanetXDropdown";
 export { default as PlanetXTabs } from "./PlanetXTabs";
+export { default as PlanetXChatBubble } from "./PlanetXChatBubble";
+export { default as PlanetXStreamingText } from "./PlanetXStreamingText";
+export { default as PlanetXTooltip } from "./PlanetXTooltip";
+export { default as PlanetXIcon } from "./PlanetXIcon";
 
 // Type exports
 export type {
@@ -51,4 +55,12 @@ export type {
   PlanetXDropdownProps,
   PlanetXTabItem,
   PlanetXTabsProps,
+  ChatRole,
+  PlanetXChatBubbleProps,
+  PlanetXStreamingTextProps,
+  TooltipPosition,
+  PlanetXTooltipProps,
+  PlanetXIconProps,
+  PlanetXIconName,
 } from "./types";
+export { EMOJI_TO_ICON } from "./icons/emojiMap";

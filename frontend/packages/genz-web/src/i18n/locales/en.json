@@ -1,0 +1,350 @@
+{
+  "site": {
+    "brand": "GenZ · PlanetX",
+    "tagline": "AI Career Growth Partner",
+    "navAria": "Primary",
+    "nav": {
+      "home": "Home",
+      "pricing": "Pricing",
+      "privacy": "Privacy",
+      "terms": "Terms",
+      "refund": "Refund"
+    },
+    "lang": {
+      "en": "EN",
+      "zh": "中文",
+      "switchAria": "Switch language"
+    },
+    "footer": {
+      "rights": "All rights reserved."
+    },
+    "support": "Support",
+    "api": "API"
+  },
+  "meta": {
+    "home": {
+      "title": "GenZ PlanetX | AI Career Growth Partner",
+      "description": "PlanetX by GenZ is a subscription-based AI SaaS that helps professionals grow their careers through coaching, resume insights, and intelligent job matching."
+    },
+    "pricing": {
+      "title": "Pricing — PlanetX USD Subscriptions | GenZ",
+      "description": "PlanetX monthly subscription plans in USD: Free, Supporter $1.99/mo, Pro $5.99/mo. AI career growth SaaS."
+    },
+    "privacy": {
+      "title": "Privacy Policy — PlanetX | GenZ",
+      "description": "Privacy Policy for PlanetX, the AI career growth SaaS operated by GenZ."
+    },
+    "terms": {
+      "title": "Terms of Service — PlanetX | GenZ",
+      "description": "Terms of Service for PlanetX AI career growth SaaS subscriptions."
+    },
+    "refund": {
+      "title": "Refund & Cancellation — PlanetX | GenZ",
+      "description": "Refund and cancellation policy for PlanetX monthly SaaS subscriptions."
+    }
+  },
+  "home": {
+    "eyebrow": "AI Career Growth SaaS",
+    "title": "AI Career Growth Partner",
+    "lead": "PlanetX by GenZ is a cloud-based subscription service for professionals who want coaching, resume insights, personality-informed guidance, and smarter job matching — all in one place.",
+    "ctaPricing": "View USD pricing",
+    "ctaRegister": "Start free",
+    "ctaSupport": "Contact support",
+    "summaryTitle": "What we sell",
+    "summaryItems": [
+      "Monthly digital subscriptions (Free, Supporter, Pro)",
+      "AI coaching and career Q&A",
+      "Resume parsing and job matching tools",
+      "Hosted on secure cloud infrastructure"
+    ],
+    "featuresTitle": "Built for career growth, not just job listings",
+    "featuresLead": "PlanetX combines practical job search tools with reflective career guidance so users can grow skills, clarity, and opportunity over time.",
+    "features": {
+      "coaching": {
+        "title": "AI coaching",
+        "body": "Daily AI conversations to plan next steps, prepare interviews, and reflect on career direction."
+      },
+      "resume": {
+        "title": "Resume insights",
+        "body": "Upload and parse resumes to improve positioning, keywords, and role fit."
+      },
+      "matching": {
+        "title": "Intelligent matching",
+        "body": "Match with relevant roles using skills, preferences, and personality-informed signals."
+      },
+      "plans": {
+        "title": "Subscription plans",
+        "body": "Start free, then upgrade to Supporter or Pro for higher limits and advanced features. Billed monthly in USD."
+      }
+    },
+    "billingTitle": "How billing works",
+    "billingLead": "PlanetX is a recurring SaaS subscription. You can review plans, upgrade, and cancel according to our Terms and Refund policy.",
+    "paymentsNote": "Payments for the US region are processed in USD via Stripe (when live checkout is enabled)."
+  },
+  "pricing": {
+    "title": "USD subscription pricing",
+    "lead": "All plans are digital SaaS subscriptions billed monthly in United States Dollars (USD). Choose your preferred payment method: Stripe, PayPal, or Airwallex. Enterprise teams can contact us for custom arrangements.",
+    "loading": "Loading live pricing…",
+    "statusApi": "Live pricing loaded from Looma API (region=US).",
+    "statusFallback": "Pricing shown from contract fallback (API unavailable).",
+    "statusProviders": "Providers: {{list}}",
+    "enterpriseTitle": "Enterprise",
+    "enterpriseBody": "Need team onboarding, custom limits, or procurement paperwork? Email <1>{{email}}</1>.",
+    "footnote": "Pricing contract source: Looma payment.v1.json (region=US). Cancel anytime — see <1>Refund & Cancellation</1>.",
+    "perMonth": "/ month",
+    "billedMonthly": "Billed monthly in USD. Cancel anytime.",
+    "mostPopular": "Most popular",
+    "paymentMethod": "Payment method",
+    "providers": {
+      "stripe": "Stripe (Card, Apple Pay, Google Pay)",
+      "paypal": "PayPal",
+      "airwallex": "Airwallex"
+    },
+    "getStartedFree": "Get started free",
+    "subscribe": "Subscribe",
+    "redirecting": "Redirecting…",
+    "tryAgain": "Try again",
+    "paymentError": "Payment not available: {{message}}\n\nContact {{email}}",
+    "plans": {
+      "free": {
+        "name": "Free",
+        "features": [
+          "30 AI chats per day",
+          "Basic job matching",
+          "3 resume parses per day"
+        ]
+      },
+      "supporter": {
+        "name": "Supporter",
+        "features": [
+          "100 AI chats per day",
+          "Advanced job matching",
+          "Unlimited resume parsing",
+          "PlanetX supporter badge"
+        ]
+      },
+      "pro": {
+        "name": "Pro",
+        "features": [
+          "Unlimited AI chats",
+          "Full job matching",
+          "Unlimited resume parsing",
+          "Advanced analytics",
+          "Priority support"
+        ]
+      }
+    }
+  },
+  "legal": {
+    "updated": "Last updated: July 12, 2026",
+    "contactPrivacy": "Privacy questions:",
+    "contactTerms": "Questions about these Terms:",
+    "contactBilling": "Billing support:",
+    "privacy": {
+      "title": "Privacy Policy",
+      "intro": "This Privacy Policy describes how PlanetX (\"we\", \"us\", or \"our\") collects, uses, and protects personal information when you use our AI career growth SaaS at <1>genz.ltd</1> and related applications that connect to our API at <2>api.genz.ltd</2>.",
+      "sections": [
+        {
+          "title": "1. Information we collect",
+          "list": [
+            "<strong>Account data:</strong> email address, authentication identifiers, and subscription tier.",
+            "<strong>Career content:</strong> resumes, job preferences, quiz responses, and messages you submit to AI features.",
+            "<strong>Usage data:</strong> feature usage, timestamps, device/browser metadata, and diagnostic logs.",
+            "<strong>Payment data:</strong> billing status and transaction references. Card details are processed by Stripe; we do not store full payment card numbers."
+          ]
+        },
+        {
+          "title": "2. How we use information",
+          "list": [
+            "Provide and improve AI coaching, resume parsing, and job matching services.",
+            "Authenticate users, enforce plan limits, and prevent abuse.",
+            "Process subscriptions, invoices, and support requests.",
+            "Comply with legal obligations and resolve disputes."
+          ]
+        },
+        {
+          "title": "3. Legal bases (where applicable)",
+          "paragraphs": [
+            "Depending on your region, we rely on contract performance, legitimate interests, consent (where required), and legal compliance to process personal data."
+          ]
+        },
+        {
+          "title": "4. Sharing and processors",
+          "paragraphs": [
+            "We may share data with service providers that help us operate PlanetX, including:"
+          ],
+          "list": [
+            "Cloud hosting and database providers",
+            "Stripe (payment processing)",
+            "Email and customer support tools"
+          ],
+          "afterList": ["We do not sell personal information."]
+        },
+        {
+          "title": "5. International transfers",
+          "paragraphs": [
+            "Data may be processed in jurisdictions where our infrastructure or subprocessors operate. We apply appropriate safeguards where required by law."
+          ]
+        },
+        {
+          "title": "6. Retention",
+          "paragraphs": [
+            "We retain personal data for as long as needed to provide the service, meet legal obligations, and resolve disputes. You may request deletion subject to applicable law."
+          ]
+        },
+        {
+          "title": "7. Your rights",
+          "paragraphs": [
+            "Depending on your location, you may have rights to access, correct, delete, or restrict processing of your personal data, and to object to certain processing."
+          ]
+        },
+        {
+          "title": "8. Security",
+          "paragraphs": [
+            "We use industry-standard measures such as HTTPS, access controls, and monitoring. No method of transmission or storage is 100% secure."
+          ]
+        },
+        {
+          "title": "9. Children",
+          "paragraphs": [
+            "PlanetX is not directed to children under 16, and we do not knowingly collect their data."
+          ]
+        }
+      ]
+    },
+    "terms": {
+      "title": "Terms of Service",
+      "intro": "These Terms of Service (\"Terms\") govern your access to PlanetX, an AI career growth SaaS offered by <1>{{entity}}</1> (\"Company\", \"we\", \"us\") through <2>genz.ltd</2> and related products connected to our API.",
+      "sections": [
+        {
+          "title": "1. Service description",
+          "paragraphs": [
+            "PlanetX provides digital, cloud-hosted software including AI coaching, resume parsing, personality-informed insights, and job matching. The service is delivered online and billed as a recurring subscription unless otherwise stated."
+          ]
+        },
+        {
+          "title": "2. Eligibility and accounts",
+          "paragraphs": [
+            "You must provide accurate registration information and keep your credentials secure. You are responsible for activity under your account."
+          ]
+        },
+        {
+          "title": "3. Subscription plans and billing",
+          "list": [
+            "Plans and prices are shown on our <1>Pricing</1> page in USD.",
+            "Paid plans renew automatically each billing period until canceled.",
+            "We may change prices with reasonable notice; changes apply to subsequent renewal periods.",
+            "Taxes may apply based on your location and will be shown at checkout when applicable."
+          ]
+        },
+        {
+          "title": "4. Payment processing",
+          "paragraphs": [
+            "Payments are processed by Stripe or other authorized payment providers. By subscribing, you authorize us and our payment processor to charge your payment method for recurring fees."
+          ]
+        },
+        {
+          "title": "5. Acceptable use",
+          "paragraphs": ["You agree not to misuse the service, including by:"],
+          "list": [
+            "Attempting unauthorized access or disrupting infrastructure",
+            "Uploading unlawful, infringing, or harmful content",
+            "Automated scraping or abuse that exceeds plan limits",
+            "Using outputs in ways that violate applicable law"
+          ]
+        },
+        {
+          "title": "6. AI outputs disclaimer",
+          "paragraphs": [
+            "AI-generated guidance is informational and not legal, financial, or employment advice. You are responsible for decisions you make based on PlanetX outputs."
+          ]
+        },
+        {
+          "title": "7. Intellectual property",
+          "paragraphs": [
+            "We retain rights in the software, branding, and service content. You retain rights in content you submit, and grant us a limited license to process it to provide the service."
+          ]
+        },
+        {
+          "title": "8. Availability and changes",
+          "paragraphs": [
+            "We may modify features, impose reasonable usage limits by plan tier, or suspend service for maintenance, security, or legal reasons."
+          ]
+        },
+        {
+          "title": "9. Termination and cancellation",
+          "paragraphs": [
+            "You may cancel at any time before renewal as described in our <1>Refund & Cancellation Policy</1>. We may suspend or terminate accounts that violate these Terms."
+          ]
+        },
+        {
+          "title": "10. Limitation of liability",
+          "paragraphs": [
+            "To the maximum extent permitted by law, the service is provided \"as is\". Our aggregate liability for claims relating to the service is limited to the fees you paid to us in the twelve (12) months before the claim, except where prohibited by law."
+          ]
+        },
+        {
+          "title": "11. Governing law",
+          "paragraphs": [
+            "These Terms are governed by the laws applicable to {{entity}}, without regard to conflict-of-law rules. Disputes will be handled in the courts or forums specified by applicable law."
+          ]
+        }
+      ]
+    },
+    "refund": {
+      "title": "Refund & Cancellation Policy",
+      "intro": "This policy explains how to cancel PlanetX subscriptions and when refunds may be available. PlanetX is a digital SaaS service billed monthly in USD.",
+      "sections": [
+        {
+          "title": "1. How to cancel",
+          "paragraphs": ["You can cancel your subscription by:"],
+          "list": [
+            "Using the account billing settings in the PlanetX application (when available), or",
+            "Emailing <1>{{email}}</1> from your registered email with subject \"Cancel subscription\"."
+          ],
+          "afterList": [
+            "Cancellation stops future renewals. It does not delete your account unless you also request account deletion."
+          ]
+        },
+        {
+          "title": "2. Effect of cancellation",
+          "list": [
+            "Your paid features remain available until the end of the current billing period.",
+            "After the period ends, your account reverts to the Free plan limits unless you resubscribe.",
+            "No further charges will be made after a successful cancellation before the renewal date."
+          ]
+        },
+        {
+          "title": "3. Refund policy",
+          "paragraphs": [
+            "Because PlanetX delivers digital services immediately upon purchase, fees are generally <strong>non-refundable</strong> once a billing period has started.",
+            "We may provide a refund at our discretion when:"
+          ],
+          "list": [
+            "You were charged after a confirmed cancellation due to a processing error",
+            "There was a duplicate charge or technical billing mistake",
+            "Required by applicable consumer protection law"
+          ]
+        },
+        {
+          "title": "4. Free trials and promotions",
+          "paragraphs": [
+            "If a promotional trial is offered, trial terms will be shown at signup. Unless stated otherwise, converting to a paid plan begins billing at the displayed USD monthly price. Cancel before the trial ends to avoid charges."
+          ]
+        },
+        {
+          "title": "5. Chargebacks and disputes",
+          "paragraphs": [
+            "Please contact <1>{{email}}</1> before initiating a chargeback so we can investigate billing issues quickly."
+          ]
+        },
+        {
+          "title": "6. Enterprise customers",
+          "paragraphs": [
+            "Custom contracts may include different cancellation and refund terms as specified in the signed agreement."
+          ]
+        }
+      ]
+    }
+  }
+}

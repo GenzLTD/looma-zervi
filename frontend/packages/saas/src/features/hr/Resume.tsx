@@ -6,23 +6,40 @@
  * Uses authStore for token, direct fetch for file upload.
  */
 import { useState, useRef, useMemo } from "react";
-import { createResumeApi, type ParsedResume } from "@looma/shared-core";
+import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { ApiError, createResumeApi, type ParsedResume } from "@looma/shared-core";
 import { createSaasApiClient } from "../../api/saasApiClient";
 import { useConsent } from "../../compliance/useConsent";
+import QuotaExhaustedModal from "../../brand/components/QuotaExhaustedModal";
+import { buildResumeMatchText, saveResumeMatchText } from "./resumeMatchBridge";
+import { normalizeParsedResume } from "./normalizeParsedResume";
 
 export default function Resume() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const [resume, setResume] = useState<ParsedResume | null>(null);
+  const [resumeId, setResumeId] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [quotaExhausted, setQuotaExhausted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const api = useMemo(() => createSaasApiClient(), []);
   const resumeApi = createResumeApi(api);
   const { ensureConsent, consentPrompt } = useConsent(() => api);
 
+  const handleBringToMatch = () => {
+    if (!resume) return;
+    const text = buildResumeMatchText(resume);
+    if (!text) return;
+    saveResumeMatchText(text, resumeId);
+    navigate("/jobs");
+  };
+
   const handleUpload = async (file: File) => {
-    const allowed = await ensureConsent("resume_upload");
+    const allowed = await ensureConsent("jobseeker_core");
     if (!allowed) {
       setMsg("需要授权后才能上传简历");
       return;
@@ -30,18 +47,45 @@ export default function Resume() {
     setParsing(true);
     setMsg(null);
     setResume(null);
+    setResumeId(null);
     try {
       const result = await resumeApi.upload(file) as any;
+      if (result.resume_id) {
+        setResumeId(String(result.resume_id));
+      }
       if (result.extracted) {
-        setResume(result.extracted);
+        const normalized = normalizeParsedResume(result.extracted);
+        setResume(normalized ?? result.extracted);
         setMsg("简历解析完成");
       } else if (result.error) {
         setMsg(result.error);
+      } else if (result.markdown && !result.extracted) {
+        // LLM extraction failed but MarkItDown succeeded - show partial result
+        setMsg("简历已提取文本，但结构化解析失败，请稍后重试");
       } else {
         setMsg("简历解析完成，但未能提取结构化信息");
       }
-    } catch {
-      setMsg("解析失败，请检查文件格式");
+    } catch (err: unknown) {
+      const apiErr = err instanceof ApiError ? err : null;
+      if (apiErr?.status === 422 || apiErr?.status === 503) {
+        setMsg(apiErr.body?.message || "文档解析失败，请检查文件格式或文件是否损坏");
+      } else if (apiErr?.status === 400) {
+        setMsg(apiErr.body?.message || "不支持的文件格式，请上传 PDF 或 Word 文件");
+      } else if (
+        apiErr?.status === 429 &&
+        apiErr.body?.error === "quota_exceeded"
+      ) {
+        setQuotaExhausted(true);
+        setMsg(null);
+      } else if (apiErr?.status === 429) {
+        setMsg("今日简历解析配额已用尽，请明天再试或升级套餐");
+      } else if (err instanceof Error && err.message === "request_timeout") {
+        setMsg("请求超时，请检查网络或稍后重试");
+      } else if (apiErr?.body?.message) {
+        setMsg(String(apiErr.body.message));
+      } else {
+        setMsg("解析失败，请检查文件格式");
+      }
     } finally {
       setParsing(false);
     }
@@ -62,6 +106,10 @@ export default function Resume() {
   return (
     <>
     {consentPrompt}
+    <QuotaExhaustedModal
+      isOpen={quotaExhausted}
+      onClose={() => setQuotaExhausted(false)}
+    />
     <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-6" style={{ color: "var(--color-text-primary)" }}>
         简历解析
@@ -97,7 +145,7 @@ export default function Resume() {
           点击或拖拽上传简历
         </p>
         <p className="text-sm mt-1" style={{ color: "var(--color-text-muted)" }}>
-          支持 PDF / Word 格式，AI 自动提取关键信息
+          支持 PDF / DOCX；旧版 .doc 请先另存为 .docx 或 PDF
         </p>
       </div>
 
@@ -127,9 +175,20 @@ export default function Resume() {
             boxShadow: "var(--shadow-sm)",
           }}
         >
-          <h2 className="text-lg font-bold mb-4" style={{ color: "var(--color-text-primary)" }}>
-            解析结果
-          </h2>
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <h2 className="text-lg font-bold" style={{ color: "var(--color-text-primary)" }}>
+              解析结果
+            </h2>
+            <button
+              type="button"
+              onClick={handleBringToMatch}
+              className="shrink-0 px-3 py-1.5 rounded-lg text-sm text-white border-none cursor-pointer"
+              style={{ backgroundColor: "var(--color-primary)" }}
+              title={t("resume.bringToMatchHint")}
+            >
+              {t("resume.bringToMatch")}
+            </button>
+          </div>
 
           {/* 基本信息 */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">

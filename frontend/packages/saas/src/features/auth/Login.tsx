@@ -1,19 +1,19 @@
 /**
  * Login - SaaS authentication page.
  * Owner: szbenyx
- *
- * Pure CSS + Tailwind (no tdesign-react).
- * Uses authStore for login state.
- * Brand: T空间.
  */
 import { useState } from "react";
 import { useNavigate, Navigate, Link } from "react-router-dom";
-import { BRAND_SAAS } from "@looma/shared-core";
+import { useTranslation } from "react-i18next";
 import { useSaasAuthStore } from "./authStore";
+import { useBrand } from "../../brand/useBrand";
+import { LanguageSwitcher } from "../../components/LanguageSwitcher";
 import SaasButton from "../../brand/ui/SaasButton";
 import SaasInput from "../../brand/ui/SaasInput";
 
 export default function Login() {
+  const { t } = useTranslation();
+  const brand = useBrand();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -27,7 +27,7 @@ export default function Login() {
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      setErrorMsg("请输入邮箱和密码");
+      setErrorMsg(t("auth.emailPasswordRequired"));
       return;
     }
 
@@ -37,7 +37,7 @@ export default function Login() {
       await login(email, password);
       navigate("/", { replace: true });
     } catch (err) {
-      const msg = (err as { detail?: string })?.detail ?? "登录失败，请检查邮箱和密码";
+      const msg = (err as { detail?: string })?.detail ?? t("auth.loginFailed");
       setErrorMsg(msg);
     } finally {
       setLoading(false);
@@ -53,17 +53,19 @@ export default function Login() {
           boxShadow: "var(--shadow-lg)",
         }}
       >
-        {/* 品牌 */}
+        <div className="flex justify-end mb-2">
+          <LanguageSwitcher />
+        </div>
+
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold" style={{ color: "var(--color-primary)" }}>
-            {BRAND_SAAS.name}
+            {brand.name}
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--color-text-muted)" }}>
-            {BRAND_SAAS.slogan}
+            {brand.slogan}
           </p>
         </div>
 
-        {/* 表单 */}
         <div className="space-y-4">
           <SaasInput
             type="email"
@@ -72,13 +74,13 @@ export default function Login() {
               setEmail(value);
               setErrorMsg("");
             }}
-            placeholder="邮箱地址"
+            placeholder={t("auth.emailPlaceholder")}
             prefix="📧"
             onKeyDown={(e) => {
               if (e.key === "Enter") handleLogin();
             }}
           />
-          
+
           <SaasInput
             type="password"
             value={password}
@@ -86,7 +88,7 @@ export default function Login() {
               setPassword(value);
               setErrorMsg("");
             }}
-            placeholder="密码"
+            placeholder={t("auth.passwordPlaceholder")}
             prefix="🔐"
             onKeyDown={(e) => {
               if (e.key === "Enter") handleLogin();
@@ -106,20 +108,19 @@ export default function Login() {
             disabled={loading}
             loading={loading}
           >
-            {loading ? "登录中..." : "登录"}
+            {loading ? t("auth.loggingIn") : t("auth.login")}
           </SaasButton>
         </div>
 
-        {/* 注册链接 */}
         <div className="text-center mt-6">
           <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-            还没有账号？{" "}
+            {t("auth.noAccount")}{" "}
             <Link
               to="/register"
               className="no-underline hover:underline"
               style={{ color: "var(--color-primary)" }}
             >
-              立即注册
+              {t("auth.registerNow")}
             </Link>
           </p>
         </div>

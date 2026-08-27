@@ -4,9 +4,12 @@ BFS 社交路径引擎 — 适配 looma-zervi 后端
 从六度分隔算法项目移植，适配 looma 的 DatabaseManager 和用户体系。
 核心功能：
   1. 查找两个用户之间的最短社交路径（推荐链）
-  2. 计算分隔度数 + 信任度评分
+  2. 计算分隔度数（几何层；不做用户可见信用分）
   3. 统计 N 步内可达用户
   4. 网络拓扑分析（平均路径、聚类系数、Hub 节点）
+
+红线（TRUST_LAYER / ENGINEERING_CLOSED_LOOP_P0）：
+  社交距离度数 ≠ 信任分。禁止把 degrees 映射成用户可见的 trust_score。
 """
 from __future__ import annotations
 from collections import deque
@@ -47,26 +50,6 @@ def compute_degrees_of_separation(adj: Dict[str, Set[str]], source: str, target:
     if path is None:
         return -1
     return len(path) - 1
-
-
-def compute_trust_score(degrees: int) -> float:
-    """
-    根据分隔度数计算信任度评分 (0-100)。
-
-    距离越近，信任度越高：
-      0 度（自己）→ 100
-      1 度（直接推荐）→ 90
-      2 度 → 70
-      3 度 → 50
-      4 度 → 30
-      5 度 → 15
-      6 度 → 5
-      >6 或不可达 → 0
-    """
-    if degrees < 0:
-        return 0.0
-    trust_map = {0: 100, 1: 90, 2: 70, 3: 50, 4: 30, 5: 15, 6: 5}
-    return trust_map.get(degrees, 0.0)
 
 
 def bfs_reachable_users(adj: Dict[str, Set[str]], source: str, max_depth: int = 6) -> Dict[str, int]:

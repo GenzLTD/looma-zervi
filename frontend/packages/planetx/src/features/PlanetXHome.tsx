@@ -10,13 +10,15 @@ import HubScreen from './hub/HubScreen'
 import QuizScreen from './quiz/QuizScreen'
 import ResultScreen from './result/ResultScreen'
 import MatchScreen from './match/MatchScreen'
+import TimelineScreen from './timeline/TimelineScreen'
+import TrustScreen from './trust/TrustScreen'
 
 /**
  * PlanetX 星际人格测试 — 主入口
  * 迁移自旧 PlanetXHome.tsx
  *
  * 屏幕流转: loading → auth → onboarding → hub ↔ quiz → result → hub
- *                              hub ↔ match
+ *                              hub ↔ match / timeline / trust
  */
 export default function PlanetXHome() {
   const screen = usePlanetXStore((s) => s.screen)
@@ -40,6 +42,8 @@ export default function PlanetXHome() {
     quiz: <QuizScreen />,
     result: <ResultScreen />,
     match: <MatchScreen />,
+    timeline: <TimelineScreen />,
+    trust: <TrustScreen />,
   }[screen]
 
   return (

@@ -114,7 +114,8 @@ export interface PlanetXAchievementPopupProps {
   visible: boolean;
   title: string;
   description?: string;
-  icon?: string;
+  /** React node or leave default trophy icon */
+  icon?: React.ReactNode;
   onClose?: () => void;
 }
 
@@ -202,3 +203,46 @@ export interface PlanetXTabsProps {
   orientation?: "horizontal" | "vertical";
   fullWidth?: boolean;
 }
+
+// ============================================================
+// ChatBubble
+// ============================================================
+export type ChatRole = "user" | "ai";
+
+export interface PlanetXChatBubbleProps {
+  role: ChatRole;
+  content: string;
+  markdown?: boolean;
+  timestamp?: string;
+  avatar?: string;
+  loading?: boolean;
+}
+
+// ============================================================
+// StreamingText
+// ============================================================
+export interface PlanetXStreamingTextProps {
+  text: string;
+  done?: boolean;
+  cursorBlink?: boolean;
+  speed?: number;
+}
+
+// ============================================================
+// Tooltip
+// ============================================================
+export type TooltipPosition = "top" | "bottom" | "left" | "right";
+
+export interface PlanetXTooltipProps {
+  children: React.ReactNode;
+  content: React.ReactNode;
+  position?: TooltipPosition;
+  delay?: number;
+  maxWidth?: string;
+  disabled?: boolean;
+}
+
+// ============================================================
+// Icon
+// ============================================================
+export type { PlanetXIconName, PlanetXIconProps } from "./PlanetXIcon";

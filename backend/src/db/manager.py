@@ -19,11 +19,14 @@ Tables:
 from __future__ import annotations
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def _dt_now():
@@ -32,7 +35,7 @@ def _dt_now():
 
 
 def email_hash(email: str | None) -> str | None:
-    """Canonical email hash shared with DemoPPI (Bridge 2/3 cross-service match).
+    """Canonical email hash shared with DemoPPI / GFCC (Bridge 2/3).
 
     Both sides compute sha256 of the lowercased, trimmed email as lowercase hex
     so PlanetX (Python) and DemoPPI (TypeScript) yield identical digests for the
@@ -53,7 +56,7 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id              TEXT PRIMARY KEY,          -- looma uuid4
     email           TEXT UNIQUE,               -- Web registration (nullable for miniprogram-only)
-    email_hash      TEXT,                      -- sha256(lower(trim(email))) for cross-service match (Bridge 2/3)
+    email_hash      TEXT,                      -- sha256(lower(trim(email))) for chain B user_id_hash
     password_hash   TEXT,                      -- bcrypt hash (nullable for miniprogram-only)
     wechat_openid   TEXT UNIQUE,               -- WeChat miniprogram login
     name            TEXT DEFAULT '',
@@ -65,7 +68,28 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_email_hash ON users(email_hash);
 CREATE INDEX IF NOT EXISTS idx_users_wechat_openid ON users(wechat_openid);
+
+-- ============================================
+-- Core: user_identities (multi-platform identity linking)
+-- Supports Google, Apple, WeChat, email+password → one user
+-- ============================================
+CREATE TABLE IF NOT EXISTS user_identities (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    provider        TEXT NOT NULL,              -- google | apple | wechat | email
+    provider_uid    TEXT NOT NULL,              -- platform-specific user ID (sub / openid / email)
+    provider_email  TEXT,                       -- email from provider (if available)
+    provider_name   TEXT,                       -- display name from provider
+    metadata_json   TEXT DEFAULT '{}',          -- extra provider data (avatar, locale, etc.)
+    created_at      TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(provider, provider_uid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_identities_user ON user_identities(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_identities_provider ON user_identities(provider, provider_uid);
 
 -- ============================================
 -- Game: game_profiles (Jason owns)
@@ -124,6 +148,47 @@ CREATE TABLE IF NOT EXISTS mission_completions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_missions_user ON mission_completions(user_id);
+
+-- ============================================
+-- Trust Layer: trust_memories (joint — append-only behaviour log)
+-- ============================================
+CREATE TABLE IF NOT EXISTS trust_memories (
+    id              TEXT PRIMARY KEY,          -- UUID
+    user_id         TEXT NOT NULL,
+    session_type    TEXT NOT NULL,             -- quiz | fleet | match | ask | share
+    session_id      TEXT NOT NULL,
+    memory_content  TEXT NOT NULL,             -- JSON: structured behaviour snapshot
+    memory_level    INTEGER DEFAULT 1,         -- 1=surface, 2=deep, 3=fragment, 4=taboo
+    created_at      TEXT DEFAULT (datetime('now')),  -- immutable
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trust_memories_user ON trust_memories(user_id);
+CREATE INDEX IF NOT EXISTS idx_trust_memories_session ON trust_memories(session_type, session_id);
+
+-- ============================================
+-- Trust Layer: trust_attestations (joint — verifiable claim cards)
+-- ============================================
+CREATE TABLE IF NOT EXISTS trust_attestations (
+    id                  TEXT PRIMARY KEY,          -- UUID
+    candidate_id        TEXT NOT NULL,
+    claim_type          TEXT NOT NULL,             -- identity | collaboration | communication | influence
+    claim_statement     TEXT NOT NULL,
+    evidence_type       TEXT NOT NULL,             -- quiz | fleet_consensus | dialogue_analysis | share_signal
+    evidence_refs       TEXT DEFAULT '[]',         -- JSON array: trust_memories.id list
+    verification_status TEXT DEFAULT 'unverified', -- verified | weak | unverified | contradicted
+    confidence_score    REAL DEFAULT 0.0,          -- 0-1 internal only, never shown to users
+    generated_by        TEXT DEFAULT 'trust_agent_v0',
+    signature           TEXT DEFAULT '',                -- Ed25519 looma_sig_v1:...
+    expires_at          TEXT DEFAULT NULL,              -- ISO 8601, 90 days from issued_at
+    created_at          TEXT DEFAULT (datetime('now')),
+    updated_at          TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (candidate_id) REFERENCES users(id),
+    UNIQUE(candidate_id, claim_type)               -- one attestation per candidate per claim type
+);
+
+CREATE INDEX IF NOT EXISTS idx_trust_attestations_candidate ON trust_attestations(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_trust_attestations_type ON trust_attestations(claim_type, verification_status);
 
 -- ============================================
 -- Signal bridge ingest (Bridge 2/3 inbound idempotency)
@@ -201,6 +266,30 @@ CREATE INDEX IF NOT EXISTS idx_job_posts_user ON job_posts(user_id);
 CREATE INDEX IF NOT EXISTS idx_job_posts_status ON job_posts(user_id, status);
 
 -- ============================================
+-- Job applications (DemoPeter thin-ingest → HR 可见投递)
+-- ============================================
+CREATE TABLE IF NOT EXISTS applications (
+    id                TEXT PRIMARY KEY,
+    seeker_user_id    TEXT NOT NULL,
+    resume_id         TEXT NOT NULL,           -- documents.id (resume)
+    job_id            TEXT NOT NULL,           -- documents.metadata.job_id or job_posts.id
+    enterprise_id     TEXT DEFAULT '',
+    status            TEXT DEFAULT 'submitted', -- submitted | withdrawn
+    metadata          TEXT DEFAULT '{}',       -- JSON, no vector payloads
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    withdrawn_at      TEXT DEFAULT NULL,
+    FOREIGN KEY (seeker_user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_applications_seeker ON applications(seeker_user_id);
+CREATE INDEX IF NOT EXISTS idx_applications_job ON applications(job_id);
+CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
+-- One active application per (seeker, resume, job)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_active_unique
+    ON applications(seeker_user_id, resume_id, job_id) WHERE status = 'submitted';
+
+-- ============================================
 -- Enterprise: sales_inquiries (szbenyx — 企业版联系销售)
 -- ============================================
 CREATE TABLE IF NOT EXISTS sales_inquiries (
@@ -264,6 +353,20 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_expires ON subscriptions(expires_at);
+
+-- ============================================
+-- Push: huawei_push_tokens (HarmonyOS Push Kit)
+-- ============================================
+CREATE TABLE IF NOT EXISTS huawei_push_tokens (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         TEXT NOT NULL,
+    push_token      TEXT NOT NULL,
+    created_at      INTEGER DEFAULT (strftime('%s','now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_token ON huawei_push_tokens(push_token);
+CREATE INDEX IF NOT EXISTS idx_push_user ON huawei_push_tokens(user_id);
 
 -- ============================================
 -- Growth: invite_codes (joint ownership)
@@ -364,6 +467,41 @@ CREATE INDEX IF NOT EXISTS idx_poems_dynasty ON poems(dynasty);
 CREATE INDEX IF NOT EXISTS idx_poems_author ON poems(author);
 CREATE INDEX IF NOT EXISTS idx_poems_theme ON poems(theme);
 CREATE INDEX IF NOT EXISTS idx_poems_title ON poems(title);
+
+-- ============================================
+-- Poetry challenge: 信达雅英译赛 (Jason / overseas)
+-- ============================================
+CREATE TABLE IF NOT EXISTS challenge_rounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week_key TEXT NOT NULL UNIQUE,          -- e.g. 2026-W29
+    poem_id INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',    -- open | closed
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (poem_id) REFERENCES poems(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_challenge_rounds_status ON challenge_rounds(status);
+CREATE INDEX IF NOT EXISTS idx_challenge_rounds_ends ON challenge_rounds(ends_at);
+
+CREATE TABLE IF NOT EXISTS challenge_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    round_id INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    translation TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    license_accepted INTEGER NOT NULL DEFAULT 0,
+    vote_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(round_id, user_id),
+    FOREIGN KEY (round_id) REFERENCES challenge_rounds(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_challenge_entries_round ON challenge_entries(round_id);
 
 -- ============================================
 -- Knowledge: documents (szbenyx)
@@ -661,45 +799,84 @@ CREATE TABLE IF NOT EXISTS quiz_sessions (
 CREATE INDEX IF NOT EXISTS idx_quiz_sessions_user ON quiz_sessions(user_id, created_at);
 
 -- ============================================
--- Trust Layer: trust_memories (joint — append-only behaviour log)
+-- Match reports (resume × JD matching persistence)
 -- ============================================
-CREATE TABLE IF NOT EXISTS trust_memories (
-    id              TEXT PRIMARY KEY,          -- UUID
+CREATE TABLE IF NOT EXISTS match_reports (
+    id              TEXT PRIMARY KEY,
     user_id         TEXT NOT NULL,
-    session_type    TEXT NOT NULL,             -- quiz | fleet | match | ask | share
-    session_id      TEXT NOT NULL,
-    memory_content  TEXT NOT NULL,             -- JSON: structured behaviour snapshot
-    memory_level    INTEGER DEFAULT 1,         -- 1=surface, 2=deep, 3=fragment, 4=taboo
-    created_at      TEXT DEFAULT (datetime('now')),  -- immutable
+    resume_id       TEXT DEFAULT '',
+    resume_snapshot TEXT DEFAULT '',
+    title           TEXT DEFAULT '',
+    status          TEXT DEFAULT 'completed',   -- draft | completed | archived | deleted
+    summary         TEXT DEFAULT '',
+    metadata        TEXT DEFAULT '{}',          -- JSON: { total_jobs, matched_at, pipeline_version }
+    created_at      TEXT DEFAULT (datetime('now')),
+    updated_at      TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_trust_memories_user ON trust_memories(user_id);
-CREATE INDEX IF NOT EXISTS idx_trust_memories_session ON trust_memories(session_type, session_id);
+CREATE INDEX IF NOT EXISTS idx_match_reports_user ON match_reports(user_id);
+CREATE INDEX IF NOT EXISTS idx_match_reports_created ON match_reports(created_at);
+CREATE INDEX IF NOT EXISTS idx_match_reports_status ON match_reports(status);
 
--- ============================================
--- Trust Layer: trust_attestations (joint — verifiable claim cards)
--- ============================================
-CREATE TABLE IF NOT EXISTS trust_attestations (
-    id                  TEXT PRIMARY KEY,          -- UUID
-    candidate_id        TEXT NOT NULL,
-    claim_type          TEXT NOT NULL,             -- identity | collaboration | communication | influence
-    claim_statement     TEXT NOT NULL,
-    evidence_type       TEXT NOT NULL,             -- quiz | fleet_consensus | dialogue_analysis | share_signal
-    evidence_refs       TEXT DEFAULT '[]',         -- JSON array: trust_memories.id list
-    verification_status TEXT DEFAULT 'unverified', -- verified | weak | unverified | contradicted
-    confidence_score    REAL DEFAULT 0.0,          -- 0-1 internal only, never shown to users
-    generated_by        TEXT DEFAULT 'trust_agent_v0',
-    signature           TEXT DEFAULT '',                -- Ed25519 looma_sig_v1:...
-    expires_at          TEXT DEFAULT NULL,              -- ISO 8601, 90 days from issued_at
-    created_at          TEXT DEFAULT (datetime('now')),
-    updated_at          TEXT DEFAULT (datetime('now')),
-    FOREIGN KEY (candidate_id) REFERENCES users(id),
-    UNIQUE(candidate_id, claim_type)               -- one attestation per candidate per claim type
+CREATE TABLE IF NOT EXISTS match_report_items (
+    id                      TEXT PRIMARY KEY,
+    report_id               TEXT NOT NULL,
+    job_title               TEXT NOT NULL,
+    company_name            TEXT NOT NULL,
+    location                TEXT DEFAULT '',
+    salary_range            TEXT DEFAULT '',
+    jd_snapshot             TEXT DEFAULT '',
+    overall_score           REAL DEFAULT 0,
+    background_match        REAL DEFAULT 0,
+    skills_overlap          REAL DEFAULT 0,
+    experience_relevance    REAL DEFAULT 0,
+    seniority               REAL DEFAULT 0,
+    language_requirement    REAL DEFAULT 0,
+    company_score           REAL DEFAULT 0,
+    salary_match            REAL DEFAULT 0,
+    location_match          REAL DEFAULT 0,
+    culture_workload_match  REAL DEFAULT 0,
+    match_reason            TEXT DEFAULT '',
+    matched_skills          TEXT DEFAULT '[]',
+    missing_skills          TEXT DEFAULT '[]',
+    fit_bullets             TEXT DEFAULT '[]',
+    gap_analysis            TEXT DEFAULT '[]',
+    improvement_plan        TEXT DEFAULT '',
+    credit_snapshot         TEXT DEFAULT '{}',
+    rank_order              INTEGER DEFAULT 0,
+    created_at              TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (report_id) REFERENCES match_reports(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_trust_attestations_candidate ON trust_attestations(candidate_id);
-CREATE INDEX IF NOT EXISTS idx_trust_attestations_type ON trust_attestations(claim_type, verification_status);
+CREATE INDEX IF NOT EXISTS idx_report_items_report ON match_report_items(report_id);
+CREATE INDEX IF NOT EXISTS idx_report_items_company ON match_report_items(company_name);
+
+-- ============================================
+-- Report sharing (career_partner slice; multi-industry later)
+-- ============================================
+CREATE TABLE IF NOT EXISTS report_sharing (
+    id                  TEXT PRIMARY KEY,
+    report_id           TEXT NOT NULL,
+    user_id             TEXT NOT NULL,
+    shared_with_type    TEXT NOT NULL DEFAULT 'career_partner',
+    shared_with_id      TEXT DEFAULT '',
+    shared_dimensions   TEXT NOT NULL DEFAULT '[]',
+    purpose             TEXT DEFAULT '',
+    status              TEXT DEFAULT 'active',   -- active | revoked | expired
+    granted_at          TEXT DEFAULT (datetime('now')),
+    revoked_at          TEXT DEFAULT NULL,
+    expires_at          TEXT DEFAULT NULL,
+    created_at          TEXT DEFAULT (datetime('now')),
+    updated_at          TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (report_id) REFERENCES match_reports(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sharing_report ON report_sharing(report_id);
+CREATE INDEX IF NOT EXISTS idx_sharing_user ON report_sharing(user_id);
+CREATE INDEX IF NOT EXISTS idx_sharing_status ON report_sharing(status);
+CREATE INDEX IF NOT EXISTS idx_sharing_type ON report_sharing(shared_with_type);
 
 -- ============================================
 -- Trust Layer: share_codes (joint — temporary access grants)
@@ -736,6 +913,66 @@ CREATE TABLE IF NOT EXISTS verification_audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_verification_audit_owner ON verification_audit_log(owner_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_verification_audit_code ON verification_audit_log(share_code);
+
+-- ============================================
+-- Timeline: career time-series (product surface)
+-- See docs/TIMELINE_EVENT_MODEL.md · contracts/timeline.v1.json
+-- Not product_events (funnel) · Not narrative_events (game) · Not trust_memories (evidence raw)
+-- ============================================
+CREATE TABLE IF NOT EXISTS timeline_events (
+    id                TEXT PRIMARY KEY,
+    user_id           TEXT NOT NULL,
+    event_kind        TEXT NOT NULL,
+    occurred_at       TEXT NOT NULL,
+    recorded_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    source_system     TEXT NOT NULL,
+    source_ref        TEXT DEFAULT '',
+    title             TEXT DEFAULT '',
+    summary           TEXT DEFAULT '',
+    payload_json      TEXT DEFAULT '{}',
+    signal_quality    TEXT NOT NULL DEFAULT 'observed',
+    confidence        REAL DEFAULT 0.5,
+    weight_role       TEXT NOT NULL DEFAULT 'evidence',
+    visibility        TEXT NOT NULL DEFAULT 'private',
+    consent_scope     TEXT DEFAULT '[]',
+    status            TEXT NOT NULL DEFAULT 'active',
+    superseded_by     TEXT DEFAULT NULL,
+    created_at        TEXT DEFAULT (datetime('now')),
+    updated_at        TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_timeline_user_time
+    ON timeline_events(user_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_timeline_user_kind
+    ON timeline_events(user_id, event_kind, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_timeline_source
+    ON timeline_events(source_system, source_ref);
+
+-- ============================================
+-- Match consensus (PlanetX phase-2 gate)
+-- See 首次星际匹配_子项目接口契约.md · ENGINEERING_CLOSED_LOOP_P0
+-- ============================================
+CREATE TABLE IF NOT EXISTS match_consensus (
+    id              TEXT PRIMARY KEY,
+    fleet_id        TEXT NOT NULL,
+    initiator_id    TEXT NOT NULL,
+    candidate_id    TEXT NOT NULL,
+    match_score     INTEGER NOT NULL,
+    status          TEXT DEFAULT 'pending',
+    reason          TEXT DEFAULT '',
+    created_at      TEXT DEFAULT (datetime('now')),
+    verified_at     TEXT,
+    expires_at      TEXT NOT NULL,
+    FOREIGN KEY (initiator_id) REFERENCES users(id),
+    FOREIGN KEY (candidate_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_match_consensus_initiator
+    ON match_consensus(initiator_id, status);
+CREATE INDEX IF NOT EXISTS idx_match_consensus_candidate
+    ON match_consensus(candidate_id, status);
+
 """
 
 
@@ -777,6 +1014,7 @@ class DatabaseManager:
         if not self._is_memory:
             conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=5000")  # 5s busy-wait 缓解 SQLITE_BUSY
         return conn
 
     @contextmanager
@@ -798,29 +1036,73 @@ class DatabaseManager:
             conn.executescript(SCHEMA_SQL)
             # Migration: add invite_code to existing fleets tables
             try:
-                conn.execute("ALTER TABLE fleets ADD COLUMN invite_code TEXT UNIQUE")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+                conn.execute("ALTER TABLE fleets ADD COLUMN invite_code TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE fleets ADD COLUMN invite_code failed: %s", e
+                    )
             try:
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_fleets_invite_code ON fleets(invite_code)")
-            except sqlite3.OperationalError:
-                pass
+                conn.execute("DROP INDEX IF EXISTS idx_fleets_invite_code")
+                conn.execute(
+                    "CREATE UNIQUE INDEX idx_fleets_invite_code ON fleets(invite_code)"
+                )
+            except sqlite3.OperationalError as e:
+                logger.warning(
+                    "Migration UNIQUE INDEX idx_fleets_invite_code failed: %s", e
+                )
             try:
                 conn.execute("ALTER TABLE game_profiles ADD COLUMN identity TEXT")
-            except sqlite3.OperationalError:
-                pass
-            # Migration: email_hash for cross-service signal matching (Bridge 2/3)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE game_profiles ADD COLUMN identity failed: %s", e
+                    )
+            # Migration: trust protocol columns on existing trust_attestations
+            try:
+                conn.execute(
+                    "ALTER TABLE trust_attestations ADD COLUMN signature TEXT DEFAULT ''"
+                )
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE trust_attestations ADD COLUMN signature failed: %s", e
+                    )
+            try:
+                conn.execute(
+                    "ALTER TABLE trust_attestations ADD COLUMN expires_at TEXT DEFAULT NULL"
+                )
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE trust_attestations ADD COLUMN expires_at failed: %s", e
+                    )
+            # Migration: trust_attestations UNIQUE(candidate_id, claim_type) for upsert ON CONFLICT
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_trust_attestations_claim "
+                    "ON trust_attestations(candidate_id, claim_type)"
+                )
+            except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
+                logger.warning(
+                    "Migration UNIQUE INDEX trust_attestations_claim failed: %s", e
+                )
+            # Migration: email_hash for GFCC chain B / DemoPPI match
             try:
                 conn.execute("ALTER TABLE users ADD COLUMN email_hash TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE users ADD COLUMN email_hash failed: %s", e
+                    )
             try:
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_users_email_hash ON users(email_hash)"
                 )
-            except sqlite3.OperationalError:
-                pass
-            # Backfill email_hash for existing users with an email (idempotent)
+            except sqlite3.OperationalError as e:
+                logger.warning(
+                    "Migration INDEX idx_users_email_hash failed: %s", e
+                )
             for uid, em in conn.execute(
                 "SELECT id, email FROM users WHERE email IS NOT NULL AND email_hash IS NULL"
             ).fetchall():
@@ -849,7 +1131,7 @@ class DatabaseManager:
         return dict(row) if row else None
 
     def get_user_by_email_hash(self, email_hash_value: str):
-        """Resolve a user by canonical email hash (cross-service match, Bridge 2/3)."""
+        """Resolve a user by canonical email hash (chain B / DemoPPI match)."""
         with self.get_conn() as conn:
             row = conn.execute(
                 "SELECT * FROM users WHERE email_hash = ?", (email_hash_value,)
@@ -892,6 +1174,86 @@ class DatabaseManager:
                 "UPDATE users SET wechat_openid = ?, updated_at = datetime('now') WHERE id = ?",
                 (wechat_openid, user_id)
             )
+
+    # ============================================
+    # Multi-identity management (overseas: Google/Apple/email)
+    # ============================================
+    def get_user_by_identity(self, provider: str, provider_uid: str):
+        """Find a user by a third-party identity (google sub, apple sub, wechat openid)."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT u.* FROM users u
+                   JOIN user_identities ui ON u.id = ui.user_id
+                   WHERE ui.provider = ? AND ui.provider_uid = ?""",
+                (provider, provider_uid)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def link_identity(self, user_id: str, provider: str, provider_uid: str,
+                      provider_email: str = "", provider_name: str = "",
+                      metadata_json: str = "{}"):
+        """Link a third-party identity to an existing user.
+        If the identity is already linked to a different user, raises ValueError."""
+        with self.get_conn() as conn:
+            existing = conn.execute(
+                "SELECT user_id FROM user_identities WHERE provider = ? AND provider_uid = ?",
+                (provider, provider_uid)
+            ).fetchone()
+            if existing and existing["user_id"] != user_id:
+                raise ValueError(f"Identity {provider}:{provider_uid} is already linked to another user")
+            if existing:
+                return  # already linked to this user, idempotent
+            conn.execute(
+                """INSERT INTO user_identities (id, user_id, provider, provider_uid,
+                   provider_email, provider_name, metadata_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), user_id, provider, provider_uid,
+                 provider_email, provider_name, metadata_json)
+            )
+
+    def get_user_identities(self, user_id: str):
+        """List all identities linked to a user."""
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT provider, provider_uid, provider_email, provider_name FROM user_identities WHERE user_id = ?",
+                (user_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_or_create_user_by_identity(self, provider: str, provider_uid: str,
+                                       email: str = "", name: str = "",
+                                       metadata_json: str = "{}"):
+        """Find or create a user by third-party identity.
+        If the identity exists, return the linked user.
+        If not, create a new user + link the identity, return the new user.
+        If email matches an existing user, link the identity to that user instead."""
+        # 1. Check if identity already linked
+        user = self.get_user_by_identity(provider, provider_uid)
+        if user:
+            return user, False  # existing user, not newly created
+
+        # 2. Check if email matches an existing user (account merge)
+        if email:
+            user = self.get_user_by_email(email)
+            if user:
+                self.link_identity(user["id"], provider, provider_uid, email, name, metadata_json)
+                return user, False
+
+        # 3. Create new user + link identity
+        user_id = str(uuid.uuid4())
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO users (id, email, email_hash, name) VALUES (?, ?, ?, ?)""",
+                (user_id, email or None, email_hash(email or None), name)
+            )
+            conn.execute(
+                """INSERT INTO user_identities (id, user_id, provider, provider_uid,
+                   provider_email, provider_name, metadata_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), user_id, provider, provider_uid,
+                 email, name, metadata_json)
+            )
+        return self.get_user_by_id(user_id), True  # newly created
 
     def update_user_tier(self, user_id: str, tier: str):
         with self.get_conn() as conn:
@@ -1176,6 +1538,166 @@ class DatabaseManager:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def count_spread_signals(self, user_id: str) -> int:
+        """Count invitees who used this user's referral code AND completed personality.
+
+        Design (ENGINEERING_CLOSED_LOOP_P0): count only after first mission to reduce spam.
+        Excludes profile_share codes.
+        """
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT COUNT(DISTINCT ic.used_by) AS cnt
+                   FROM invite_codes ic
+                   INNER JOIN mission_completions mc
+                     ON mc.user_id = ic.used_by AND mc.mission_id = 'personality'
+                   WHERE ic.created_by = ?
+                     AND ic.used_by IS NOT NULL
+                     AND IFNULL(ic.tier_grant, '') != 'profile_share'""",
+                (user_id,),
+            ).fetchone()
+        return int(row["cnt"]) if row else 0
+
+    # ============================================
+    # Match consensus (PlanetX phase-2)
+    # ============================================
+    def create_match_consensus(
+        self,
+        *,
+        fleet_id: str,
+        initiator_id: str,
+        candidate_id: str,
+        match_score: int,
+        reason: str = "",
+        expires_hours: int = 72,
+    ) -> dict:
+        """Create or refresh a pending consensus between initiator and candidate."""
+        import uuid as _uuid
+        from datetime import datetime, timedelta, timezone
+
+        consensus_id = str(_uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        expires_at = (now + timedelta(hours=expires_hours)).strftime("%Y-%m-%d %H:%M:%S")
+
+        with self.get_conn() as conn:
+            # Reuse open pending pair if still valid
+            existing = conn.execute(
+                """SELECT * FROM match_consensus
+                   WHERE initiator_id = ? AND candidate_id = ? AND status = 'pending'
+                     AND expires_at > datetime('now')
+                   ORDER BY created_at DESC LIMIT 1""",
+                (initiator_id, candidate_id),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """UPDATE match_consensus
+                       SET match_score = ?, reason = ?, fleet_id = ?, expires_at = ?
+                       WHERE id = ?""",
+                    (match_score, reason, fleet_id, expires_at, existing["id"]),
+                )
+                row = conn.execute(
+                    "SELECT * FROM match_consensus WHERE id = ?", (existing["id"],)
+                ).fetchone()
+                return dict(row)
+
+            conn.execute(
+                """INSERT INTO match_consensus
+                   (id, fleet_id, initiator_id, candidate_id, match_score, status, reason, expires_at)
+                   VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                (
+                    consensus_id,
+                    fleet_id,
+                    initiator_id,
+                    candidate_id,
+                    match_score,
+                    reason,
+                    expires_at,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM match_consensus WHERE id = ?", (consensus_id,)
+            ).fetchone()
+        return dict(row)
+
+    def get_match_consensus(self, consensus_id: str) -> dict | None:
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM match_consensus WHERE id = ?", (consensus_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def acknowledge_match_consensus(
+        self, consensus_id: str, actor_id: str, action: str = "accept"
+    ) -> tuple[dict | None, str | None]:
+        """Candidate (or either party) accepts/rejects. Returns (row, error_code)."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM match_consensus WHERE id = ?", (consensus_id,)
+            ).fetchone()
+            if not row:
+                return None, "not_found"
+            rec = dict(row)
+            if rec["status"] == "verified":
+                return rec, None
+            if rec["status"] in ("rejected", "expired"):
+                return None, "not_pending"
+            # Expire stale
+            expired = conn.execute(
+                """SELECT 1 FROM match_consensus
+                   WHERE id = ? AND expires_at <= datetime('now')""",
+                (consensus_id,),
+            ).fetchone()
+            if expired:
+                conn.execute(
+                    "UPDATE match_consensus SET status = 'expired' WHERE id = ?",
+                    (consensus_id,),
+                )
+                return None, "expired"
+            if actor_id not in (rec["initiator_id"], rec["candidate_id"]):
+                return None, "forbidden"
+            # Prefer candidate acknowledgement; initiator may also accept for demo
+            if action == "reject":
+                conn.execute(
+                    "UPDATE match_consensus SET status = 'rejected' WHERE id = ?",
+                    (consensus_id,),
+                )
+            else:
+                conn.execute(
+                    """UPDATE match_consensus
+                       SET status = 'verified', verified_at = datetime('now')
+                       WHERE id = ?""",
+                    (consensus_id,),
+                )
+            updated = conn.execute(
+                "SELECT * FROM match_consensus WHERE id = ?", (consensus_id,)
+            ).fetchone()
+        return (dict(updated) if updated else None), None
+
+    def list_match_consensus_for_user(self, user_id: str) -> list[dict]:
+        with self.get_conn() as conn:
+            # Auto-expire
+            conn.execute(
+                """UPDATE match_consensus SET status = 'expired'
+                   WHERE status = 'pending' AND expires_at <= datetime('now')"""
+            )
+            rows = conn.execute(
+                """SELECT * FROM match_consensus
+                   WHERE initiator_id = ? OR candidate_id = ?
+                   ORDER BY created_at DESC LIMIT 50""",
+                (user_id, user_id),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def has_verified_match_consensus(self, user_id: str) -> bool:
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT 1 FROM match_consensus
+                   WHERE status = 'verified'
+                     AND (initiator_id = ? OR candidate_id = ?)
+                   LIMIT 1""",
+                (user_id, user_id),
+            ).fetchone()
+        return row is not None
+
     def is_mission_completed(self, user_id: str, mission_id: str) -> bool:
         """Check if a user has already completed a specific mission."""
         with self.get_conn() as conn:
@@ -1187,8 +1709,274 @@ class DatabaseManager:
         return row is not None
 
     # ============================================
+    # Trust Layer: trust_memories (append-only)
+    # ============================================
+    def insert_trust_memory(self, user_id: str, session_type: str,
+                            session_id: str, memory_content: dict,
+                            memory_level: int = 1) -> str:
+        """Insert an append-only trust memory. Returns memory_id."""
+        memory_id = str(uuid.uuid4())
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO trust_memories
+                   (id, user_id, session_type, session_id, memory_content, memory_level)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (memory_id, user_id, session_type, session_id,
+                 json.dumps(memory_content, ensure_ascii=False), memory_level),
+            )
+        return memory_id
+
+    def get_trust_memories(self, user_id: str,
+                           session_type: str | None = None,
+                           limit: int = 50) -> list[dict]:
+        """Retrieve trust memories for a user, optionally filtered by type."""
+        if session_type:
+            sql = """SELECT * FROM trust_memories
+                     WHERE user_id = ? AND session_type = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            params = (user_id, session_type, limit)
+        else:
+            sql = """SELECT * FROM trust_memories
+                     WHERE user_id = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            params = (user_id, limit)
+        with self.get_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    # ============================================
+    # Trust Layer: trust_attestations
+    # ============================================
+    def upsert_trust_attestation(self, candidate_id: str, claim_type: str,
+                                 claim_statement: str, evidence_type: str,
+                                 verification_status: str = "unverified",
+                                 evidence_refs: list | None = None,
+                                 confidence_score: float = 0.0) -> dict:
+        """Upsert a trust attestation claim card. Returns the attestation dict.
+        One row per (candidate_id, claim_type) — subsequent calls update the same row."""
+        attestation_id = str(uuid.uuid4())
+        refs_json = json.dumps(evidence_refs or [])
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO trust_attestations
+                   (id, candidate_id, claim_type, claim_statement, evidence_type,
+                    verification_status, evidence_refs, confidence_score)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(candidate_id, claim_type) DO UPDATE SET
+                     claim_statement = excluded.claim_statement,
+                     verification_status = excluded.verification_status,
+                     evidence_refs = excluded.evidence_refs,
+                     confidence_score = excluded.confidence_score,
+                     updated_at = datetime('now')""",
+                (attestation_id, candidate_id, claim_type, claim_statement,
+                 evidence_type, verification_status, refs_json, confidence_score),
+            )
+            row = conn.execute(
+                """SELECT * FROM trust_attestations
+                   WHERE candidate_id = ? AND claim_type = ?""",
+                (candidate_id, claim_type),
+            ).fetchone()
+        return dict(row) if row else {}
+
+    def get_trust_attestations(self, candidate_id: str) -> list[dict]:
+        """Get all attestation cards for a candidate."""
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM trust_attestations
+                   WHERE candidate_id = ?
+                   ORDER BY created_at DESC""",
+                (candidate_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_trust_attestation(self, attestation_id: str) -> dict | None:
+        """Get a single attestation by ID."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM trust_attestations WHERE id = ?", (attestation_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    # ============================================
     # Quota operations (joint)
     # ============================================
+    def get_trust_attestations_by_type(self, candidate_id: str, claim_types: list[str] | None = None) -> list[dict]:
+        """Get attestations for candidate, optionally filtered by claim_type."""
+        if claim_types:
+            placeholders = ",".join("?" * len(claim_types))
+            sql = f"""SELECT * FROM trust_attestations
+                      WHERE candidate_id = ? AND claim_type IN ({placeholders})
+                      ORDER BY created_at DESC"""
+            params = [candidate_id] + claim_types
+        else:
+            sql = """SELECT * FROM trust_attestations
+                     WHERE candidate_id = ? ORDER BY created_at DESC"""
+            params = [candidate_id]
+        with self.get_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_attestation_signature(self, attestation_id: str, signature: str, expires_at: str) -> bool:
+        """Set the Ed25519 signature and expiration on an attestation."""
+        with self.get_conn() as conn:
+            cur = conn.execute(
+                """UPDATE trust_attestations
+                   SET signature = ?, expires_at = ?, updated_at = datetime('now')
+                   WHERE id = ?""",
+                (signature, expires_at, attestation_id),
+            )
+        return cur.rowcount > 0
+
+    # ============================================
+    # Trust Layer: share_codes
+    # ============================================
+    def create_share_code(self, owner_id: str, scope: list[str],
+                          max_access_count: int = 10,
+                          expires_in_seconds: int = 604800) -> dict:
+        """Generate a temporary share code for third-party verification.
+        
+        Args:
+            owner_id: candidate user_id
+            scope: list of claim_types (e.g. ['identity', 'collaboration'])
+            max_access_count: max times this code can be used (default 10)
+            expires_in_seconds: TTL in seconds (default 604800 = 7 days, max 2592000 = 30 days)
+        """
+        import secrets
+        from datetime import datetime, timedelta, timezone
+
+        _SHA_TZ = timezone(timedelta(hours=8))
+        now = datetime.now(_SHA_TZ)
+        expires_at = (now + timedelta(seconds=min(expires_in_seconds, 2592000))).isoformat()
+
+        code_id = str(uuid.uuid4())
+        code = "sc_" + secrets.token_hex(8)
+
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO share_codes
+                   (id, code, owner_id, scope, max_access_count, expires_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (code_id, code, owner_id, json.dumps(scope), max_access_count, expires_at),
+            )
+            row = conn.execute(
+                "SELECT * FROM share_codes WHERE id = ?", (code_id,),
+            ).fetchone()
+        result = dict(row) if row else {}
+        if "scope" in result and isinstance(result["scope"], str):
+            result["scope"] = json.loads(result["scope"])
+        return result
+
+    def get_share_code(self, code: str) -> dict | None:
+        """Look up a share_code by its code string."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM share_codes WHERE code = ?", (code,),
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        if "scope" in result and isinstance(result["scope"], str):
+            result["scope"] = json.loads(result["scope"])
+        return result
+
+    def consume_share_code(self, code: str) -> dict | None:
+        """Increment access_count for a share_code. Returns updated row or None if exhausted/expired."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM share_codes WHERE code = ? AND status = 'active'", (code,),
+            ).fetchone()
+            if not row:
+                return None
+
+            sc = dict(row)
+            # Check expiration
+            from datetime import datetime, timezone, timedelta
+            _SHA_TZ = timezone(timedelta(hours=8))
+            now = datetime.now(_SHA_TZ).isoformat()
+            if sc["expires_at"] < now:
+                conn.execute(
+                    "UPDATE share_codes SET status = 'expired' WHERE code = ?", (code,),
+                )
+                return None
+
+            # Check exhausted
+            if sc["access_count"] >= sc["max_access_count"]:
+                return None
+
+            conn.execute(
+                "UPDATE share_codes SET access_count = access_count + 1 WHERE code = ?",
+                (code,),
+            )
+            row2 = conn.execute(
+                "SELECT * FROM share_codes WHERE code = ?", (code,),
+            ).fetchone()
+        result = dict(row2) if row2 else {}
+        if "scope" in result and isinstance(result["scope"], str):
+            result["scope"] = json.loads(result["scope"])
+        return result
+
+    def revoke_share_code(self, code_id: str, owner_id: str) -> bool:
+        """Revoke a share_code (owner only)."""
+        with self.get_conn() as conn:
+            cur = conn.execute(
+                """UPDATE share_codes SET status = 'revoked'
+                   WHERE id = ? AND owner_id = ? AND status = 'active'""",
+                (code_id, owner_id),
+            )
+        return cur.rowcount > 0
+
+    def list_share_codes(self, owner_id: str) -> list[dict]:
+        """List all share codes for an owner."""
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM share_codes
+                   WHERE owner_id = ?
+                   ORDER BY created_at DESC""",
+                (owner_id,),
+            ).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            if "scope" in d and isinstance(d["scope"], str):
+                d["scope"] = json.loads(d["scope"])
+            results.append(d)
+        return results
+
+    # ============================================
+    # Trust Layer: verification_audit_log
+    # ============================================
+    def insert_verification_audit(self, share_code: str, owner_id: str,
+                                  verifier_info: str, attestation_ids: list[str],
+                                  result: str = "success") -> str:
+        """Log a third-party verification access. Returns audit log ID."""
+        log_id = str(uuid.uuid4())
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO verification_audit_log
+                   (id, share_code, owner_id, verifier_info, attestation_ids, result)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (log_id, share_code, owner_id, verifier_info,
+                 json.dumps(attestation_ids), result),
+            )
+        return log_id
+
+    def get_verification_audit_log(self, owner_id: str, limit: int = 50) -> list[dict]:
+        """Get verification audit trail for a candidate."""
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM verification_audit_log
+                   WHERE owner_id = ?
+                   ORDER BY created_at DESC LIMIT ?""",
+                (owner_id, limit),
+            ).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            if "attestation_ids" in d and isinstance(d["attestation_ids"], str):
+                d["attestation_ids"] = json.loads(d["attestation_ids"])
+            results.append(d)
+        return results
+
     def get_quota(self, user_id: str, resource: str, date: str):
         """Get quota record for a specific user + resource + date."""
         with self.get_conn() as conn:
@@ -1218,6 +2006,21 @@ class DatabaseManager:
                     "INSERT INTO quota_records (user_id, resource, date, used, daily_limit) VALUES (?, ?, ?, 1, ?)",
                     (user_id, resource, date, limit),
                 )
+        return True
+
+    def refund_quota(self, user_id: str, resource: str, date: str) -> bool:
+        """Refund 1 daily quota unit (best-effort). Returns True if decremented."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT used FROM quota_records WHERE user_id=? AND resource=? AND date=?",
+                (user_id, resource, date),
+            ).fetchone()
+            if not row or row[0] <= 0:
+                return False
+            conn.execute(
+                "UPDATE quota_records SET used=used-1 WHERE user_id=? AND resource=? AND date=? AND used>0",
+                (user_id, resource, date),
+            )
         return True
 
     # ============================================
@@ -1386,6 +2189,192 @@ class DatabaseManager:
         with self.get_conn() as conn:
             row = conn.execute("SELECT COUNT(*) as cnt FROM poems").fetchone()
         return row["cnt"] if row else 0
+
+    # ============================================
+    # Poetry challenge (信达雅)
+    # ============================================
+
+    @staticmethod
+    def _iso_week_key(dt=None) -> str:
+        from datetime import datetime, timezone
+        d = dt or datetime.now(timezone.utc)
+        iso = d.isocalendar()
+        return f"{iso.year}-W{iso.week:02d}"
+
+    @staticmethod
+    def _week_bounds_utc(dt=None):
+        """Return (starts_at, ends_at) ISO strings for the UTC ISO week containing dt."""
+        from datetime import datetime, timedelta, timezone
+        d = dt or datetime.now(timezone.utc)
+        # Monday 00:00 UTC → next Monday 00:00 UTC
+        monday = (d - timedelta(days=d.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        next_monday = monday + timedelta(days=7)
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        return monday.strftime(fmt), next_monday.strftime(fmt)
+
+    def pick_short_poem_for_challenge(self, max_chars: int = 80):
+        """Prefer short classical poems suitable for weekly translation."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT id, title, author, dynasty, theme, content, tags
+                   FROM poems
+                   WHERE LENGTH(content) > 0 AND LENGTH(content) <= ?
+                   ORDER BY RANDOM()
+                   LIMIT 1""",
+                (max_chars,),
+            ).fetchone()
+            if row:
+                return dict(row)
+            # Fallback: any poem
+            row = conn.execute(
+                """SELECT id, title, author, dynasty, theme, content, tags
+                   FROM poems
+                   ORDER BY RANDOM()
+                   LIMIT 1"""
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_challenge_round_by_week(self, week_key: str):
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM challenge_rounds WHERE week_key = ?",
+                (week_key,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_open_challenge_round(self):
+        """Current open round whose ends_at is still in the future (UTC)."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM challenge_rounds
+                   WHERE status = 'open' AND ends_at > datetime('now')
+                   ORDER BY starts_at DESC
+                   LIMIT 1"""
+            ).fetchone()
+        return dict(row) if row else None
+
+    def create_challenge_round(self, week_key: str, poem_id: int, title: str,
+                               starts_at: str, ends_at: str):
+        with self.get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO challenge_rounds
+                   (week_key, poem_id, title, status, starts_at, ends_at)
+                   VALUES (?, ?, ?, 'open', ?, ?)""",
+                (week_key, poem_id, title, starts_at, ends_at),
+            )
+            return cur.lastrowid
+
+    def ensure_current_challenge_round(self) -> dict | None:
+        """Return this week's open round, creating one from a short poem if needed.
+
+        Returns None when the poems library is empty (cannot seed a round).
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        week_key = self._iso_week_key(now)
+
+        existing = self.get_challenge_round_by_week(week_key)
+        if existing:
+            # Auto-close stale rounds from previous weeks still marked open
+            if existing.get("status") == "open" and existing.get("ends_at", "") <= now.strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ):
+                with self.get_conn() as conn:
+                    conn.execute(
+                        "UPDATE challenge_rounds SET status = 'closed' WHERE id = ?",
+                        (existing["id"],),
+                    )
+                existing["status"] = "closed"
+            else:
+                return existing
+
+        # Close any other lingering open rounds
+        with self.get_conn() as conn:
+            conn.execute(
+                """UPDATE challenge_rounds SET status = 'closed'
+                   WHERE status = 'open' AND week_key != ?""",
+                (week_key,),
+            )
+
+        poem = self.pick_short_poem_for_challenge()
+        if not poem:
+            return None
+
+        starts_at, ends_at = self._week_bounds_utc(now)
+        title = f"Xin-Da-Ya · {poem.get('title', '')}"
+        round_id = self.create_challenge_round(
+            week_key=week_key,
+            poem_id=poem["id"],
+            title=title,
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+        return self.get_challenge_round_by_week(week_key) or {
+            "id": round_id,
+            "week_key": week_key,
+            "poem_id": poem["id"],
+            "title": title,
+            "status": "open",
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+        }
+
+    def get_challenge_entry(self, round_id: int, user_id: str):
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM challenge_entries
+                   WHERE round_id = ? AND user_id = ?""",
+                (round_id, user_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_challenge_entry(
+        self,
+        round_id: int,
+        user_id: str,
+        translation: str,
+        note: str = "",
+        license_accepted: bool = False,
+    ):
+        """Create or update the user's single entry for a round. Returns entry dict."""
+        existing = self.get_challenge_entry(round_id, user_id)
+        with self.get_conn() as conn:
+            if existing:
+                conn.execute(
+                    """UPDATE challenge_entries
+                       SET translation = ?, note = ?, license_accepted = ?,
+                           updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (
+                        translation,
+                        note,
+                        1 if license_accepted else 0,
+                        existing["id"],
+                    ),
+                )
+                entry_id = existing["id"]
+            else:
+                cur = conn.execute(
+                    """INSERT INTO challenge_entries
+                       (round_id, user_id, translation, note, license_accepted)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        round_id,
+                        user_id,
+                        translation,
+                        note,
+                        1 if license_accepted else 0,
+                    ),
+                )
+                entry_id = cur.lastrowid
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM challenge_entries WHERE id = ?", (entry_id,)
+            ).fetchone()
+        return dict(row) if row else None
 
     def get_poetry_stats(self) -> dict:
         """Get poetry collection stats: total, dynasty distribution, theme distribution."""
@@ -1971,6 +2960,122 @@ class DatabaseManager:
         }
 
     # ============================================
+    # Admin dashboard statistics
+    # ============================================
+
+    def get_admin_stats(self) -> dict:
+        """Aggregate admin dashboard metrics: users, activity, system overview."""
+        with self.get_conn() as conn:
+            # ── User counts ──
+            total_users = conn.execute(
+                "SELECT COUNT(*) as cnt FROM users"
+            ).fetchone()["cnt"]
+
+            users_by_tier = {
+                r["tier"]: r["cnt"]
+                for r in conn.execute(
+                    "SELECT tier, COUNT(*) as cnt FROM users GROUP BY tier"
+                ).fetchall()
+            }
+
+            users_by_role = {
+                r["role"]: r["cnt"]
+                for r in conn.execute(
+                    "SELECT role, COUNT(*) as cnt FROM users GROUP BY role"
+                ).fetchall()
+            }
+
+            early_adopters = conn.execute(
+                "SELECT COUNT(*) as cnt FROM users WHERE is_early_adopter = 1"
+            ).fetchone()["cnt"]
+
+            new_users_today = conn.execute(
+                "SELECT COUNT(*) as cnt FROM users WHERE created_at >= date('now')"
+            ).fetchone()["cnt"]
+
+            new_users_week = conn.execute(
+                "SELECT COUNT(*) as cnt FROM users WHERE created_at >= date('now', '-7 days')"
+            ).fetchone()["cnt"]
+
+            # ── Activity counts ──
+            total_queries = conn.execute(
+                "SELECT COUNT(*) as cnt FROM product_events WHERE event_name = 'quiz_complete'"
+            ).fetchone()["cnt"]
+
+            def _safe_count(table: str) -> int:
+                try:
+                    return conn.execute(
+                        f"SELECT COUNT(*) as cnt FROM {table}"
+                    ).fetchone()["cnt"]
+                except Exception:
+                    return 0
+
+            total_resumes = _safe_count("resumes")
+            total_jobs = _safe_count("jobs")
+            total_matches = _safe_count("job_matches")
+            total_poems = _safe_count("poems")
+
+            # ── Daily active users (7-day window) ──
+            dau_rows = conn.execute(
+                """SELECT date(created_at) as day, COUNT(DISTINCT user_id) as cnt
+                   FROM product_events
+                   WHERE created_at >= date('now', '-7 days')
+                   GROUP BY day
+                   ORDER BY day DESC"""
+            ).fetchall()
+            dau_trend = [{"day": r["day"], "count": r["cnt"]} for r in dau_rows]
+
+            # ── Recent registrations ──
+            recent_users = conn.execute(
+                """SELECT id, email, name, tier, role, created_at
+                   FROM users
+                   ORDER BY created_at DESC LIMIT 10"""
+            ).fetchall()
+            recent = [
+                {
+                    "id": r["id"],
+                    "email": r["email"],
+                    "name": r["name"],
+                    "tier": r["tier"],
+                    "role": r["role"],
+                    "created_at": r["created_at"],
+                }
+                for r in recent_users
+            ]
+
+            # ── DB size ──
+            try:
+                page_count = conn.execute("PRAGMA page_count").fetchone()[0]
+                page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+                db_size_bytes = page_count * page_size
+            except Exception:
+                db_size_bytes = 0
+
+        return {
+            "users": {
+                "total": total_users,
+                "by_tier": users_by_tier,
+                "by_role": users_by_role,
+                "early_adopters": early_adopters,
+                "new_today": new_users_today,
+                "new_this_week": new_users_week,
+                "recent": recent,
+            },
+            "activity": {
+                "total_queries": total_queries,
+                "total_resumes": total_resumes,
+                "total_jobs": total_jobs,
+                "total_matches": total_matches,
+                "total_poems": total_poems,
+                "dau_trend": dau_trend,
+            },
+            "system": {
+                "db_size_bytes": db_size_bytes,
+                "db_size_mb": round(db_size_bytes / (1024 * 1024), 2),
+            },
+        }
+
+    # ============================================
     # Quiz sessions (HarmonyOS 答题游戏)
     # ============================================
     def create_quiz_session(self, user_id: str, questions_json: str) -> dict:
@@ -2314,267 +3419,199 @@ class DatabaseManager:
         return cur.rowcount > 0
 
     # ============================================
-    # Trust Layer: trust_memories (append-only)
+    # Timeline: career time-series events
     # ============================================
-    def insert_trust_memory(self, user_id: str, session_type: str,
-                            session_id: str, memory_content: dict,
-                            memory_level: int = 1) -> str:
-        """Insert an append-only trust memory. Returns memory_id."""
-        memory_id = str(uuid.uuid4())
-        with self.get_conn() as conn:
-            conn.execute(
-                """INSERT INTO trust_memories
-                   (id, user_id, session_type, session_id, memory_content, memory_level)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (memory_id, user_id, session_type, session_id,
-                 json.dumps(memory_content, ensure_ascii=False), memory_level),
-            )
-        return memory_id
+    def insert_timeline_event(
+        self,
+        user_id: str,
+        event_kind: str,
+        source_system: str,
+        *,
+        source_ref: str = "",
+        title: str = "",
+        summary: str = "",
+        payload: dict | None = None,
+        signal_quality: str = "observed",
+        confidence: float = 0.5,
+        weight_role: str = "evidence",
+        visibility: str = "private",
+        consent_scope: list | None = None,
+        occurred_at: str | None = None,
+        allow_duplicate: bool = False,
+    ) -> dict:
+        """Insert or upsert a timeline event. Returns the row as dict.
 
-    def get_trust_memories(self, user_id: str,
-                           session_type: str | None = None,
-                           limit: int = 50) -> list[dict]:
-        """Retrieve trust memories for a user, optionally filtered by type."""
-        if session_type:
-            sql = """SELECT * FROM trust_memories
-                     WHERE user_id = ? AND session_type = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            params = (user_id, session_type, limit)
-        else:
-            sql = """SELECT * FROM trust_memories
-                     WHERE user_id = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            params = (user_id, limit)
+        Idempotent on (user_id, source_system, source_ref, event_kind) when
+        source_ref is non-empty and allow_duplicate is False.
+        """
+        now = _dt_now().isoformat()
+        occurred = occurred_at or now
+        payload_json = json.dumps(payload or {}, ensure_ascii=False)
+        consent_json = json.dumps(consent_scope or [], ensure_ascii=False)
+        event_id = f"tle_{uuid.uuid4().hex[:8]}"
+
+        with self.get_conn() as conn:
+            existing = None
+            if source_ref and not allow_duplicate:
+                existing = conn.execute(
+                    """SELECT * FROM timeline_events
+                       WHERE user_id = ? AND source_system = ?
+                         AND source_ref = ? AND event_kind = ?
+                         AND status != 'deleted'
+                       ORDER BY recorded_at DESC LIMIT 1""",
+                    (user_id, source_system, source_ref, event_kind),
+                ).fetchone()
+
+            if existing:
+                conn.execute(
+                    """UPDATE timeline_events SET
+                         title = ?, summary = ?, payload_json = ?,
+                         signal_quality = ?, confidence = ?, weight_role = ?,
+                         visibility = ?, consent_scope = ?,
+                         occurred_at = ?, updated_at = datetime('now'),
+                         status = 'active'
+                       WHERE id = ?""",
+                    (
+                        title or existing["title"],
+                        summary or existing["summary"],
+                        payload_json,
+                        signal_quality,
+                        confidence,
+                        weight_role,
+                        visibility,
+                        consent_json,
+                        occurred,
+                        existing["id"],
+                    ),
+                )
+                row = conn.execute(
+                    "SELECT * FROM timeline_events WHERE id = ?",
+                    (existing["id"],),
+                ).fetchone()
+            else:
+                conn.execute(
+                    """INSERT INTO timeline_events
+                       (id, user_id, event_kind, occurred_at, recorded_at,
+                        source_system, source_ref, title, summary, payload_json,
+                        signal_quality, confidence, weight_role, visibility,
+                        consent_scope, status)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')""",
+                    (
+                        event_id, user_id, event_kind, occurred, now,
+                        source_system, source_ref, title, summary, payload_json,
+                        signal_quality, confidence, weight_role, visibility,
+                        consent_json,
+                    ),
+                )
+                row = conn.execute(
+                    "SELECT * FROM timeline_events WHERE id = ?",
+                    (event_id,),
+                ).fetchone()
+        return dict(row) if row else {}
+
+    def list_timeline_events(
+        self,
+        user_id: str,
+        *,
+        event_kind: str | None = None,
+        since: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+        include_deleted: bool = False,
+    ) -> list[dict]:
+        """List timeline events newest-first. cursor = occurred_at of last item."""
+        limit = max(1, min(int(limit or 50), 100))
+        clauses = ["user_id = ?"]
+        params: list = [user_id]
+        if not include_deleted:
+            clauses.append("status != 'deleted'")
+        if event_kind:
+            clauses.append("event_kind = ?")
+            params.append(event_kind)
+        if since:
+            clauses.append("occurred_at >= ?")
+            params.append(since)
+        if cursor:
+            clauses.append("occurred_at < ?")
+            params.append(cursor)
+        where = " AND ".join(clauses)
+        sql = f"""SELECT * FROM timeline_events
+                  WHERE {where}
+                  ORDER BY occurred_at DESC, recorded_at DESC
+                  LIMIT ?"""
+        params.append(limit)
         with self.get_conn() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
-    # ============================================
-    # Trust Layer: trust_attestations
-    # ============================================
-    def upsert_trust_attestation(self, candidate_id: str, claim_type: str,
-                                 claim_statement: str, evidence_type: str,
-                                 verification_status: str = "unverified",
-                                 evidence_refs: list | None = None,
-                                 confidence_score: float = 0.0) -> dict:
-        """Upsert a trust attestation claim card. Returns the attestation dict.
-        One row per (candidate_id, claim_type) — subsequent calls update the same row."""
-        attestation_id = str(uuid.uuid4())
-        refs_json = json.dumps(evidence_refs or [])
-        with self.get_conn() as conn:
-            conn.execute(
-                """INSERT INTO trust_attestations
-                   (id, candidate_id, claim_type, claim_statement, evidence_type,
-                    verification_status, evidence_refs, confidence_score)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(candidate_id, claim_type) DO UPDATE SET
-                     claim_statement = excluded.claim_statement,
-                     verification_status = excluded.verification_status,
-                     evidence_refs = excluded.evidence_refs,
-                     confidence_score = excluded.confidence_score,
-                     updated_at = datetime('now')""",
-                (attestation_id, candidate_id, claim_type, claim_statement,
-                 evidence_type, verification_status, refs_json, confidence_score),
-            )
-            row = conn.execute(
-                """SELECT * FROM trust_attestations
-                   WHERE candidate_id = ? AND claim_type = ?""",
-                (candidate_id, claim_type),
-            ).fetchone()
-        return dict(row) if row else {}
-
-    def get_trust_attestations(self, candidate_id: str) -> list[dict]:
-        """Get all attestation cards for a candidate."""
-        with self.get_conn() as conn:
-            rows = conn.execute(
-                """SELECT * FROM trust_attestations
-                   WHERE candidate_id = ?
-                   ORDER BY created_at DESC""",
-                (candidate_id,),
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-    def get_trust_attestation(self, attestation_id: str) -> dict | None:
-        """Get a single attestation by ID."""
+    def get_timeline_event(self, user_id: str, event_id: str) -> dict | None:
         with self.get_conn() as conn:
             row = conn.execute(
-                "SELECT * FROM trust_attestations WHERE id = ?", (attestation_id,),
+                """SELECT * FROM timeline_events
+                   WHERE id = ? AND user_id = ?""",
+                (event_id, user_id),
             ).fetchone()
         return dict(row) if row else None
 
-    def get_trust_attestations_by_type(self, candidate_id: str, claim_types: list[str] | None = None) -> list[dict]:
-        """Get attestations for candidate, optionally filtered by claim_type."""
-        if claim_types:
-            placeholders = ",".join("?" * len(claim_types))
-            sql = f"""SELECT * FROM trust_attestations
-                      WHERE candidate_id = ? AND claim_type IN ({placeholders})
-                      ORDER BY created_at DESC"""
-            params = [candidate_id] + claim_types
-        else:
-            sql = """SELECT * FROM trust_attestations
-                     WHERE candidate_id = ? ORDER BY created_at DESC"""
-            params = [candidate_id]
-        with self.get_conn() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
-
-    def update_attestation_signature(self, attestation_id: str, signature: str, expires_at: str) -> bool:
-        """Set the Ed25519 signature and expiration on an attestation."""
+    def soft_delete_timeline_event(self, user_id: str, event_id: str) -> bool:
         with self.get_conn() as conn:
             cur = conn.execute(
-                """UPDATE trust_attestations
-                   SET signature = ?, expires_at = ?, updated_at = datetime('now')
-                   WHERE id = ?""",
-                (signature, expires_at, attestation_id),
+                """UPDATE timeline_events SET status = 'deleted',
+                   updated_at = datetime('now')
+                   WHERE id = ? AND user_id = ? AND status != 'deleted'""",
+                (event_id, user_id),
             )
         return cur.rowcount > 0
 
-    # ============================================
-    # Trust Layer: share_codes
-    # ============================================
-    def create_share_code(self, owner_id: str, scope: list[str],
-                          max_access_count: int = 10,
-                          expires_in_seconds: int = 604800) -> dict:
-        """Generate a temporary share code for third-party verification.
-        
-        Args:
-            owner_id: candidate user_id
-            scope: list of claim_types (e.g. ['identity', 'collaboration'])
-            max_access_count: max times this code can be used (default 10)
-            expires_in_seconds: TTL in seconds (default 604800 = 7 days, max 2592000 = 30 days)
-        """
-        import secrets
-        from datetime import datetime, timedelta, timezone
-
-        _SHA_TZ = timezone(timedelta(hours=8))
-        now = datetime.now(_SHA_TZ)
-        expires_at = (now + timedelta(seconds=min(expires_in_seconds, 2592000))).isoformat()
-
-        code_id = str(uuid.uuid4())
-        code = "sc_" + secrets.token_hex(8)
-
-        with self.get_conn() as conn:
-            conn.execute(
-                """INSERT INTO share_codes
-                   (id, code, owner_id, scope, max_access_count, expires_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (code_id, code, owner_id, json.dumps(scope), max_access_count, expires_at),
-            )
-            row = conn.execute(
-                "SELECT * FROM share_codes WHERE id = ?", (code_id,),
-            ).fetchone()
-        result = dict(row) if row else {}
-        if "scope" in result and isinstance(result["scope"], str):
-            result["scope"] = json.loads(result["scope"])
-        return result
-
-    def get_share_code(self, code: str) -> dict | None:
-        """Look up a share_code by its code string."""
-        with self.get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM share_codes WHERE code = ?", (code,),
-            ).fetchone()
-        if not row:
+    def supersede_timeline_event(
+        self,
+        user_id: str,
+        event_id: str,
+        *,
+        title: str | None = None,
+        summary: str | None = None,
+        payload: dict | None = None,
+    ) -> dict | None:
+        """Mark old event superseded and insert a replacement active row."""
+        old = self.get_timeline_event(user_id, event_id)
+        if not old or old.get("status") == "deleted":
             return None
-        result = dict(row)
-        if "scope" in result and isinstance(result["scope"], str):
-            result["scope"] = json.loads(result["scope"])
-        return result
+        old_payload = old.get("payload_json") or "{}"
+        if isinstance(old_payload, str):
+            try:
+                old_payload = json.loads(old_payload)
+            except (json.JSONDecodeError, TypeError):
+                old_payload = {}
+        new_payload = payload if payload is not None else old_payload
+        new_row = self.insert_timeline_event(
+            user_id=user_id,
+            event_kind=old["event_kind"],
+            source_system=old["source_system"],
+            source_ref=old.get("source_ref") or "",
+            title=title if title is not None else old.get("title") or "",
+            summary=summary if summary is not None else old.get("summary") or "",
+            payload=new_payload if isinstance(new_payload, dict) else {},
+            signal_quality=old.get("signal_quality") or "observed",
+            confidence=float(old.get("confidence") or 0.5),
+            weight_role=old.get("weight_role") or "evidence",
+            visibility=old.get("visibility") or "private",
+            occurred_at=old.get("occurred_at"),
+            allow_duplicate=True,
+        )
+        with self.get_conn() as conn:
+            conn.execute(
+                """UPDATE timeline_events SET status = 'superseded',
+                   superseded_by = ?, updated_at = datetime('now')
+                   WHERE id = ? AND user_id = ?""",
+                (new_row.get("id"), event_id, user_id),
+            )
+        return new_row
 
-    def consume_share_code(self, code: str) -> dict | None:
-        """Increment access_count for a share_code. Returns updated row or None if exhausted/expired."""
+    def count_timeline_events(self, user_id: str) -> int:
         with self.get_conn() as conn:
             row = conn.execute(
-                "SELECT * FROM share_codes WHERE code = ? AND status = 'active'", (code,),
+                """SELECT COUNT(*) AS n FROM timeline_events
+                   WHERE user_id = ? AND status = 'active'""",
+                (user_id,),
             ).fetchone()
-            if not row:
-                return None
-
-            sc = dict(row)
-            # Check expiration
-            from datetime import datetime, timezone, timedelta
-            _SHA_TZ = timezone(timedelta(hours=8))
-            now = datetime.now(_SHA_TZ).isoformat()
-            if sc["expires_at"] < now:
-                conn.execute(
-                    "UPDATE share_codes SET status = 'expired' WHERE code = ?", (code,),
-                )
-                return None
-
-            # Check exhausted
-            if sc["access_count"] >= sc["max_access_count"]:
-                return None
-
-            conn.execute(
-                "UPDATE share_codes SET access_count = access_count + 1 WHERE code = ?",
-                (code,),
-            )
-            row2 = conn.execute(
-                "SELECT * FROM share_codes WHERE code = ?", (code,),
-            ).fetchone()
-        result = dict(row2) if row2 else {}
-        if "scope" in result and isinstance(result["scope"], str):
-            result["scope"] = json.loads(result["scope"])
-        return result
-
-    def revoke_share_code(self, code_id: str, owner_id: str) -> bool:
-        """Revoke a share_code (owner only)."""
-        with self.get_conn() as conn:
-            cur = conn.execute(
-                """UPDATE share_codes SET status = 'revoked'
-                   WHERE id = ? AND owner_id = ? AND status = 'active'""",
-                (code_id, owner_id),
-            )
-        return cur.rowcount > 0
-
-    def list_share_codes(self, owner_id: str) -> list[dict]:
-        """List all share codes for an owner."""
-        with self.get_conn() as conn:
-            rows = conn.execute(
-                """SELECT * FROM share_codes
-                   WHERE owner_id = ?
-                   ORDER BY created_at DESC""",
-                (owner_id,),
-            ).fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
-            if "scope" in d and isinstance(d["scope"], str):
-                d["scope"] = json.loads(d["scope"])
-            results.append(d)
-        return results
-
-    # ============================================
-    # Trust Layer: verification_audit_log
-    # ============================================
-    def insert_verification_audit(self, share_code: str, owner_id: str,
-                                  verifier_info: str, attestation_ids: list[str],
-                                  result: str = "success") -> str:
-        """Log a third-party verification access. Returns audit log ID."""
-        log_id = str(uuid.uuid4())
-        with self.get_conn() as conn:
-            conn.execute(
-                """INSERT INTO verification_audit_log
-                   (id, share_code, owner_id, verifier_info, attestation_ids, result)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (log_id, share_code, owner_id, verifier_info,
-                 json.dumps(attestation_ids), result),
-            )
-        return log_id
-
-    def get_verification_audit_log(self, owner_id: str, limit: int = 50) -> list[dict]:
-        """Get verification audit trail for a candidate."""
-        with self.get_conn() as conn:
-            rows = conn.execute(
-                """SELECT * FROM verification_audit_log
-                   WHERE owner_id = ?
-                   ORDER BY created_at DESC LIMIT ?""",
-                (owner_id, limit),
-            ).fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
-            if "attestation_ids" in d and isinstance(d["attestation_ids"], str):
-                d["attestation_ids"] = json.loads(d["attestation_ids"])
-            results.append(d)
-        return results
+        return int(row["n"]) if row else 0

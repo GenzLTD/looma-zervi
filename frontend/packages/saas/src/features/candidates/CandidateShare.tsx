@@ -10,6 +10,7 @@ import {
 } from "@looma/shared-core";
 import { createSaasApiClient } from "../../api/saasApiClient";
 import { parsePersonalityDetail } from "./personalityDetail";
+import TimelineL1Card from "./TimelineL1Card";
 import { MicroFeedbackBar } from "../../brand/components/MicroFeedbackBar";
 import { MICRO_FEEDBACK_CONTEXT } from "@looma/shared-core";
 
@@ -99,6 +100,8 @@ export default function CandidateShare() {
             </p>
           )}
         </div>
+
+        <TimelineL1Card summary={data.timeline_l1} />
 
         <div
           className="rounded-xl p-6 text-center"

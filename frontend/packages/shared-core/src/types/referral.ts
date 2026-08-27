@@ -44,6 +44,23 @@ export interface ProfileShareView {
   personality_detail?: Record<string, unknown> | string | null;
   xp: number;
   level: number;
+  /** L1 behaviour thickness — aggregates only (E5) */
+  timeline_l1?: TimelineL1Summary;
+}
+
+/** Public/HR-safe timeline thickness (no private payloads). */
+export interface TimelineL1Summary {
+  level: "l1" | string;
+  event_count: number;
+  evidence_count?: number;
+  project_count?: number;
+  check_in_count?: number;
+  has_thickness: boolean;
+  hypothesis_present?: boolean;
+  confidence: "empty" | "thin" | "building" | string;
+  message: string;
+  last_active_at?: string | null;
+  recent_labels?: string[];
 }
 
 export interface ImportShareRequest {

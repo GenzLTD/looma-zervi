@@ -1,4 +1,4 @@
-"""Payment plan contract loader — single source aligned with contracts/payment.v1.json."""
+"""Payment module — plans + provider registry + legacy exports."""
 
 from src.payment.plans import (
     DEFAULT_REGION,
@@ -7,6 +7,12 @@ from src.payment.plans import (
     normalize_region,
     resolve_region,
 )
+from src.payment.providers import (
+    get_provider,
+    list_configured_providers,
+    list_registered_providers,
+    BaseProvider,
+)
 
 __all__ = [
     "DEFAULT_REGION",
@@ -14,4 +20,8 @@ __all__ = [
     "list_plans_for_region",
     "normalize_region",
     "resolve_region",
+    "get_provider",
+    "list_configured_providers",
+    "list_registered_providers",
+    "BaseProvider",
 ]

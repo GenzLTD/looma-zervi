@@ -31,6 +31,7 @@ const PERSISTED_KEYS: (keyof StoreState)[] = [
   'fleet',
   'teamSize',
   'fleetMembers',
+  'spreadCount',
   'quizStep',
   'quizTraitCounts',
 ]
@@ -52,6 +53,7 @@ interface StoreState {
   fleet: Fleet | null
   teamSize: number
   fleetMembers: string[]
+  spreadCount: number
 
   // Quiz
   quizStep: number
@@ -74,6 +76,7 @@ const state: StoreState = {
   fleet: null,
   teamSize: 0,
   fleetMembers: [],
+  spreadCount: 0,
   quizStep: 0,
   quizTraitCounts: {},
   achievement: null,
@@ -138,6 +141,7 @@ export const store = {
     const fleet = data.fleet !== undefined ? data.fleet : undefined
     const team_size = data.team_size !== undefined ? data.team_size : data.teamSize
     const fleet_members = data.fleet_members !== undefined ? data.fleet_members : data.fleetMembers
+    const spread_count = data.spread_count !== undefined ? data.spread_count : data.spreadCount
     const personality_detail = data.personality_detail !== undefined ? data.personality_detail : undefined
 
     if (identity !== undefined) state.identity = identity
@@ -172,6 +176,7 @@ export const store = {
     if (fleet !== undefined) state.fleet = fleet
     if (team_size !== undefined) state.teamSize = team_size
     if (fleet_members !== undefined) state.fleetMembers = fleet_members
+    if (spread_count !== undefined) state.spreadCount = Number(spread_count) || 0
     persistToStorage()
     eventBus.emit('profile:loaded', state)
   },
@@ -246,6 +251,7 @@ export const store = {
     state.fleet = null
     state.teamSize = 0
     state.fleetMembers = []
+    state.spreadCount = 0
     state.quizStep = 0
     state.quizTraitCounts = {}
     state.achievement = null

@@ -11,15 +11,50 @@
     "CN": {
       "currency": "CNY",
       "payment_provider": "wechat",
+      "payment_providers": ["wechat", "huawei_iap"],
       "default": true,
       "label": "中国大陆"
     },
     "US": {
       "currency": "USD",
       "payment_provider": "stripe",
+      "payment_providers": ["stripe", "paypal", "airwallex"],
       "default": false,
       "label": "United States"
     }
+  },
+  "huawei_iap": {
+    "description": "HarmonyOS 元服务 IAP；客户端验签上报后服务端 RSA 验签并发货",
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/v1/payment/huawei/notify",
+        "auth": "required",
+        "body_camelCase": {
+          "purchaseData": "string JSON",
+          "purchaseSignature": "Base64",
+          "signatureAlgorithm": "SHA256WithRSA (optional)",
+          "expectedProductId": "optional",
+          "expectedAmount": "optional"
+        },
+        "status": "implemented"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/payment/huawei/verify",
+        "auth": "required",
+        "body_camelCase": {
+          "purchaseToken": "string",
+          "productId": "string"
+        },
+        "status": "stub_501"
+      }
+    ],
+    "env": [
+      "HUAWEI_IAP_PUBLIC_KEY",
+      "HUAWEI_IAP_SIGN_ALGORITHM",
+      "HUAWEI_IAP_TIER_MAP"
+    ]
   },
   "plans": [
     {

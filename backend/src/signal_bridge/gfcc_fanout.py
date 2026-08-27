@@ -1,6 +1,6 @@
 """GFCC chain-B fan-out — PlanetX → POST /v1/signal-ingest.
 
-Maps THOMAS personality_beacon (user_email_hash / data / X-Signal-Signature)
+Maps PlanetX personality_beacon (user_email_hash / data / X-Signal-Signature)
 onto frozen signal.envelope.v1 (user_id_hash / payload / X-Signature).
 
 Chain A (DemoPPI) is unchanged. Missing URL/secret, unmapped personality
@@ -53,7 +53,7 @@ def map_personality_type(label: str) -> str | None:
 
 
 def _gfcc_traits(traits):
-    """THOMAS traits may be string[] or {name,score}[]; GFCC requires the latter."""
+    """PlanetX traits may be string[] or {name,score}[]; GFCC requires the latter."""
     if not isinstance(traits, list) or not traits:
         return None
     out = []

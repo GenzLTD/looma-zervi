@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Looma Identity Contract v1",
+  "version": "1.0.0",
+  "description": "个人持久身份契约：looma user_id 为真源；JWT 仅为会话；tier 见 payment.v1.json。真源：looma-zervi/backend/contracts/identity.v1.json",
+
+  "principles": {
+    "persistent_id": "users.id (UUID) — 终身不变，跨端互认",
+    "session": "JWT access_token — 可刷新、可过期，不代表身份本体",
+    "credit_subject": "individual user_id only — 合伙人与 C 端信用均归属个人，非企业主体",
+    "tier_cross_ref": "backend/contracts/payment.v1.json",
+    "shared_core_mirror": "frontend/packages/shared-core/src/types/planetx-game.ts"
+  },
+
+  "linked_account_provider_enum": [
+    "email",
+    "wechat",
+    "google",
+    "huawei",
+    "apple",
+    "orcid"
+  ],
+
+  "linked_accounts": {
+    "description": "第三方登录/绑定账号；同一 user_id 可挂多条 provider。DB 真源：user_identities。",
+    "unique_constraint": ["provider", "provider_uid"],
+    "fields": {
+      "provider": {
+        "type": "string",
+        "enum_ref": "linked_account_provider_enum",
+        "required": true
+      },
+      "provider_uid": {
+        "type": "string",
+        "description": "平台侧用户 ID：Google sub / WeChat openid / email / ORCID iD",
+        "required": true
+      },
+      "provider_email": {
+        "type": "string",
+        "format": "email",
+        "required": false
+      },
+      "provider_name": {
+        "type": "string",
+        "required": false
+      },
+      "metadata_json": {
+        "type": "object",
+        "description": "头像、locale 等扩展；默认 {}",
+        "required": false
+      },
+      "verified": {
+        "type": "boolean",
+        "description": "provider 侧已校验（OAuth / 验证码）；email 密码注册视为 verified",
+        "default": false
+      },
+      "linked_at": {
+        "type": "string",
+        "format": "date-time",
+        "required": false
+      }
+    },
+    "status_enum": ["active", "pending_verification", "revoked"],
+    "example": [
+      {
+        "provider": "wechat",
+        "provider_uid": "oXXXX_miniapp_openid",
+        "provider_name": "",
+        "verified": true,
+        "status": "active"
+      },
+      {
+        "provider": "google",
+        "provider_uid": "109876543210987654321",
+        "provider_email": "user@example.com",
+        "provider_name": "Alex Chen",
+        "verified": true,
+        "status": "active"
+      }
+    ]
+  },
+
+  "planetx_identity_enum": ["explorer", "captain", "wanderer"],
+
+  "planetx_identity": {
+    "description": "PlanetX  onboarding 角色选择；持久化于 game_profiles.identity。写入：POST /v1/game/profile-sync。",
+    "enum_ref": "planetx_identity_enum",
+    "labels": {
+      "CN": {
+        "explorer": "星际探索者 · 求职模式",
+        "captain": "舰队舰长 · 组队模式",
+        "wanderer": "星际漫游者 · 探索模式"
+      },
+      "US": {
+        "explorer": "Stellar Explorer · Job Seeker",
+        "captain": "Fleet Captain · Team Mode",
+        "wanderer": "Cosmic Wanderer · Discovery Mode"
+      }
+    },
+    "default_visibility": "trusted"
+  },
+
+  "personality_type_enum": [
+    "星云艺术家",
+    "黑洞程序员",
+    "超新星领航员",
+    "双星星系守护者",
+    "脉冲星修行者",
+    "暗物质漫游者"
+  ],
+
+  "personality": {
+    "description": "人格测试结果；持久化于 game_profiles.personality_type / personality_detail (JSON)。",
+    "type_field": "personality_type",
+    "detail_field": "personality_detail",
+    "enum_ref": "personality_type_enum",
+    "default_visibility": "trusted"
+  },
+
+  "visibility_enum": ["everyone", "trusted", "private"],
+
+  "visibility": {
+    "description": "身份声明的可见性分级（ORCID 式：Everyone / Trusted parties / Only me）。",
+    "definitions": {
+      "everyone": {
+        "label": { "CN": "公开", "US": "Everyone" },
+        "description": "未登录或任意访客可见（公开档案页、分享链接）"
+      },
+      "trusted": {
+        "label": { "CN": "信任方", "US": "Trusted parties" },
+        "description": "已登录且存在业务关系：舰队成员、合伙人候选人池、已授权 match"
+      },
+      "private": {
+        "label": { "CN": "仅自己", "US": "Only me" },
+        "description": "仅本人与平台合规审计可见"
+      }
+    },
+    "defaults": {
+      "display_name": "everyone",
+      "avatar_url": "everyone",
+      "planetx_identity": "trusted",
+      "personality_type": "trusted",
+      "personality_detail": "private",
+      "tier_badge": "everyone",
+      "partner_stats": "trusted",
+      "resume_summary": "private",
+      "email": "private"
+    }
+  },
+
+  "claims": {
+    "description": "可版本化的身份声明块；每项可独立设置 visibility。未来 GET /v1/identity/profile 按 viewer 过滤。",
+    "claim_types": [
+      {
+        "key": "display_name",
+        "source": "users.name | provider_name",
+        "mutable": true
+      },
+      {
+        "key": "avatar_url",
+        "source": "linked_accounts.metadata_json",
+        "mutable": true
+      },
+      {
+        "key": "planetx_identity",
+        "source": "game_profiles.identity",
+        "enum_ref": "planetx_identity_enum"
+      },
+      {
+        "key": "personality_type",
+        "source": "game_profiles.personality_type",
+        "enum_ref": "personality_type_enum"
+      },
+      {
+        "key": "tier",
+        "source": "users.tier",
+        "cross_ref": "payment.v1.json#tier_enum",
+        "note": "商业身份；定义与价格在 payment 契约，此处仅引用"
+      },
+      {
+        "key": "partner",
+        "source": "derived",
+        "description": "合伙人角色：发布 job-posts、候选人池；归属 user_id"
+      },
+      {
+        "key": "trust_attestation",
+        "source": "trust.v1.json",
+        "description": "交集记忆体经智能体验证后的 claim 状态；非社交度数"
+      },
+      {
+        "key": "external_id",
+        "source": "linked_accounts",
+        "description": "orcid 等外部持久 ID，verified 后可用于信用背书",
+        "providers": ["orcid"]
+      }
+    ]
+  },
+
+  "profile_shape": {
+    "description": "IdentityProfile v1 — 聚合视图（实现时可拆成多 API，形状以此为准）。",
+    "type": "object",
+    "required": ["user_id", "linked_accounts", "visibility_policy_version"],
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Looma 持久身份真源"
+      },
+      "handle": {
+        "type": "string",
+        "pattern": "^[a-z0-9_]{3,32}$",
+        "description": "可选公开句柄；未设置时公开页用 user_id 短码",
+        "required": false
+      },
+      "display_name": { "type": "string" },
+      "avatar_url": { "type": "string", "format": "uri", "required": false },
+      "email": {
+        "type": "string",
+        "format": "email",
+        "visibility_default": "private"
+      },
+      "tier": {
+        "type": "string",
+        "description": "引用 payment.v1.json tier_enum；JWT 内嵌副本，以 DB 为准"
+      },
+      "role": {
+        "type": "string",
+        "enum": ["user", "partner", "admin"],
+        "default": "user",
+        "description": "partner = 可发 job-posts 的个人合伙人，非企业 HR"
+      },
+      "linked_accounts": {
+        "type": "array",
+        "items_ref": "linked_accounts.fields"
+      },
+      "planetx_identity": {
+        "type": "string",
+        "enum_ref": "planetx_identity_enum",
+        "nullable": true
+      },
+      "personality_type": {
+        "type": "string",
+        "enum_ref": "personality_type_enum",
+        "nullable": true
+      },
+      "game": {
+        "type": "object",
+        "description": "游戏化进度；详情见 GET /v1/game/profile",
+        "properties": {
+          "xp": { "type": "integer", "minimum": 0 },
+          "level": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "partner_profile": {
+        "type": "object",
+        "required": false,
+        "description": "合伙人公开摘要（个人信用，非企业）",
+        "properties": {
+          "active_job_posts": { "type": "integer", "minimum": 0 },
+          "tier_badge_visible": { "type": "boolean", "default": true }
+        }
+      },
+      "visibility": {
+        "type": "object",
+        "description": "用户对各 claim 的可见性覆盖；缺省用 visibility.defaults",
+        "additionalProperties": { "enum_ref": "visibility_enum" }
+      },
+      "visibility_policy_version": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 1
+      },
+      "created_at": { "type": "string", "format": "date-time" },
+      "updated_at": { "type": "string", "format": "date-time" }
+    }
+  },
+
+  "public_profile": {
+    "description": "可选公开页 URL 约定（P1）；空 record 时不对外 404，应展示最小公开壳 + 隐私提示。",
+    "url_patterns": {
+      "CN": "https://planetx.szbolent.com/p/{handle_or_short_id}",
+      "US": "https://genz.ltd/p/{handle_or_short_id}"
+    },
+    "minimal_public_fields": ["display_name", "tier_badge", "planetx_identity", "partner_profile"]
+  },
+
+  "endpoints": {
+    "implemented": [
+      {
+        "method": "POST",
+        "path": "/v1/auth/wechat",
+        "purpose": "微信登录 → 创建/查找 user + linked_account(wechat)"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/auth/google",
+        "purpose": "Google 登录 → user_identities"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/auth/huawei",
+        "purpose": "华为账号登录（authorizationCode）→ user_identities(provider=huawei)",
+        "body": {
+          "authorizationCode": "string (required)",
+          "state": "string (optional, not validated)"
+        },
+        "response": {
+          "access_token": "JWT",
+          "token_type": "bearer",
+          "expires_in": "number",
+          "user": {
+            "id": "uuid",
+            "name": "string",
+            "tier": "string",
+            "role": "string",
+            "is_new_user": "boolean"
+          }
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/v1/auth/bind",
+        "purpose": "绑定微信到已有 user_id（当前仅 wechat；huawei 走独立登录链路）"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/auth/profile",
+        "purpose": "账号层 profile（email, tier, role）"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/auth/identities",
+        "purpose": "列出 linked_accounts"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/game/profile-sync",
+        "purpose": "写入 planetx_identity / personality"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/game/profile",
+        "purpose": "读取 game 层 identity + 进度"
+      }
+    ],
+    "planned": [
+      {
+        "method": "GET",
+        "path": "/v1/identity/profile",
+        "purpose": "聚合 IdentityProfile；按 viewer + visibility 过滤"
+      },
+      {
+        "method": "PATCH",
+        "path": "/v1/identity/visibility",
+        "purpose": "更新各 claim 的 visibility"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/identity/public/{handle_or_id}",
+        "purpose": "公开档案页（everyone 字段 only）"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/auth/orcid",
+        "purpose": "ORCID OAuth 绑定为 external_id linked_account"
+      }
+    ]
+  },
+
+  "jwt_session_claims": {
+    "description": "JWT 内嵌字段；刷新后可能与 DB 短暂不一致，以 DB + refresh 为准。",
+    "standard": ["sub", "exp", "iat"],
+    "looma": ["tier", "email"],
+    "must_not_embed": ["personality_detail", "private resume", "full linked_accounts"]
+  },
+
+  "cross_client_invariants": [
+    "同一 user_id 在小程序 / Web / PWA / Harmony 共享 planetx_identity 与 personality",
+    "换端登录后 linked_accounts 并集不变",
+    "tier 变更走 payment 链，identity 契约只读引用",
+    "合伙人 job-posts 永远归属 user_id，不归属企业 entity"
+  ]
+}

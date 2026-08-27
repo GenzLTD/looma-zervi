@@ -5,7 +5,13 @@ from __future__ import annotations
 import logging
 from flask import Blueprint, request, jsonify, g
 from src.api.auth.decorators import require_auth
-from src.compliance.consent import get_consent_manager, ALL_SCOPES
+from src.compliance.consent import (
+    get_consent_manager,
+    ALL_SCOPES,
+    PRIMARY_TIERS,
+    CONSENT_PACKAGES,
+    SCOPE_LABELS_ZH,
+)
 from src.compliance.audit import get_audit_logger
 
 logger = logging.getLogger("looma.compliance.routes")
@@ -72,26 +78,21 @@ def consent_status():
         return jsonify(error="unauthorized", message="请先登录"), 401
     c = get_consent_manager()
     consents = c.get_user_consents(uid)
-    sm = {}
-    for s in ALL_SCOPES:
-        sm[s] = any(x["scope"] == s and x["status"] == "granted" for x in consents)
-    return jsonify(user_id=uid, consents=consents, status=sm)
+    sm = c.status_map(uid)
+    return jsonify(
+        user_id=uid,
+        consents=consents,
+        status=sm,
+        primary_tiers=list(PRIMARY_TIERS),
+        packages={k: sorted(v) for k, v in CONSENT_PACKAGES.items()},
+    )
 
 
 @compliance_bp.route("/consent/required", methods=["GET"])
 def required_consents():
-    sd = {
-        "resume_upload": "上传简历文件",
-        "resume_parse": "简历结构化提取",
-        "credit_query": "企业征信查询",
-        "credit_analyze": "征信文本分析",
-        "profile_share": "分享人格分析",
-        "ask_rag": "AI 知识库问答",
-        "job_match": "职位智能匹配",
-        "mbti_analyze": "MBTI 性格测评",
-        "navigator_memory": "对话记忆持久化",
-    }
     return jsonify(
         available_scopes=sorted(ALL_SCOPES),
-        details={s: sd.get(s, "") for s in sorted(ALL_SCOPES)},
+        primary_tiers=list(PRIMARY_TIERS),
+        packages={k: sorted(v) for k, v in CONSENT_PACKAGES.items()},
+        details={s: SCOPE_LABELS_ZH.get(s, s) for s in sorted(ALL_SCOPES)},
     )

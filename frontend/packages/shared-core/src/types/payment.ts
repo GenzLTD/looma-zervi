@@ -11,6 +11,9 @@ export type PaymentRegion = "CN" | "US";
 /** 支付方式 */
 export type PaymentTradeType = "NATIVE" | "JSAPI";
 
+/** 支付服务商（海外） */
+export type PaymentProvider = "wechat" | "stripe" | "paypal" | "airwallex";
+
 /** 定价计划（GET /v1/payment/plans 单条） */
 export interface PaymentPlan {
   tier: Tier;
@@ -27,7 +30,8 @@ export interface PaymentPlan {
 export interface PlansResponse {
   region: PaymentRegion;
   currency: string;
-  payment_provider: "wechat" | "stripe";
+  payment_provider: PaymentProvider;
+  payment_providers?: PaymentProvider[];  // Multi-provider regions (overseas)
   plans: PaymentPlan[];
   stub_mode?: boolean;
 }
@@ -105,3 +109,30 @@ export const PAYMENT_PRO_PRICES = {
 export const DEPRECATED_TIER_ALIASES = {
   basic: "supporter",
 } as const;
+
+/** POST /v1/payment/checkout 请求 */
+export interface CheckoutRequest {
+  provider: PaymentProvider;
+  tier: "supporter" | "pro";
+  mode?: "payment" | "subscription";
+  success_url?: string;
+  cancel_url?: string;
+}
+
+/** POST /v1/payment/checkout 响应 */
+export interface CheckoutResponse {
+  order_id: string;
+  out_trade_no: string;
+  provider: PaymentProvider;
+  checkout_url: string;
+  amount: number;
+  currency: string;
+  tier: "supporter" | "pro";
+}
+
+/** GET /v1/payment/providers 响应 */
+export interface ProvidersResponse {
+  region: PaymentRegion;
+  providers: PaymentProvider[];
+  stub_mode: boolean;
+}

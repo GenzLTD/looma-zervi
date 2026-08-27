@@ -31,6 +31,7 @@ export {
   createCreditApi,
   createAnalyticsApi,
   createComplianceApi,
+  createTrustApi,
 } from "../api/createMiniApi";
 
 export type { MiniApiClientInterface } from "../api/createMiniApi";
@@ -218,6 +219,21 @@ export type {
   ConsentRequiredError,
 } from "../types/compliance";
 
+// Trust (PlanetX attestations)
+export type {
+  TrustClaimType,
+  TrustVerificationStatus,
+  TrustEvidenceType,
+  TrustAttestation,
+  TrustAttestationsResponse,
+  CreateShareCodeRequest,
+  CreateShareCodeResponse,
+  TrustShareCode,
+  TrustShareCodesResponse,
+  TrustVerifyRequest,
+  TrustVerifyResponse,
+} from "../types/trust";
+
 // Constants
 export { QUIZ_QUESTIONS } from "../constants/quiz";
 export { PERSONALITY_MAP, PERSONALITY_FALLBACK_MAP } from "../constants/personality";
@@ -233,6 +249,15 @@ export {
 } from "../constants/quota";
 export { CLOSED_LOOP_EVENTS, MICRO_FEEDBACK_CONTEXT, ANALYTICS_SESSION_KEY } from "../constants/analytics";
 export { CONSENT_SCOPE_LABELS, CONSENT_SCOPE_DESCRIPTIONS } from "../constants/compliance";
+export {
+  CLAIM_LABEL,
+  STATUS_LABEL,
+  STATUS_COLOR,
+  EVIDENCE_LABEL,
+  EVIDENCE_FALLBACK,
+  CLAIM_FALLBACK,
+  STATUS_FALLBACK_KEY,
+} from "../constants/trustLabels";
 export { BRAND, BRAND_PLANETX, BRAND_SAAS } from "../types/brand";
 
 // Utils

@@ -196,3 +196,89 @@ class TestPoetryRoutes:
         data = resp.get_json()
         assert "total" in data
         assert "dynasties" in data
+
+
+def _register(client, email="challenge@test.com"):
+    resp = client.post(
+        "/v1/auth/register",
+        json={"email": email, "password": "secret123", "name": "Translator"},
+    )
+    assert resp.status_code in (200, 201)
+    data = resp.get_json()
+    return data["access_token"]
+
+
+class TestPoetryChallenge:
+    def test_current_empty_library(self, client, db):
+        resp = client.get("/v1/poetry/challenge/current")
+        assert resp.status_code == 503
+        data = resp.get_json()
+        assert data["error"] == "library_empty"
+
+    def test_current_seeds_round(self, client, db):
+        db.insert_poem(
+            title="静夜思",
+            author="李白",
+            dynasty="唐",
+            content="床前明月光，疑是地上霜。举头望明月，低头思故乡。",
+        )
+        resp = client.get("/v1/poetry/challenge/current")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["round"]["week_key"]
+        assert data["poem"]["title"] == "静夜思"
+        assert data["my_entry"] is None
+
+    def test_submit_requires_auth(self, client, db):
+        db.insert_poem(title="春晓", author="孟浩然", dynasty="唐", content="春眠不觉晓")
+        resp = client.post(
+            "/v1/poetry/challenge/entries",
+            json={
+                "translation": "Spring morning — birds everywhere.",
+                "license_accepted": True,
+            },
+        )
+        assert resp.status_code == 401
+
+    def test_submit_and_update(self, client, db):
+        db.insert_poem(
+            title="登鹳雀楼",
+            author="王之涣",
+            dynasty="唐",
+            content="白日依山尽，黄河入海流。欲穷千里目，更上一层楼。",
+        )
+        token = _register(client, "xdy@test.com")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        cur = client.get("/v1/poetry/challenge/current", headers=headers)
+        assert cur.status_code == 200
+        round_id = cur.get_json()["round"]["id"]
+
+        resp = client.post(
+            "/v1/poetry/challenge/entries",
+            headers=headers,
+            json={
+                "round_id": round_id,
+                "translation": "The sun sinks behind the hills; the Yellow River runs to the sea.",
+                "note": "Tried for cadence.",
+                "license_accepted": True,
+            },
+        )
+        assert resp.status_code == 200
+        entry = resp.get_json()["entry"]
+        assert "Yellow River" in entry["translation"]
+
+        resp2 = client.post(
+            "/v1/poetry/challenge/entries",
+            headers=headers,
+            json={
+                "round_id": round_id,
+                "translation": "Daylight dies on the hills; the Yellow River joins the sea.",
+                "license_accepted": True,
+            },
+        )
+        assert resp2.status_code == 200
+        assert "Daylight dies" in resp2.get_json()["entry"]["translation"]
+
+        again = client.get("/v1/poetry/challenge/current", headers=headers)
+        assert again.get_json()["my_entry"]["translation"].startswith("Daylight")

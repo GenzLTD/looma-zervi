@@ -264,6 +264,20 @@ def get_candidate(candidate_id: str):
                 except Exception as e:
                     logger.warning("trust_bridge: HR trust profile failed for %s: %s", candidate_user_id, e)
 
+                try:
+                    from src.timeline.events import build_timeline_l1_summary
+                    result["timeline_l1"] = build_timeline_l1_summary(db, candidate_user_id)
+                except Exception as e:
+                    logger.warning("timeline_l1: HR summary failed for %s: %s", candidate_user_id, e)
+                    result["timeline_l1"] = {
+                        "level": "l1",
+                        "event_count": 0,
+                        "has_thickness": False,
+                        "confidence": "empty",
+                        "message": "尚无足够行为沉淀，画像厚度不足",
+                        "recent_labels": [],
+                    }
+
         return jsonify(result)
     except Exception as e:
         return jsonify(error="get_failed", message=str(e)), 500

@@ -2,7 +2,7 @@
   "remotes": {
     "github": {
       "name": "origin",
-      "url": "git@github.com:szpeter2026/looma-zervi.git"
+      "url": "git@github-szpeter2026:szpeter2026/looma-zervi.git"
     },
     "gitee": {
       "name": "gitee",

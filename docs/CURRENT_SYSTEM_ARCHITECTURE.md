@@ -495,3 +495,16 @@ limiter = Limiter(
 **最后验证时间**：2026-07-09 11:56  
 **验证结果**：✅ 冒烟测试8/8通过，所有组件正常运行，架构稳定  
 **测试报告**：[SMOKE_TEST_REPORT_20260709.md](./SMOKE_TEST_REPORT_20260709.md)
+
+---
+
+## 相关：职业时间序列（2026-07-29）
+
+产品主线从「快照测评」转向「行为时间序列」。契约与一期 backlog：
+
+- [TIMELINE_EVENT_MODEL.md](./TIMELINE_EVENT_MODEL.md)
+- [TIMELINE_PHASE1_BACKLOG.md](./TIMELINE_PHASE1_BACKLOG.md)
+- `backend/contracts/timeline.v1.json`
+
+与 `product_events`（漏斗）、`narrative_events`（叙事）、`trust_memories`（信任证据）边界见模型文档 §1。参赛材料不作为本层真源。
+

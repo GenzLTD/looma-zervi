@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>T3 · T空间 职位管理</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{--bg:#F8FAFC;--card:#fff;--blue:#2563EB;--green:#059669;--t1:#1E293B;--t2:#64748B;--t3:#94A3B8;--bd:#E2E8F0;--sh:0 4px 6px -1px rgba(0,0,0,.07)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1920px;height:1080px;overflow:hidden;font-family:Inter,'Noto Sans SC',sans-serif;background:var(--bg);color:var(--t1)}
+.top{height:64px;background:#fff;border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;padding:0 28px}
+.brand{display:flex;align-items:center;gap:12px;font-weight:600}
+.logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#2563EB,#4F46E5)}
+.crumb{color:var(--t2);font-size:13px;font-weight:400}
+.user{display:flex;align-items:center;gap:12px}
+.av{width:32px;height:32px;border-radius:50%;background:#DBEAFE;display:grid;place-items:center;font-weight:700;color:var(--blue);font-size:12px}
+.wrap{padding:20px 28px}
+.head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:16px}
+.head h1{font-size:24px}.head p{font-size:13px;color:var(--t2);margin-top:4px}
+.right{display:flex;gap:10px}
+.search{width:260px;height:40px;border:1px solid var(--bd);border-radius:8px;padding:0 12px;background:#fff;font-size:13px;color:var(--t3);display:flex;align-items:center}
+.btn{height:40px;padding:0 18px;border-radius:8px;border:none;background:var(--blue);color:#fff;font-size:13px;font-weight:600}
+.filters{display:flex;align-items:center;gap:16px;margin-bottom:16px;background:#fff;border-radius:8px;box-shadow:var(--sh);padding:12px 16px}
+.tab{font-size:13px;color:var(--t2);padding:6px 12px;border-radius:6px;cursor:default}
+.tab.on{background:#EFF6FF;color:var(--blue);font-weight:600}
+.select{font-size:12px;color:var(--t2);border:1px solid var(--bd);border-radius:6px;padding:6px 10px;background:#F8FAFC}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}
+.stat{background:#fff;border-radius:8px;box-shadow:var(--sh);padding:18px 20px}
+.stat .l{font-size:12px;color:var(--t2);margin-bottom:8px}
+.stat .v{font-size:28px;font-weight:700}
+.stat .t{font-size:12px;color:var(--green);margin-top:6px}
+.table{background:#fff;border-radius:8px;box-shadow:var(--sh);overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:14px 16px;background:#F8FAFC;color:var(--t2);font-weight:500;border-bottom:1px solid var(--bd)}
+td{padding:14px 16px;border-bottom:1px solid var(--bd);height:56px}
+tr:nth-child(even) td{background:#FCFDFE}
+tr:hover td{background:#EFF6FF}
+.job{font-weight:500}.job small{display:inline-block;margin-left:8px;font-size:11px;background:#EEF2FF;color:#4F46E5;padding:2px 6px;border-radius:4px;font-weight:500}
+.bar{width:80px;height:6px;background:#E2E8F0;border-radius:99px;overflow:hidden;display:inline-block;vertical-align:middle;margin-left:8px}
+.bar i{display:block;height:100%;background:var(--blue)}
+.match{font-weight:600}.g{color:var(--green)}.b{color:var(--blue)}.m{color:var(--t3)}
+.st{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:500}
+.st.on{background:#D1FAE5;color:var(--green)}.st.off{background:#F1F5F9;color:var(--t3)}
+.ops{color:var(--t2);letter-spacing:6px}
+.pager{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;font-size:13px;color:var(--t2)}
+.pages{display:flex;gap:6px}
+.pages span{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;border:1px solid var(--bd)}
+.pages .on{background:var(--blue);color:#fff;border-color:var(--blue)}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="brand"><div class="logo"></div>T空间 <span class="crumb">招聘 › 职位管理</span></div>
+  <div class="user"><span>🔔</span><div class="av">J</div>Jason</div>
+</div>
+<div class="wrap">
+  <div class="head">
+    <div><h1>职位管理</h1><p>共 24 个活跃职位</p></div>
+    <div class="right"><div class="search">🔍 搜索职位、部门…</div><button class="btn">+ 创建职位</button></div>
+  </div>
+  <div class="filters">
+    <span class="tab on">全部(24)</span><span class="tab">招聘中(18)</span><span class="tab">已暂停(4)</span><span class="tab">已关闭(2)</span>
+    <span style="flex:1"></span>
+    <span class="select">部门 ▾</span><span class="select">截止日期 ▾</span><span class="select">匹配度 ▾</span>
+    <span class="select">☰ 列表</span>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="l">活跃职位</div><div class="v">24</div><div class="t">本周 +3</div></div>
+    <div class="stat"><div class="l">收到简历</div><div class="v">1,856</div><div class="t">本周 +127</div></div>
+    <div class="stat"><div class="l">面试中</div><div class="v">43</div><div class="t">本周 +8</div></div>
+    <div class="stat"><div class="l">平均匹配度</div><div class="v">78%</div><div class="t">本周 +2%</div></div>
+  </div>
+  <div class="table">
+    <table>
+      <thead><tr><th>职位名称</th><th>部门</th><th>招聘中</th><th>候选人数</th><th>匹配度</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+        <tr><td class="job">高级产品经理 <small>全职</small></td><td>产品中心</td><td>2</td><td>48 <span class="bar"><i style="width:70%"></i></span></td><td class="match g">92%</td><td><span class="st on">招聘中</span></td><td class="ops">👁 ✎ ⋯</td></tr>
+        <tr><td class="job">增长策略师 <small>全职</small></td><td>增长部</td><td>1</td><td>36 <span class="bar"><i style="width:55%"></i></span></td><td class="match g">88%</td><td><span class="st on">招聘中</span></td><td class="ops">👁 ✎ ⋯</td></tr>
+        <tr><td class="job">用户体验设计师 <small>全职</small></td><td>设计部</td><td>1</td><td>29 <span class="bar"><i style="width:45%"></i></span></td><td class="match b">81%</td><td><span class="st on">招聘中</span></td><td class="ops">👁 ✎ ⋯</td></tr>
+        <tr><td class="job">后端工程师 <small>全职</small></td><td>研发中心</td><td>3</td><td>112 <span class="bar"><i style="width:85%"></i></span></td><td class="match b">76%</td><td><span class="st on">招聘中</span></td><td class="ops">👁 ✎ ⋯</td></tr>
+        <tr><td class="job">数据分析师 <small>全职</small></td><td>数据部</td><td>1</td><td>41 <span class="bar"><i style="width:50%"></i></span></td><td class="match b">74%</td><td><span class="st on">招聘中</span></td><td class="ops">👁 ✎ ⋯</td></tr>
+        <tr><td class="job">AI 产品经理 <small>全职</small></td><td>产品中心</td><td>1</td><td>22 <span class="bar"><i style="width:35%"></i></span></td><td class="match g">90%</td><td><span class="st on">招聘中</span></td><td class="ops">👁 ✎ ⋯</td></tr>
+        <tr><td class="job">HRBP <small>全职</small></td><td>人力资源</td><td>0</td><td>18 <span class="bar"><i style="width:25%"></i></span></td><td class="match m">68%</td><td><span class="st off">已暂停</span></td><td class="ops">👁 ✎ ⋯</td></tr>
+        <tr><td class="job">前端工程师 <small>实习</small></td><td>研发中心</td><td>2</td><td>67 <span class="bar"><i style="width:60%"></i></span></td><td class="match b">79%</td><td><span class="st on">招聘中</span></td><td class="ops">👁 ✎ ⋯</td></tr>
+      </tbody>
+    </table>
+    <div class="pager">
+      <span>显示 1-8 / 共 24 条</span>
+      <div class="pages"><span>‹</span><span class="on">1</span><span>2</span><span>3</span><span>›</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -24,7 +24,7 @@ test.describe("compliance consent @live", () => {
     const allowed = await checkCompanyCredit(token, "测试科技有限公司");
     expect(allowed.status).toBe(200);
     expect(allowed.body.extracted).toBeTruthy();
-    expect(allowed.body.warning).toContain("非正式征信");
+    expect(allowed.body.warning).toContain("AI 训练知识评估");
   });
 
   test("consent status reflects granted scope", async () => {

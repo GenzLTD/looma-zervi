@@ -80,6 +80,10 @@ def test_profile_share_view_and_import(client):
     view = view_resp.get_json()
     assert view["personality_type"] == "星云艺术家"
     assert view["personality_detail"]["emoji"] == "🎨"
+    assert "timeline_l1" in view
+    assert view["timeline_l1"]["level"] == "l1"
+    assert "message" in view["timeline_l1"]
+    assert "has_thickness" in view["timeline_l1"]
 
     ent_resp = client.post(
         "/v1/enterprise/create",

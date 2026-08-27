@@ -8,6 +8,8 @@ export const API_ROUTES = {
   AUTH_REGISTER: "/v1/auth/register",
   AUTH_LOGIN: "/v1/auth/login",
   AUTH_WECHAT: "/v1/auth/wechat",
+  AUTH_GOOGLE: "/v1/auth/google",
+  AUTH_HUAWEI: "/v1/auth/huawei",
   AUTH_BIND: "/v1/auth/bind",
   AUTH_PROFILE: "/v1/auth/profile",
   AUTH_REFRESH: "/v1/auth/refresh",
@@ -68,30 +70,54 @@ export const API_ROUTES = {
   JOBS_SEARCH: "/v1/jobs/search",      // GET — 关键字搜索
   JOBS_RECOMMEND: "/v1/jobs/recommend",// GET — AI 推荐
   JOBS_DETAIL: "/v1/jobs",             // GET /:id — 拼接方式: `${JOBS_DETAIL}/${jobId}`
+  JOBS_SEED_DEMO: "/v1/jobs/seed-demo", // POST — 持久化演示职位（HR owner）
+  JOBS_APPLICATIONS: "/v1/jobs",       // GET `${JOBS_APPLICATIONS}/${jobId}/applications`
+
+  // Applications (seeker apply → HR visible)
+  APPLICATION: "/v1/application",      // POST create / GET list mine
+  // DELETE/GET one: `${APPLICATION}/${applicationId}`
+  // GET report: `${APPLICATION}/${applicationId}/report` — CONTRACT_APPLICATION_REPORT.md
 
   // Resume
   RESUME_PARSE: "/v1/resume/parse",
   RESUME_UPLOAD: "/v1/resume/upload",
+  RESUME_INGEST: "/v1/resume/ingest",
   RESUME_IMPROVE: "/v1/resume/improve",
   // Resume — HarmonyOS 简历管理
   RESUME_LIST: "/v1/resume/list",        // GET — 用户简历列表
   RESUME_ANALYSIS: "/v1/resume/analysis",// GET — AI 分析 (?resume_id=xxx)
   RESUME_DELETE: "/v1/resume",           // DELETE /:id — 拼接方式: `${RESUME_DELETE}/${resumeId}`
 
-  // Reports
+  // Reports (ops daily/weekly/monthly)
   REPORTS_GENERATE: "/v1/reports/generate",
   REPORTS_LIST: "/v1/reports/list",
+
+  // Match reports (user-owned resume×JD persistence)
+  MATCH_REPORTS: "/v1/match-reports",
 
   // Payment
   PAYMENT_PLANS: "/v1/payment/plans",
   PAYMENT_STATUS: "/v1/payment/status",
   PAYMENT_UPGRADE: "/v1/payment/upgrade",
+  PAYMENT_PROVIDERS: "/v1/payment/providers",
+  PAYMENT_CHECKOUT: "/v1/payment/checkout",
   PAYMENT_WECHAT_ORDER: "/v1/payment/wechat/order",
   PAYMENT_WECHAT_NOTIFY: "/v1/payment/wechat/notify",
 
   // Credit (company evaluation — tripod leg 3: Resume → Job → Company)
+  // ⭐ Powered by QCC (企查查) official data source
   CREDIT_ANALYZE: "/v1/credit/analyze",
   CREDIT_CHECK_COMPANY: "/v1/credit/check-company",
+  CREDIT_CHECK_COMPANY_DETAIL: "/v1/credit/check-company/detail",
+
+  // Poetry library + Xin-Da-Ya challenge (overseas)
+  POETRY_SEARCH: "/v1/poetry/search",
+  POETRY_BROWSE: "/v1/poetry/browse",
+  POETRY_RANDOM: "/v1/poetry/random",
+  POETRY_STATS: "/v1/poetry/stats",
+  POETRY_AUTHORS: "/v1/poetry/authors",
+  POETRY_CHALLENGE_CURRENT: "/v1/poetry/challenge/current",
+  POETRY_CHALLENGE_ENTRIES: "/v1/poetry/challenge/entries",
 
   // Health
   HEALTH: "/health",
@@ -116,9 +142,42 @@ export const API_ROUTES = {
   ANALYTICS_FUNNEL: "/v1/analytics/funnel",
   FEEDBACK_MICRO: "/v1/feedback/micro",
 
+  // Career timeline (behaviour time-series)
+  TIMELINE: "/v1/timeline",
+  TIMELINE_EVENTS: "/v1/timeline/events",
+  TIMELINE_GROWTH: "/v1/timeline/growth",
+  TIMELINE_BACKFILL: "/v1/timeline/bridge/backfill",
+  TIMELINE_EXPORT: "/v1/timeline/export",
+  TIMELINE_DELETE_ME: "/v1/timeline/me",
+
+  // HarmonyOS cloud kits (IAP / Push / Card)
+  HUAWEI_IAP_NOTIFY: "/v1/payment/huawei/notify",
+  HUAWEI_IAP_VERIFY: "/v1/payment/huawei/verify",
+  HUAWEI_PUSH_REGISTER: "/v1/push/huawei/register",
+  HUAWEI_PUSH_UNREGISTER: "/v1/push/huawei/unregister",
+  HUAWEI_PUSH_SEND: "/v1/push/huawei/send",
+  HUAWEI_PUSH_BATCH: "/v1/push/huawei/batch",
+  HUAWEI_CARD: "/v1/card",
+  HUAWEI_CARD_BATCH: "/v1/card/batch",
+
+  // Trust protocol (attestation cards + share_code verify)
+  TRUST_ATTESTATIONS: "/v1/trust/attestations",
+  TRUST_REFRESH: "/v1/trust/refresh",
+  TRUST_SHARE_CODE: "/v1/trust/share-code",
+  TRUST_SHARE_CODES: "/v1/trust/share-codes",
+  TRUST_AUDIT_LOG: "/v1/trust/audit-log",
+  TRUST_VERIFY: "/v1/trust/verify",
+  TRUST_PUBLIC_KEY: "/v1/trust/.well-known/public-key",
+
   // Compliance (PIPL consent gate)
   COMPLIANCE_CONSENT_GRANT: "/v1/compliance/consent/grant",
   COMPLIANCE_CONSENT_REVOKE: "/v1/compliance/consent/revoke",
   COMPLIANCE_CONSENT_STATUS: "/v1/compliance/consent/status",
   COMPLIANCE_CONSENT_REQUIRED: "/v1/compliance/consent/required",
+
+  // Admin dashboard
+  ADMIN_STATS: "/v1/admin/stats",
+  ADMIN_FUNNEL: "/v1/admin/funnel",
+  ADMIN_NARRATIVE: "/v1/admin/narrative",
+  ADMIN_HEALTH: "/v1/admin/health",
 } as const;

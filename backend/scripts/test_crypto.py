@@ -2,7 +2,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from utils.crypto import load_or_generate_keys, sign_attestation, verify_attestation, get_public_key_pem
+from utils.crypto import _load_or_generate_keys, sign_attestation, verify_attestation, get_public_key_pem
 
 # Test key generation
 pem = get_public_key_pem()

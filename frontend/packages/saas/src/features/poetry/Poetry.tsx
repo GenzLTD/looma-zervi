@@ -11,7 +11,9 @@
  * Uses SaaS brand tokens + Tailwind utility classes.
  */
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { createSaasApiClient } from "../../api/saasApiClient";
+import { IS_OVERSEAS } from "../../config/region";
 
 interface Poem {
   id: number;
@@ -177,12 +179,23 @@ export default function Poetry() {
   return (
     <div className="max-w-5xl mx-auto">
       {/* Header */}
-      <h1
-        className="text-2xl font-bold mb-1"
-        style={{ color: "var(--color-text-primary)" }}
-      >
-        诗词文库
-      </h1>
+      <div className="flex items-start justify-between gap-4 mb-1">
+        <h1
+          className="text-2xl font-bold"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          诗词文库
+        </h1>
+        {IS_OVERSEAS && (
+          <Link
+            to="/poetry/challenge"
+            className="text-sm shrink-0 no-underline px-3 py-1.5 rounded-lg text-white"
+            style={{ backgroundColor: "var(--color-primary)" }}
+          >
+            Translate Challenge
+          </Link>
+        )}
+      </div>
       <p
         className="text-sm mb-5"
         style={{ color: "var(--color-text-secondary)" }}
@@ -423,7 +436,8 @@ export default function Poetry() {
       {mode === "browse" && !loading && browseResult && browseResult.items.length === 0 && (
         <div className="flex flex-col items-center py-12" style={{ color: "var(--color-text-muted)" }}>
           <span className="text-4xl opacity-20 mb-2">📖</span>
-          <p>暂无诗词数据，请先运行 import_poetry 导入</p>
+          <p className="mb-1">诗词文库正在筹备中</p>
+          <p className="text-xs opacity-60">请稍后再来浏览经典诗词</p>
         </div>
       )}
 

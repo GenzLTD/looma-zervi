@@ -202,9 +202,15 @@ export class ApiClient {
     const query = buildQueryString(options.params);
     const fullUrl = `${this.baseURL}${url}${query}`;
     const isFormData = typeof FormData !== "undefined" && data instanceof FormData;
+    // Credential endpoints: never send stale Bearer, never treat 401 as session expiry
+    const isCredentialAuth =
+      url.includes("/v1/auth/login") ||
+      url.includes("/v1/auth/register") ||
+      url.includes("/v1/auth/google") ||
+      url.includes("/v1/auth/wechat");
     const headers = await this.buildHeaders(
       isFormData ? options.headers : { "Content-Type": "application/json", ...options.headers },
-      true
+      !isCredentialAuth
     );
 
     const controller = new AbortController();
@@ -229,15 +235,25 @@ export class ApiClient {
     clearTimeout(timer);
 
     if (response.status === 401) {
-      await this.clearToken();
-      this.onUnauthorized?.();
       const error = await this.parseError(response);
-      throw new ApiError(response.status, error, "Unauthorized");
+      if (!isCredentialAuth) {
+        await this.clearToken();
+        this.onUnauthorized?.();
+      }
+      throw new ApiError(
+        response.status,
+        error,
+        (error && (error.message || error.error)) || "Unauthorized"
+      );
     }
 
     if (!response.ok) {
       const error = await this.parseError(response);
-      throw new ApiError(response.status, error, `HTTP ${response.status}`);
+      throw new ApiError(
+        response.status,
+        error,
+        (error && (error.message || error.error)) || `HTTP ${response.status}`
+      );
     }
 
     const contentType = response.headers.get("Content-Type") || "";

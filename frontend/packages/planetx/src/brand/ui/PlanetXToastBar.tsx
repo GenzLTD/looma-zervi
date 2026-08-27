@@ -3,32 +3,36 @@
  * Types: info / success / warning / error
  * Positioned at top center, slides in with fadeIn.
  */
-import type { PlanetXToastBarProps } from "./types";
+import type { PlanetXToastBarProps, ToastType } from "./types";
+import PlanetXIcon, { type PlanetXIconName } from "./PlanetXIcon";
 
-const TYPE_STYLES: Record<string, { color: string; border: string; bg: string; icon: string }> = {
+const TYPE_STYLES: Record<
+  ToastType,
+  { color: string; border: string; bg: string; icon: PlanetXIconName }
+> = {
   info: {
     color: "var(--px-color-cyan)",
     border: "1px solid rgba(0, 229, 255, 0.5)",
     bg: "rgba(0, 229, 255, 0.08)",
-    icon: "ℹ️",
+    icon: "info",
   },
   success: {
     color: "var(--px-color-accent)",
     border: "1px solid rgba(200, 255, 80, 0.5)",
     bg: "rgba(200, 255, 80, 0.08)",
-    icon: "✓",
+    icon: "check",
   },
   warning: {
     color: "var(--px-color-warning)",
     border: "1px solid rgba(255, 165, 2, 0.5)",
     bg: "rgba(255, 165, 2, 0.08)",
-    icon: "⚠",
+    icon: "warning",
   },
   error: {
     color: "var(--px-color-danger)",
     border: "1px solid rgba(255, 71, 87, 0.5)",
     bg: "rgba(255, 71, 87, 0.08)",
-    icon: "✗",
+    icon: "error",
   },
 };
 
@@ -65,7 +69,7 @@ export default function PlanetXToastBar({
         maxWidth: "90vw",
       }}
     >
-      <span>{s.icon}</span>
+      <PlanetXIcon name={s.icon} size={16} color="currentColor" />
       <span>{message}</span>
     </div>
   );

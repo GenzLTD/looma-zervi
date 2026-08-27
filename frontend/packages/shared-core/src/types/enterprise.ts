@@ -29,6 +29,8 @@ export interface Candidate {
   profile_data?: Record<string, unknown>;
   created_at?: string;
   imported?: boolean;
+  trust_profile?: { attestations?: unknown[]; total?: number };
+  timeline_l1?: import("./referral").TimelineL1Summary;
 }
 
 export interface AddCandidateRequest {

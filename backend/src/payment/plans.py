@@ -66,6 +66,7 @@ def list_plans_for_region(region: str | None = None) -> dict[str, Any]:
         "region": code,
         "currency": currency,
         "payment_provider": region_meta["payment_provider"],
+        "payment_providers": region_meta.get("payment_providers", [region_meta["payment_provider"]]),
         "plans": plans,
     }
 

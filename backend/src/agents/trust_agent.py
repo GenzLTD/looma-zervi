@@ -15,6 +15,8 @@ logger = logging.getLogger("looma.trust_agent")
 
 _CLAIM_TEMPLATES = {
     "identity": "在压力下倾向战略型决策",
+    "identity_resume": "已沉淀可核验的职业经历与技能主张",
+    "identity_match": "已完成面向真实职位的匹配扫描",
     "collaboration": "能与不同风格的人完成协作任务",
     "communication": "能清晰表达复杂方案",
     "influence": "能带动他人参与和行动",
@@ -70,8 +72,11 @@ def generate_attestations(user_id: str, db) -> list[dict]:
     memories = db.get_trust_memories(user_id, limit=200)
     results = []
 
-    # ── 1. Identity (quiz) ──
+    # ── 1. Identity (quiz preferred; else resume / match bridges) ──
     quiz_memories = [m for m in memories if m["session_type"] == "quiz"]
+    resume_memories = [m for m in memories if m["session_type"] == "resume"]
+    match_memories = [m for m in memories if m["session_type"] == "match"]
+
     if quiz_memories:
         consistency = _calc_quiz_consistency(quiz_memories)
         if consistency > 0.85:
@@ -94,33 +99,79 @@ def generate_attestations(user_id: str, db) -> list[dict]:
             confidence_score=round(confidence, 2),
         )
         results.append(attestation)
-        logger.info("trust_agent: identity attestation for %s → %s (consistency=%.2f)", user_id, status, consistency)
+        logger.info(
+            "trust_agent: identity attestation for %s → %s (consistency=%.2f)",
+            user_id, status, consistency,
+        )
+    elif resume_memories or match_memories:
+        # T-space resume/match write memories but Agent v0 previously ignored them.
+        # Self-claim alone never becomes "verified".
+        refs = [m["id"] for m in resume_memories] + [m["id"] for m in match_memories]
+        if resume_memories and match_memories:
+            status, confidence = "weak", 0.45
+            statement = _CLAIM_TEMPLATES["identity_resume"]
+            evidence_type = "resume"
+        elif resume_memories:
+            status, confidence = "weak", 0.35
+            statement = _CLAIM_TEMPLATES["identity_resume"]
+            evidence_type = "resume"
+        else:
+            status, confidence = "unverified", 0.25
+            statement = _CLAIM_TEMPLATES["identity_match"]
+            evidence_type = "match_scan"
 
-    # ── 2. Collaboration (fleet) ──
+        attestation = db.upsert_trust_attestation(
+            candidate_id=user_id,
+            claim_type="identity",
+            claim_statement=statement,
+            evidence_type=evidence_type,
+            verification_status=status,
+            evidence_refs=refs,
+            confidence_score=confidence,
+        )
+        results.append(attestation)
+        logger.info(
+            "trust_agent: identity (bridge) for %s → %s (resume=%d match=%d)",
+            user_id, status, len(resume_memories), len(match_memories),
+        )
+
+    # ── 2. Collaboration (fleet + match consensus) ──
     fleet_memories = [m for m in memories if m["session_type"] == "fleet"]
-    if fleet_memories:
-        consensus_count = _count_consensus(fleet_memories)
-        if len(fleet_memories) >= 3 and consensus_count >= 2:
-            status = "verified"
-            confidence = 0.9
-        elif len(fleet_memories) >= 1:
+    match_consensus_memories = [
+        m for m in memories
+        if m["session_type"] == "match" and _count_consensus([m]) > 0
+    ]
+    collab_memories = fleet_memories + match_consensus_memories
+    if collab_memories:
+        consensus_count = _count_consensus(collab_memories)
+        if (len(fleet_memories) >= 3 and consensus_count >= 2) or consensus_count >= 1:
+            status = "verified" if consensus_count >= 1 else "weak"
+            confidence = 0.9 if consensus_count >= 1 else 0.5
+        elif len(collab_memories) >= 1:
             status = "weak"
             confidence = 0.5
         else:
             status = "unverified"
             confidence = 0.0
 
+        # 有双向 match consensus 时直接 verified
+        if consensus_count >= 1:
+            status, confidence = "verified", 0.9
+
         attestation = db.upsert_trust_attestation(
             candidate_id=user_id,
             claim_type="collaboration",
             claim_statement=_CLAIM_TEMPLATES["collaboration"],
-            evidence_type="fleet_consensus",
+            evidence_type="fleet_consensus" if fleet_memories else "match_consensus",
             verification_status=status,
-            evidence_refs=[m["id"] for m in fleet_memories],
+            evidence_refs=[m["id"] for m in collab_memories],
             confidence_score=confidence,
         )
         results.append(attestation)
-        logger.info("trust_agent: collaboration attestation for %s → %s (fleets=%d, consensus=%d)", user_id, status, len(fleet_memories), consensus_count)
+        logger.info(
+            "trust_agent: collaboration attestation for %s → %s (fleets=%d, match_consensus=%d)",
+            user_id, status, len(fleet_memories), len(match_consensus_memories),
+        )
 
     # ── 3. Communication (ask) ──
     ask_memories = [m for m in memories if m["session_type"] == "ask"]

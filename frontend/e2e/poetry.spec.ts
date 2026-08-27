@@ -461,7 +461,7 @@ test.describe("Poetry Page", () => {
     await expect(prevBtn).toBeVisible({ timeout: 5_000 });
     await expect(nextBtn).toBeVisible({ timeout: 3_000 });
 
-    const pageInfo = page.locator("span", { hasText: /页/ });
+    const pageInfo = page.locator("span", { hasText: "共" });
     await expect(pageInfo).toContainText("1");
     await expect(pageInfo).toContainText("56,570");
   });

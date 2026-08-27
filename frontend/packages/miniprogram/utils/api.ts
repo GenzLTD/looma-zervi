@@ -10,6 +10,7 @@ import {
   createAuthApi,
   createGameApi,
   createChatApi,
+  createTrustApi,
   createQuotaApi,
   createReferralApi,
   createComplianceApi,
@@ -156,6 +157,9 @@ export const complianceApi = createComplianceApi(apiClient)
 // Payment API 适配器
 export const paymentApi = createPaymentApi(apiClient)
 
+// Trust API 适配器
+export const trustApi = createTrustApi(apiClient)
+
 // ============================================================
 // 类型导出（向后兼容）
 // ============================================================
@@ -175,4 +179,5 @@ export default {
   referralApi,
   complianceApi,
   paymentApi,
+  trustApi,
 }

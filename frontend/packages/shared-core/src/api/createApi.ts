@@ -11,9 +11,25 @@ import type {
   RegisterRequest,
   WechatAuthRequest,
   WechatAuthResponse,
+  GoogleAuthRequest,
+  GoogleAuthResponse,
   UserProfile,
   QuotaResponse,
 } from "../types/auth";
+import type {
+  HarmonyCardBatchRequest,
+  HarmonyCardItem,
+  HuaweiAuthRequest,
+  HuaweiAuthResponse,
+  HuaweiIapNotifyRequest,
+  HuaweiIapNotifyResponse,
+  HuaweiIapVerifyRequest,
+  HuaweiIapVerifyResponse,
+  HuaweiPushRegisterResponse,
+  HuaweiPushSendRequest,
+  HuaweiPushSendResponse,
+  HuaweiPushTokenRequest,
+} from "../types/harmony";
 import type {
   AskRequest,
   AskResponse,
@@ -52,8 +68,34 @@ import type {
   JobPostMatchesResponse,
   CandidateListResponse,
 } from "../types/enterprise";
-import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ResumeUploadResult, ParsedJob, JobUploadResult, CreditAnalysis, CheckCompanyRequest, ResumeListResponse, ResumeAnalysisResponse } from "../types/resume";
+import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ResumeUploadResult, ResumeIngestRequest, ResumeIngestResponse, ParsedJob, JobUploadResult, CreditAnalysis, CheckCompanyRequest, CheckCompanyResponse, ResumeListResponse, ResumeAnalysisResponse } from "../types/resume";
 import type { Report, GenerateReportRequest } from "../types/misc";
+import type {
+  CreateMatchReportRequest,
+  MatchReport,
+  MatchReportListResponse,
+  ReportSharing,
+  ShareMatchReportRequest,
+} from "../types/matchReport";
+import type {
+  CreateShareCodeRequest,
+  CreateShareCodeResponse,
+  TrustAttestationsResponse,
+  TrustAuditLogResponse,
+  TrustPublicKeyResponse,
+  TrustShareCodesResponse,
+  TrustVerifyRequest,
+  TrustVerifyResponse,
+} from "../types/trust";
+import type {
+  CreateTimelineEventRequest,
+  TimelineBackfillResponse,
+  TimelineDeleteAllResponse,
+  TimelineEvent,
+  TimelineExportResponse,
+  TimelineGrowthResponse,
+  TimelineListResponse,
+} from "../types/timeline";
 import { API_ROUTES } from "../constants/routes";
 
 // ============================================================
@@ -72,6 +114,14 @@ export function createAuthApi(client: ApiClient) {
     /** WeChat miniprogram login (wx.login code -> looma JWT) */
     wechat: (payload: WechatAuthRequest) =>
       client.post<WechatAuthResponse>(API_ROUTES.AUTH_WECHAT, payload),
+
+    /** Google OAuth login (overseas ID token -> looma JWT) */
+    google: (payload: GoogleAuthRequest) =>
+      client.post<GoogleAuthResponse>(API_ROUTES.AUTH_GOOGLE, payload),
+
+    /** Huawei Account Kit login (authorizationCode -> looma JWT) */
+    huawei: (payload: HuaweiAuthRequest) =>
+      client.post<HuaweiAuthResponse>(API_ROUTES.AUTH_HUAWEI, payload),
 
     /** Bind WeChat account to existing email user */
     bind: (code: string) =>
@@ -336,6 +386,10 @@ export function createResumeApi(client: ApiClient) {
     /** Upload resume file for AI parsing (PDF/DOCX → structured JSON) */
     upload: (file: File) => client.upload<ResumeUploadResult>(API_ROUTES.RESUME_UPLOAD, file, "file"),
 
+    /** Ingest pre-parsed markdown directly (DemoPeter thin-ingest — no LLM call) */
+    ingest: (payload: ResumeIngestRequest) =>
+      client.post<ResumeIngestResponse>(API_ROUTES.RESUME_INGEST, payload),
+
     // ── HarmonyOS 简历管理 ──
     /** List all resumes uploaded by current user */
     list: () => client.get<ResumeListResponse>(API_ROUTES.RESUME_LIST),
@@ -400,6 +454,86 @@ export function createReportsApi(client: ApiClient) {
   };
 }
 
+export function createMatchReportsApi(client: ApiClient) {
+  return {
+    create: (payload: CreateMatchReportRequest) =>
+      client.post<MatchReport>(API_ROUTES.MATCH_REPORTS, payload),
+
+    list: (params?: { page?: number; page_size?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.page) q.set("page", String(params.page));
+      if (params?.page_size) q.set("page_size", String(params.page_size));
+      const qs = q.toString();
+      return client.get<MatchReportListResponse>(
+        qs ? `${API_ROUTES.MATCH_REPORTS}?${qs}` : API_ROUTES.MATCH_REPORTS,
+      );
+    },
+
+    get: (id: string) =>
+      client.get<MatchReport>(`${API_ROUTES.MATCH_REPORTS}/${id}`),
+
+    export: (id: string) =>
+      client.get<MatchReport>(`${API_ROUTES.MATCH_REPORTS}/${id}/export`),
+
+    remove: (id: string) =>
+      client.delete<{ ok: boolean; id: string }>(`${API_ROUTES.MATCH_REPORTS}/${id}`),
+
+    listSharings: (id: string) =>
+      client.get<{ sharings: ReportSharing[] }>(
+        `${API_ROUTES.MATCH_REPORTS}/${id}/sharings`,
+      ),
+
+    share: (id: string, payload: ShareMatchReportRequest) =>
+      client.post<ReportSharing>(`${API_ROUTES.MATCH_REPORTS}/${id}/share`, payload),
+
+    updateShare: (id: string, sharingId: string, payload: ShareMatchReportRequest) =>
+      client.put<ReportSharing>(
+        `${API_ROUTES.MATCH_REPORTS}/${id}/share/${sharingId}`,
+        payload,
+      ),
+
+    revokeShare: (id: string, sharingId: string) =>
+      client.delete<ReportSharing>(
+        `${API_ROUTES.MATCH_REPORTS}/${id}/share/${sharingId}`,
+      ),
+  };
+}
+
+// ============================================================
+// Trust API (attestation cards + share_code verify)
+// ============================================================
+export function createTrustApi(client: ApiClient) {
+  return {
+    listAttestations: () =>
+      client.get<TrustAttestationsResponse>(API_ROUTES.TRUST_ATTESTATIONS),
+
+    refresh: () =>
+      client.post<TrustAttestationsResponse>(API_ROUTES.TRUST_REFRESH),
+
+    createShareCode: (payload?: CreateShareCodeRequest) =>
+      client.post<CreateShareCodeResponse>(API_ROUTES.TRUST_SHARE_CODE, payload ?? {}),
+
+    listShareCodes: () =>
+      client.get<TrustShareCodesResponse>(API_ROUTES.TRUST_SHARE_CODES),
+
+    revokeShareCode: (codeId: string) =>
+      client.delete<{ message: string }>(`${API_ROUTES.TRUST_SHARE_CODE}/${codeId}`),
+
+    auditLog: (limit?: number) => {
+      const q = limit != null ? `?limit=${limit}` : "";
+      return client.get<TrustAuditLogResponse>(`${API_ROUTES.TRUST_AUDIT_LOG}${q}`);
+    },
+
+    /** Public — no JWT; authorised via share_code */
+    verify: (payload: TrustVerifyRequest) =>
+      client.post<TrustVerifyResponse>(API_ROUTES.TRUST_VERIFY, payload),
+
+    /** Public — Ed25519 PEM for offline signature checks */
+    publicKey: () =>
+      client.get<TrustPublicKeyResponse>(API_ROUTES.TRUST_PUBLIC_KEY),
+  };
+}
+
 // ============================================================
 // Credit API (Company evaluation — tripod leg 3)
 // ============================================================
@@ -409,9 +543,13 @@ export function createCreditApi(client: ApiClient) {
     analyze: (text: string) =>
       client.post<{ extracted: CreditAnalysis }>(API_ROUTES.CREDIT_ANALYZE, { text }),
 
-    /** Evaluate a company by name (post-match flow) */
+    /** Evaluate a company by name (post-match flow) — powered by QCC official data */
     checkCompany: (payload: CheckCompanyRequest) =>
-      client.post<{ extracted: CreditAnalysis }>(API_ROUTES.CREDIT_CHECK_COMPANY, payload),
+      client.post<CheckCompanyResponse>(API_ROUTES.CREDIT_CHECK_COMPANY, payload),
+
+    /** Full detailed credit check with all QCC categories */
+    checkCompanyDetail: (payload: { company_name: string }) =>
+      client.post<CheckCompanyResponse>(API_ROUTES.CREDIT_CHECK_COMPANY_DETAIL, payload),
   };
 }
 
@@ -510,7 +648,7 @@ export function createPaymentApi(client: ApiClient) {
     /** Get current user subscription status */
     status: () => client.get<import("../types/payment").PaymentStatus>(API_ROUTES.PAYMENT_STATUS),
 
-    /** Upgrade tier (stub mode only; blocked in production → use wechatOrder instead) */
+    /** Upgrade tier (stub mode only; blocked in production → use checkout instead) */
     upgrade: (tier: "supporter" | "pro") =>
       client.post<import("../types/payment").UpgradeResponse>(API_ROUTES.PAYMENT_UPGRADE, { tier }),
 
@@ -518,6 +656,21 @@ export function createPaymentApi(client: ApiClient) {
     wechatOrder: (payload: import("../types/payment").WechatOrderRequest) =>
       client.post<import("../types/payment").WechatOrderResponse>(
         API_ROUTES.PAYMENT_WECHAT_ORDER,
+        payload,
+      ),
+
+    /** List configured overseas payment providers */
+    providers: (region?: import("../types/payment").PaymentRegion) => {
+      const query = region ? `?region=${region}` : "";
+      return client.get<import("../types/payment").ProvidersResponse>(
+        `${API_ROUTES.PAYMENT_PROVIDERS}${query}`,
+      );
+    },
+
+    /** Create unified checkout session (Stripe / PayPal / Airwallex) */
+    checkout: (payload: import("../types/payment").CheckoutRequest) =>
+      client.post<import("../types/payment").CheckoutResponse>(
+        API_ROUTES.PAYMENT_CHECKOUT,
         payload,
       ),
   };
@@ -549,6 +702,32 @@ export function createAnalyticsApi(client: ApiClient) {
 
     microFeedback: (payload: import("../types/analytics").MicroFeedbackRequest) =>
       client.post<{ ok: boolean; id: number }>(API_ROUTES.FEEDBACK_MICRO, payload),
+  };
+}
+
+// ============================================================
+// Admin API (Management dashboard)
+// ============================================================
+export function createAdminApi(client: ApiClient) {
+  return {
+    /** Full admin dashboard stats (users, activity, system) */
+    stats: () =>
+      client.get<import("../types/admin").AdminStatsResponse>(API_ROUTES.ADMIN_STATS),
+
+    /** Funnel conversion stats */
+    funnel: (days = 30) =>
+      client.get<import("../types/admin").AdminFunnelResponse>(
+        API_ROUTES.ADMIN_FUNNEL,
+        { days },
+      ),
+
+    /** Narrative / Phase 0 metrics */
+    narrative: () =>
+      client.get<import("../types/admin").AdminNarrativeResponse>(API_ROUTES.ADMIN_NARRATIVE),
+
+    /** Enhanced system health */
+    health: () =>
+      client.get<import("../types/admin").AdminHealthResponse>(API_ROUTES.ADMIN_HEALTH),
   };
 }
 
@@ -586,3 +765,94 @@ export function createComplianceApi(client: ApiClient) {
       ),
   };
 }
+
+// ============================================================
+// Timeline API (career behaviour time-series)
+// ============================================================
+export function createTimelineApi(client: ApiClient) {
+  return {
+    list: (params?: { cursor?: string; limit?: number; kind?: string; since?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.cursor) q.set("cursor", params.cursor);
+      if (params?.limit != null) q.set("limit", String(params.limit));
+      if (params?.kind) q.set("kind", params.kind);
+      if (params?.since) q.set("since", params.since);
+      const qs = q.toString();
+      return client.get<TimelineListResponse>(
+        qs ? `${API_ROUTES.TIMELINE}?${qs}` : API_ROUTES.TIMELINE,
+      );
+    },
+
+    createEvent: (payload: CreateTimelineEventRequest) =>
+      client.post<TimelineEvent>(API_ROUTES.TIMELINE_EVENTS, payload),
+
+    deleteEvent: (eventId: string) =>
+      client.delete<{ ok: boolean; id: string }>(`${API_ROUTES.TIMELINE_EVENTS}/${eventId}`),
+
+    growth: () => client.get<TimelineGrowthResponse>(API_ROUTES.TIMELINE_GROWTH),
+
+    backfill: () =>
+      client.post<TimelineBackfillResponse>(API_ROUTES.TIMELINE_BACKFILL),
+
+    exportMyData: () =>
+      client.get<TimelineExportResponse>(API_ROUTES.TIMELINE_EXPORT),
+
+    deleteAllMyData: () =>
+      client.delete<TimelineDeleteAllResponse>(
+        `${API_ROUTES.TIMELINE_DELETE_ME}?confirm=yes`,
+      ),
+  };
+}
+
+// ============================================================
+// HarmonyOS cloud kits (IAP / Push / Card)
+// ============================================================
+export function createHuaweiIapApi(client: ApiClient) {
+  return {
+    /** Client-side purchase → server RSA verify + deliver */
+    notify: (payload: HuaweiIapNotifyRequest) =>
+      client.post<HuaweiIapNotifyResponse>(API_ROUTES.HUAWEI_IAP_NOTIFY, payload),
+
+    /** Server-side order verify (MVP stub → 501) */
+    verify: (payload: HuaweiIapVerifyRequest) =>
+      client.post<HuaweiIapVerifyResponse>(API_ROUTES.HUAWEI_IAP_VERIFY, payload),
+  };
+}
+
+export function createHuaweiPushApi(client: ApiClient) {
+  return {
+    register: (payload: HuaweiPushTokenRequest) =>
+      client.post<HuaweiPushRegisterResponse>(
+        API_ROUTES.HUAWEI_PUSH_REGISTER,
+        payload,
+      ),
+
+    unregister: (payload: HuaweiPushTokenRequest) =>
+      client.post<HuaweiPushRegisterResponse>(
+        API_ROUTES.HUAWEI_PUSH_UNREGISTER,
+        payload,
+      ),
+
+    send: (payload: HuaweiPushSendRequest) =>
+      client.post<HuaweiPushSendResponse>(API_ROUTES.HUAWEI_PUSH_SEND, payload),
+
+    batch: (payload: Record<string, unknown>) =>
+      client.post<HuaweiPushSendResponse>(API_ROUTES.HUAWEI_PUSH_BATCH, payload),
+  };
+}
+
+export function createCardApi(client: ApiClient) {
+  return {
+    get: (cardId: string, type?: string) => {
+      const q = type ? `?type=${encodeURIComponent(type)}` : "";
+      return client.get<HarmonyCardItem>(`${API_ROUTES.HUAWEI_CARD}/${cardId}${q}`);
+    },
+
+    batch: (payload: HarmonyCardBatchRequest) =>
+      client.post<{ cards: HarmonyCardItem[] }>(
+        API_ROUTES.HUAWEI_CARD_BATCH,
+        payload,
+      ),
+  };
+}
+

@@ -12,7 +12,7 @@
 
 | 项 | 状态 |
 |----|------|
-| MCP Sidecar 3 工具 | ✅ 可交付 |
+| MCP Sidecar 多工具（含征信聚合+细分） | ✅ 可交付 |
 | JWT 认证 | ✅ |
 | Health 探测 | ✅ |
 | `parse_resume` Consent | ✅（`resume_upload`） |
@@ -34,10 +34,11 @@
          │  MCP Client（Cursor / 内测脚本）
          ▼
 ┌──────────────────────────┐
-│ MCP Sidecar  :8999 (SSE) │
-│  rag_query               │
-│  match_jobs              │
+│ MCP Sidecar  :8999 (SSE) │  ← 一个 Looma MCP + 多工具
+│  rag_query / match_jobs  │
 │  parse_resume (+consent) │
+│  credit_check（聚合）    │
+│  credit_company/risk/legal│  ← 少量细分；不 1:1 镜像 QCC 九服
 └───────────┬──────────────┘
             │ sys.path import backend/src
             ▼
@@ -195,19 +196,19 @@ curl -s -X POST http://localhost:5200/v1/compliance/consent/grant \
 |------|-------------|------------|
 | JWT 验签 + exp | ✅ `mcp_auth.py` | ✅ `@require_auth` |
 | DB 用户存在性 | 可选 `require_db_user`（默认未全开） | ✅ `@require_auth` 查 DB |
-| Consent | 仅 **`parse_resume` → resume_upload** | credit / resume / ask / jobs 等 |
+| Consent | `parse_resume`→jobseeker；`credit_*`→credit_query | credit / resume / ask / jobs 等 |
 | Token 吊销 | ❌ 无 blacklist | ❌ 同上 |
 
-内测策略：**敏感 REST 能力走 Flask + 前端 Consent UI**；MCP 仅暴露 3 个工具，其中仅 parse 强制 consent。
+内测策略：**一个 SSE 入口 + 多工具**；征信为聚合 `credit_check` + 少量细分（company/risk/legal），不 1:1 镜像企查查九服。敏感能力仍走 JWT + Consent。
 
 ---
 
 ## 7. 已知限制（交付边界）
 
 1. **临时方案**：Python Sidecar，内测后由 Rust `zervi` 接管（见 `mcp-mvp-strategy.md`）。
-2. **工具固定 3 个**：不扩 narrative / poetry / mbti 等。
+2. **工具集**：核心三件套 + 征信四工具；不扩 narrative / poetry / mbti 等。
 3. **认证传参**：MVP 用工具参数 `token`；Rust 阶段改为 `Authorization: Bearer` Header。
-4. **内部实现**：Sidecar 通过 `sys.path` 直接 import `backend/src`，非 HTTP 调 REST。
+4. **内部实现**：Sidecar 通过 `sys.path` 直接 import `backend/src`，非 HTTP 调 REST；QCC 经 `qcc_client`。
 5. **无 MCP 单测**：依赖 `verify-p0-local.sh` 烟雾。
 6. **`fastmcp` 未写入主 `requirements.txt`**：需手动 `pip install` 或后续 CI 补装。
 7. **端口占用**：`:8999` 被占用时见下方排障。

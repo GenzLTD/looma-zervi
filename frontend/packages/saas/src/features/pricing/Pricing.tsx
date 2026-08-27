@@ -11,15 +11,13 @@ import {
   CLOSED_LOOP_EVENTS,
   trackEvent,
   type PaymentPlan,
-  type PaymentRegion,
   type ContactSalesRequest,
   type WechatOrderResponse,
 } from "@looma/shared-core";
 import { createSaasApiClient } from "../../api/saasApiClient";
 import { useSaasAuthStore } from "../auth/authStore";
 import SaasModal from "../../brand/ui/SaasModal";
-
-const BILLING_REGION: PaymentRegion = "CN";
+import { BILLING_REGION, IS_OVERSEAS } from "../../config/region";
 
 interface PlanCard extends PaymentPlan {
   desc: string;
@@ -28,7 +26,7 @@ interface PlanCard extends PaymentPlan {
   actionLabel?: string;
 }
 
-const PLAN_META: Record<string, Pick<PlanCard, "desc" | "highlight" | "badge" | "actionLabel">> = {
+const PLAN_META_CN: Record<string, Pick<PlanCard, "desc" | "highlight" | "badge" | "actionLabel">> = {
   free: {
     desc: "入门体验，探索 AI 招聘潜力",
     highlight: false,
@@ -47,6 +45,28 @@ const PLAN_META: Record<string, Pick<PlanCard, "desc" | "highlight" | "badge" | 
     actionLabel: "开始 7 天试用",
   },
 };
+
+const PLAN_META_US: Record<string, Pick<PlanCard, "desc" | "highlight" | "badge" | "actionLabel">> = {
+  free: {
+    desc: "Explore AI career tools for free",
+    highlight: false,
+    badge: "Free",
+  },
+  supporter: {
+    desc: "Unlock higher limits and support the project",
+    highlight: false,
+    badge: "Supporter",
+    actionLabel: "Become Supporter",
+  },
+  pro: {
+    desc: "Full AI power for serious career growth",
+    highlight: true,
+    badge: "7-day trial",
+    actionLabel: "Start Pro trial",
+  },
+};
+
+const PLAN_META = IS_OVERSEAS ? PLAN_META_US : PLAN_META_CN;
 
 const ENTERPRISE_CARD: PlanCard = {
   tier: "enterprise",
@@ -80,7 +100,7 @@ function formatPrice(plan: PaymentPlan): string {
 }
 
 export default function Pricing() {
-  const { isAuthenticated, token, applySessionToken } = useSaasAuthStore();
+  const { isAuthenticated, token, applySessionToken, fetchProfile } = useSaasAuthStore();
   const navigate = useNavigate();
   const [plans, setPlans] = useState<PlanCard[]>([]);
   const [stubMode, setStubMode] = useState(true);
@@ -114,7 +134,7 @@ export default function Pricing() {
           ...plan,
           ...PLAN_META[plan.tier],
         }));
-        setPlans([...cards, ENTERPRISE_CARD]);
+        setPlans(IS_OVERSEAS ? cards : [...cards, ENTERPRISE_CARD]);
         setStubMode(resp.stub_mode ?? true);
       } catch {
         if (!cancelled) {
@@ -145,7 +165,6 @@ export default function Pricing() {
       const client = createSaasApiClient();
 
       if (stubMode) {
-        // 开发/测试模式：直接升级
         const resp = await createPaymentApi(client).upgrade(tier);
         if (resp.access_token) {
           await applySessionToken(resp.access_token);
@@ -153,10 +172,24 @@ export default function Pricing() {
           const refreshed = await createAuthApi(client).refresh();
           await applySessionToken(refreshed.access_token);
         }
-        const label = tier === "supporter" ? "支持者版" : "Pro 试用";
-        setMessage(`已开通 ${label}（内测 Stub，无需真实支付）`);
+        const label = tier === "supporter"
+          ? (IS_OVERSEAS ? "Supporter" : "支持者版")
+          : (IS_OVERSEAS ? "Pro trial" : "Pro 试用");
+        setMessage(
+          IS_OVERSEAS
+            ? `Activated ${label} (stub mode, no real payment)`
+            : `已开通 ${label}（内测 Stub，无需真实支付）`,
+        );
+      } else if (IS_OVERSEAS) {
+        const checkout = await createPaymentApi(client).checkout({
+          provider: "stripe",
+          tier,
+          mode: "payment",
+          success_url: `${window.location.origin}/pricing?status=success`,
+          cancel_url: `${window.location.origin}/pricing?status=cancel`,
+        });
+        window.location.href = checkout.checkout_url;
       } else {
-        // 生产模式：走微信支付
         const orderResp = await createPaymentApi(client).wechatOrder({
           tier,
           trade_type: "NATIVE", // PC Web 扫码支付
@@ -169,9 +202,9 @@ export default function Pricing() {
       }
     } catch (err: any) {
       if (err?.status === 402) {
-        setMessage("此服务需要真实支付，请联系管理员开通");
+        setMessage(IS_OVERSEAS ? "Payment required. Contact support to enable checkout." : "此服务需要真实支付，请联系管理员开通");
       } else {
-        setMessage("操作失败，请稍后重试");
+        setMessage(IS_OVERSEAS ? "Something went wrong. Please try again." : "操作失败，请稍后重试");
       }
     } finally {
       setUpgradingTier(null);
@@ -193,9 +226,7 @@ export default function Pricing() {
           setPollingOrder(false);
           setPaymentModalOpen(false);
           setWechatOrder(null);
-          if (status.access_token) {
-            await applySessionToken(status.access_token);
-          }
+          await fetchProfile();
           setMessage(`已开通 ${status.plan.name}！`);
           return;
         }
@@ -350,14 +381,16 @@ export default function Pricing() {
           style={{ backgroundColor: "var(--color-bg-card)", boxShadow: "var(--shadow-sm)" }}
         >
           <p className="text-sm font-medium mb-1" style={{ color: "var(--color-text-primary)" }}>
-            🚀 开发模式 — Stub 支付开启
+            {IS_OVERSEAS ? "🚀 Stub mode — upgrades apply instantly" : "🚀 开发模式 — Stub 支付开启"}
           </p>
           <p className="text-xs mb-3" style={{ color: "var(--color-text-muted)" }}>
-            升级按钮直接生效，无需真实支付。设置 PAYMENT_STUB_MODE=false 可启用微信支付流程。
+            {IS_OVERSEAS
+              ? "Upgrade buttons work without real payment. Set PAYMENT_STUB_MODE=false to enable Stripe."
+              : "升级按钮直接生效，无需真实支付。设置 PAYMENT_STUB_MODE=false 可启用微信支付流程。"}
           </p>
           {!isAuthenticated && (
             <Link to="/register" className="text-sm" style={{ color: "var(--color-primary)" }}>
-              还没有账号？立即注册 →
+              {IS_OVERSEAS ? "No account yet? Sign up →" : "还没有账号？立即注册 →"}
             </Link>
           )}
         </div>
@@ -367,14 +400,16 @@ export default function Pricing() {
           style={{ backgroundColor: "var(--color-bg-card)", boxShadow: "var(--shadow-sm)" }}
         >
           <p className="text-sm font-medium mb-1" style={{ color: "var(--color-text-primary)" }}>
-            💳 微信支付
+            {IS_OVERSEAS ? "💳 Stripe Checkout" : "💳 微信支付"}
           </p>
           <p className="text-xs mb-3" style={{ color: "var(--color-text-muted)" }}>
-            支持者 ¥9.9/月 · 专业版 ¥29.9/月 · 企业版请联系销售定制
+            {IS_OVERSEAS
+              ? "Supporter $1.99/mo · Pro $5.99/mo · Billed in USD"
+              : "支持者 ¥9.9/月 · 专业版 ¥29.9/月 · 企业版请联系销售定制"}
           </p>
           {!isAuthenticated && (
             <Link to="/register" className="text-sm" style={{ color: "var(--color-primary)" }}>
-              还没有账号？立即注册 →
+              {IS_OVERSEAS ? "No account yet? Sign up →" : "还没有账号？立即注册 →"}
             </Link>
           )}
         </div>
@@ -450,7 +485,8 @@ export default function Pricing() {
         </div>
       </SaasModal>
 
-      {/* WeChat Pay 扫码支付弹窗 */}
+      {/* WeChat Pay 扫码支付弹窗（仅大陆） */}
+      {!IS_OVERSEAS && (
       <SaasModal
         isOpen={paymentModalOpen}
         onClose={handleClosePayment}
@@ -529,6 +565,7 @@ export default function Pricing() {
           )}
         </div>
       </SaasModal>
+      )}
     </div>
   );
 }

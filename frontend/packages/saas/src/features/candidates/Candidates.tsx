@@ -1,47 +1,97 @@
 /**
  * Enterprise candidates list — import from PlanetX share codes.
+ * Requires supporter+ (aligned with backend `@require_tier("supporter")`).
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
+  ApiError,
+  CANDIDATE_LIMITS,
   createEnterpriseApi,
+  hasMinTier,
   type Candidate,
   type EnterpriseProfile,
+  type Tier,
 } from "@looma/shared-core";
 import { createSaasApiClient } from "../../api/saasApiClient";
 import { useSaasAuthStore } from "../auth/authStore";
+import TierGatePanel from "../../brand/components/TierGatePanel";
 
 function getEnterpriseApi() {
   return createEnterpriseApi(createSaasApiClient());
 }
 
 export default function Candidates() {
+  const { t } = useTranslation();
   const { user } = useSaasAuthStore();
   const [enterprise, setEnterprise] = useState<EnterpriseProfile | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [shareCode, setShareCode] = useState("");
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const [needsEnterprise, setNeedsEnterprise] = useState(false);
+  const [tierBlocked, setTierBlocked] = useState(false);
+
+  const canUseCandidates = hasMinTier(user?.tier, "supporter");
+
+  const loadCandidates = useCallback(async () => {
+    try {
+      const list = await getEnterpriseApi().candidates();
+      setCandidates(list.candidates ?? []);
+      setListError(null);
+    } catch (err) {
+      setCandidates([]);
+      if (err instanceof ApiError && err.status === 403) {
+        setTierBlocked(true);
+        setListError(null);
+        return;
+      }
+      // Keep enterprise shell; never bounce back to the create panel.
+      const detail =
+        err instanceof ApiError
+          ? (typeof err.body?.message === "string" && err.body.message) || err.message
+          : null;
+      setListError(detail || t("candidates.listLoadFailed"));
+    }
+  }, [t]);
 
   const loadData = useCallback(async () => {
+    if (!canUseCandidates) {
+      setLoading(false);
+      setTierBlocked(true);
+      return;
+    }
+
     setLoading(true);
+    setTierBlocked(false);
+    setListError(null);
     const api = getEnterpriseApi();
     try {
       const profile = await api.profile();
       setEnterprise(profile);
       setNeedsEnterprise(false);
-      const list = await api.candidates();
-      setCandidates(list.candidates ?? []);
-    } catch {
-      setNeedsEnterprise(true);
-      setEnterprise(null);
-      setCandidates([]);
+      await loadCandidates();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setNeedsEnterprise(true);
+        setEnterprise(null);
+        setCandidates([]);
+      } else if (err instanceof ApiError && err.status === 403) {
+        setTierBlocked(true);
+        setEnterprise(null);
+        setCandidates([]);
+      } else {
+        // Unknown/network errors must not force the create-enterprise panel.
+        setMessage(t("candidates.loadEnterpriseFailed"));
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canUseCandidates, loadCandidates, t]);
 
   useEffect(() => {
     void loadData();
@@ -49,12 +99,23 @@ export default function Candidates() {
 
   const handleCreateEnterprise = async () => {
     const name = user?.name || user?.email?.split("@")[0] || "我的企业";
+    setCreating(true);
+    setMessage(null);
     try {
-      await getEnterpriseApi().create({ name });
-      setMessage("企业已创建");
-      await loadData();
+      const created = await getEnterpriseApi().create({ name });
+      setEnterprise({
+        id: created.id,
+        name: created.name,
+        domain: created.domain,
+        role: (created.role === "member" ? "member" : "admin") as EnterpriseProfile["role"],
+      });
+      setNeedsEnterprise(false);
+      setMessage(t("candidates.createdSuccess"));
+      await loadCandidates();
     } catch {
-      setMessage("创建企业失败，请重试");
+      setMessage(t("candidates.createFailed"));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -68,45 +129,75 @@ export default function Candidates() {
       setMessage(result.imported === false ? "该候选人已在列表中" : "导入成功");
       setShareCode("");
       await loadData();
-    } catch {
-      setMessage("导入失败：分享码无效或用户未完成测试");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        setTierBlocked(true);
+        setMessage(null);
+      } else {
+        setMessage("导入失败：分享码无效或用户未完成测试");
+      }
     } finally {
       setImporting(false);
     }
   };
 
+  if (!canUseCandidates || tierBlocked) {
+    return (
+      <TierGatePanel
+        title={t("candidates.title")}
+        description={t("candidates.tierRequired")}
+        minTier="supporter"
+      />
+    );
+  }
+
   if (loading) {
-    return <p style={{ color: "var(--color-text-muted)" }}>加载候选人…</p>;
+    return <p style={{ color: "var(--color-text-muted)" }}>{t("candidates.loading")}</p>;
   }
 
   if (needsEnterprise) {
     return (
       <div className="max-w-xl">
         <h1 className="text-2xl font-bold mb-4" style={{ color: "var(--color-text-primary)" }}>
-          求职者画像
+          {t("candidates.title")}
         </h1>
         <p className="text-sm mb-4" style={{ color: "var(--color-text-secondary)" }}>
-          请先创建企业空间，才能导入 PlanetX 分享的候选人。
+          {t("candidates.needsEnterprise")}
         </p>
         <button
           onClick={() => void handleCreateEnterprise()}
-          className="px-4 py-2 rounded-lg text-sm text-white"
+          disabled={creating}
+          className="px-4 py-2 rounded-lg text-sm text-white disabled:opacity-50"
           style={{ backgroundColor: "var(--color-primary)" }}
         >
-          创建企业（一键）
+          {creating ? t("candidates.creating") : t("candidates.createEnterprise")}
         </button>
         {message && <p className="text-sm mt-3" style={{ color: "var(--color-text-muted)" }}>{message}</p>}
       </div>
     );
   }
 
+  const tier = (user?.tier ?? "free") as Tier;
+  const limit =
+    tier in CANDIDATE_LIMITS
+      ? CANDIDATE_LIMITS[tier as keyof typeof CANDIDATE_LIMITS]
+      : CANDIDATE_LIMITS.free;
+  const atCap = limit !== null && candidates.length >= limit;
+
   return (
     <div className="max-w-3xl">
       <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--color-text-primary)" }}>
-        求职者画像
+        {t("candidates.title")}
       </h1>
-      <p className="text-sm mb-6" style={{ color: "var(--color-text-muted)" }}>
-        {enterprise?.name} · 粘贴 PlanetX 分享码导入候选人
+      <p className="text-sm mb-2" style={{ color: "var(--color-text-muted)" }}>
+        {enterprise?.name} · {t("candidates.importHint")}
+      </p>
+      <p className="text-xs mb-6" style={{ color: atCap ? "var(--color-warning)" : "var(--color-text-muted)" }}>
+        {t("candidates.capacity", {
+          used: candidates.length,
+          limit: limit === null ? t("tier.unlimited") : String(limit),
+        })}
+        {atCap ? ` · ${t("candidates.capacityFull")}` : ""}
       </p>
 
       <div
@@ -117,7 +208,7 @@ export default function Candidates() {
           type="text"
           value={shareCode}
           onChange={(e) => setShareCode(e.target.value.toUpperCase())}
-          placeholder="粘贴分享码，如 A1B2C3D4"
+          placeholder={t("candidates.shareCodePlaceholder")}
           className="flex-1 px-3 py-2 rounded-lg text-sm border"
           style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-bg-surface)" }}
         />
@@ -127,24 +218,27 @@ export default function Candidates() {
           className="px-4 py-2 rounded-lg text-sm text-white disabled:opacity-50"
           style={{ backgroundColor: "var(--color-primary)" }}
         >
-          {importing ? "导入中…" : "导入"}
+          {importing ? t("candidates.importing") : t("candidates.import")}
         </button>
       </div>
 
       {message && (
         <p className="text-sm mb-4" style={{ color: "var(--color-success)" }}>{message}</p>
       )}
+      {listError && (
+        <p className="text-sm mb-4" style={{ color: "var(--color-warning)" }}>{listError}</p>
+      )}
 
-      {candidates.length === 0 ? (
+      {candidates.length === 0 && !listError ? (
         <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-          暂无候选人。让求职者在 PlanetX 完成测试后，点击「分享给 HR」复制链接或分享码。
+          {t("candidates.empty")}
         </p>
       ) : (
         <ul className="space-y-3">
           {candidates.map((c) => {
             const profile = c.profile_data as { personality_type?: string; personality_detail?: { emoji?: string; name?: string } } | undefined;
             const emoji = profile?.personality_detail?.emoji ?? "🪐";
-            const typeName = profile?.personality_detail?.name ?? profile?.personality_type ?? "未知";
+            const typeName = profile?.personality_detail?.name ?? profile?.personality_type ?? t("candidates.unknownType");
             return (
               <li key={c.id}>
                 <Link

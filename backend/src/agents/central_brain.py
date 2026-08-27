@@ -22,10 +22,14 @@ logger = logging.getLogger("looma.brain")
 INTENTS = ("job_match", "resume_parse", "poetry", "credit", "mbti", "rag", "report", "greeting", "unknown")
 
 # Keyword → intent rules (fallback when LLM unavailable)
+# NOTE: Do NOT put 陪伴/安慰 in poetry — SaaS 六域 chips（情绪陪伴·压力疏导）会误入诗词兜底。
 INTENT_KEYWORDS = {
-    "poetry": ["诗词", "诗人", "古诗", "推荐一句", "陪伴", "安慰", "思乡", "送别", "山水", "边塞", "励志", "一句诗", "唐诗", "宋词", "的诗", "的诗句", "词", "诗句", "绝句", "律诗"],
+    "poetry": [
+        "诗词", "诗人", "古诗", "推荐一句", "思乡", "送别", "山水", "边塞", "励志",
+        "一句诗", "唐诗", "宋词", "的诗", "的诗句", "诗句", "绝句", "律诗", "推荐诗",
+    ],
     "job_match": ["匹配", "职位", "找工作", "有没有适合", "岗位", "求职", "招聘"],
-    "resume_parse": ["上传", "简历", "解析简历"],
+    "resume_parse": ["上传", "解析简历", "分析简历", "提取简历"],
     "credit": ["征信", "信用", "验证"],
     "mbti": ["人格", "MBTI", "测评", "性格"],
     "report": ["报告", "日报", "周报", "月报", "生成报告"],
@@ -34,12 +38,94 @@ INTENT_KEYWORDS = {
         "是什么", "什么是", "有哪些", "主要内容", "底座", "架构", "可以做什么", "能做什么",
         "有什么功能", "探索", "探索什么", "探索什么", "能探索", "星球", "星际探索",
         "六域", "职业域", "学习域", "生活域", "社交域", "健康域", "创意域",
+        "情绪陪伴", "压力疏导", "时间管理", "效率提升", "职位匹配", "简历解析", "职业规划",
+        "技能训练", "知识问答", "人格匹配", "组建舰队", "诗词推荐", "灵感激发",
         "planetx", "planetx 是什么", "planetx 能做什么", "planetx 有什么",
     ],
     "greeting": ["hi", "hello", "hey", "你好", "早上好", "晚上好", "您好", "很高兴", "再见", "谢谢", "感谢", "辛苦了", "在吗", "你是谁", "你能做什么", "帮我", "请问", "好的", "明白了", "ok", "thanks", "morning", "evening", "下午好", "晚安", "嗨"],
 }
 
 POETRY_RECOMMEND_THEMES = ("思乡", "送别", "山水", "边塞", "咏物", "励志", "田园", "怀古")
+
+# SaaS Ask RAG modes: chat=multi-turn, deepseek=more retrieval+longer reasoning, fast=less retrieval+low temp
+ASK_MODE_PRESETS: dict[str, dict[str, Any]] = {
+    "chat": {
+        "top_k": 3,
+        "history_turns": 10,
+        "temperature": 0.5,
+        "max_tokens": 800,
+        "reasoning": False,
+    },
+    "deepseek": {
+        "top_k": 8,
+        "history_turns": 4,
+        "temperature": 0.55,
+        "max_tokens": 2000,
+        "reasoning": True,
+    },
+    "fast": {
+        "top_k": 1,
+        "history_turns": 0,
+        "temperature": 0.1,
+        "max_tokens": 280,
+        "reasoning": False,
+    },
+}
+
+
+def resolve_ask_mode(mode: str | None) -> str:
+    m = (mode or "chat").strip().lower()
+    return m if m in ASK_MODE_PRESETS else "chat"
+
+
+def get_ask_mode_preset(mode: str | None) -> dict[str, Any]:
+    return ASK_MODE_PRESETS[resolve_ask_mode(mode)]
+
+
+def _format_session_history(session_history: list | None, turns: int) -> str:
+    """Format recent chat turns for prompt injection (user/assistant pairs)."""
+    if not session_history or turns <= 0:
+        return ""
+    lines: list[str] = []
+    for msg in session_history[-turns:]:
+        if not isinstance(msg, dict):
+            continue
+        role = "用户" if msg.get("role") == "user" else "助手"
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            continue
+        lines.append(f"{role}：{content[:400]}")
+    if not lines:
+        return ""
+    return "[对话历史]\n" + "\n".join(lines) + "\n\n"
+
+
+def _format_match_report_block(context: dict[str, Any] | None) -> str:
+    """Optional match-report summary for Ask (not navigator)."""
+    report = (context or {}).get("match_report")
+    if not isinstance(report, dict) or not report:
+        return ""
+    lines = [
+        "[当前匹配报告上下文]",
+        "以下为用户已保存的匹配报告摘要（非全文简历）。回答涉及匹配/缺口/技能时优先依据本段；",
+        "若问题与报告无关，可忽略。不要编造报告中未出现的岗位或分数。",
+        f"报告标题：{report.get('title') or '（无标题）'}",
+        f"报告ID：{report.get('report_id') or ''}",
+    ]
+    resume_summary = str(report.get("resume_summary") or "").strip()
+    if resume_summary:
+        lines.append(f"简历摘要：{resume_summary}")
+    for i, item in enumerate(report.get("top_items") or [], 1):
+        if not isinstance(item, dict):
+            continue
+        matched = "、".join(str(x) for x in (item.get("matched_skills") or [])[:8])
+        missing = "、".join(str(x) for x in (item.get("missing_skills") or [])[:8])
+        lines.append(
+            f"{i}. {item.get('job_title') or '职位'} · 综合分 {item.get('overall_score') or 0}"
+            f" · 已匹配[{matched or '—'}] · 缺口[{missing or '—'}]"
+            f" · 差距：{item.get('gap_analysis') or '—'}"
+        )
+    return "\n".join(lines) + "\n\n"
 
 
 def _poetry_is_recommendation_query(text: str) -> bool:
@@ -50,7 +136,12 @@ def _poetry_is_recommendation_query(text: str) -> bool:
     return bool(re.search(r"推荐|来一句|来首|随便.*诗|一句诗", t))
 
 
-def _call_llm(prompt: str) -> str | None:
+def _call_llm(
+    prompt: str,
+    *,
+    temperature: float = 0.3,
+    max_tokens: int | None = None,
+) -> str | None:
     """Call the configured LLM provider via DeepSeek/OpenAI API.
     Returns response text or None on failure."""
     config = current_app.config
@@ -59,19 +150,35 @@ def _call_llm(prompt: str) -> str | None:
     for provider in provider_order:
         try:
             if provider == "deepseek":
+                api_key = (config.get("DEEPSEEK_API_KEY") or "").strip()
+                if not api_key or api_key.lower() in ("skip", "your-deepseek-api-key"):
+                    continue
                 url = f"{config['DEEPSEEK_BASE_URL']}/chat/completions"
-                headers = {"Authorization": f"Bearer {config['DEEPSEEK_API_KEY']}", "Content-Type": "application/json"}
-                payload = {"model": config["DEEPSEEK_MODEL"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
+                headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                payload: dict[str, Any] = {
+                    "model": config["DEEPSEEK_MODEL"],
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": temperature,
+                }
+                if max_tokens is not None:
+                    payload["max_tokens"] = max_tokens
                 resp = requests.post(url, json=payload, headers=headers, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"]
 
             elif provider == "openai":
-                if not config.get("OPENAI_API_KEY"):
+                openai_key = (config.get("OPENAI_API_KEY") or "").strip()
+                if not openai_key or openai_key.lower() in ("skip", "your-openai-api-key"):
                     continue
                 url = f"{config.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')}/chat/completions"
-                headers = {"Authorization": f"Bearer {config['OPENAI_API_KEY']}", "Content-Type": "application/json"}
-                payload = {"model": config.get("OPENAI_MODEL", "gpt-3.5-turbo"), "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
+                headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
+                payload = {
+                    "model": config.get("OPENAI_MODEL", "gpt-3.5-turbo"),
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": temperature,
+                }
+                if max_tokens is not None:
+                    payload["max_tokens"] = max_tokens
                 resp = requests.post(url, json=payload, headers=headers, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"]
@@ -80,7 +187,10 @@ def _call_llm(prompt: str) -> str | None:
                 host = config.get("OLLAMA_HOST", "http://127.0.0.1:11434")
                 url = f"{host.rstrip('/')}/api/generate"
                 model = config.get("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
-                payload = {"model": model, "prompt": prompt, "stream": False}
+                options: dict[str, Any] = {"temperature": temperature}
+                if max_tokens is not None:
+                    options["num_predict"] = max_tokens
+                payload = {"model": model, "prompt": prompt, "stream": False, "options": options}
                 resp = requests.post(url, json=payload, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
                 return resp.json().get("response", "")
@@ -176,9 +286,30 @@ def dispatch(
     if intent == "rag":
         try:
             from src.rag.chroma_client import search_chroma
+            preset = get_ask_mode_preset(context.get("ask_mode"))
+            top_k = int(preset["top_k"])
+            history_turns = int(preset["history_turns"])
+            temperature = float(preset["temperature"])
+            max_tokens = int(preset["max_tokens"])
+            reasoning = bool(preset["reasoning"])
+
             t_retrieve = time.time()
-            results = search_chroma(query, n_results=3)
+            results = search_chroma(query, n_results=top_k)
             _timing["rag_retrieve"] = int((time.time() - t_retrieve) * 1000)
+
+            history_block = _format_session_history(
+                context.get("session_history"), history_turns
+            )
+            report_block = _format_match_report_block(context)
+            style = (
+                "请分步骤深入推理与分析，给出较完整、有层次的回答；必要时先列要点再展开。"
+                if reasoning
+                else (
+                    "请用两三句话直接回答，不要展开背景，不要列长清单。"
+                    if top_k <= 1
+                    else "回答要友好、简洁，结合上下文自然延续对话。"
+                )
+            )
 
             if results:
                 # Use retrieved context as the primary source. The LLM is told it may
@@ -187,9 +318,11 @@ def dispatch(
                 prompt = (
                     "你是 PlanetX 星际导航员，一位热情、简洁的 AI 助手。"
                     "请根据以下参考资料回答用户问题，并自然地介绍 PlanetX 的六域探索体系。"
-                    "回答要友好、有吸引力，让用户想要继续探索。"
                     "如果参考资料不够完整，可以结合通用知识补充，但不要强调「资料没有提到」或「这一解释并非来自参考资料」。"
-                    "用第一人称「我」或「我们」回答，营造陪伴感。\n\n"
+                    "用第一人称「我」或「我们」回答，营造陪伴感。\n"
+                    f"{style}\n\n"
+                    f"{history_block}"
+                    f"{report_block}"
                     f"参考资料：\n{context_text}\n\n"
                     f"用户问题：{query}\n\n"
                     f"回答："
@@ -201,16 +334,26 @@ def dispatch(
                     "你是 PlanetX 星际导航员，一位热情、简洁的 AI 助手。"
                     "请用友好、有吸引力的方式回答用户，并自然地介绍 PlanetX 的六域探索体系："
                     "职业域、学习域、生活域、社交域、健康域、创意域。"
-                    "如果用户的问题与这些域相关，请邀请他们进一步体验对应功能。\n\n"
+                    "如果用户的问题与这些域相关，请邀请他们进一步体验对应功能。\n"
+                    f"{style}\n\n"
+                    f"{history_block}"
+                    f"{report_block}"
                     f"用户问题：{query}\n\n"
                     f"回答："
                 )
             t_llm = time.time()
-            answer = _call_llm(prompt) or "知识库检索失败，请稍后再试"
+            answer = _call_llm(
+                prompt, temperature=temperature, max_tokens=max_tokens
+            ) or "知识库检索失败，请稍后再试"
             _timing["rag_llm"] = int((time.time() - t_llm) * 1000)
 
             sources = [{"chunk_text": r.get("content", "")[:200], "score": r.get("score")} for r in results]
-            return {"answer": answer, "_sources": sources, "slots": slots}
+            return {
+                "answer": answer,
+                "_sources": sources,
+                "slots": slots,
+                "ask_mode": resolve_ask_mode(context.get("ask_mode")),
+            }
         except Exception as e:
             logger.error(f"RAG query failed: {e}", exc_info=True)
             return {"message": f"RAG 查询失败: {str(e)}", "answer": "", "slots": slots}
@@ -239,6 +382,21 @@ def dispatch(
 
     # ── 简历解析 ──
     if intent == "resume_parse":
+        # Guard: if text looks like a search query rather than resume content,
+        # fall through to RAG instead of trying to parse it as a resume.
+        search_indicators = ["查找", "搜索", "帮我找", "帮我查", "有没有", "在哪里", "是谁", "介绍", "了解"]
+        if text and any(ind in text for ind in search_indicators) and len(text) < 200:
+            # Redirect to RAG with a helpful note
+            rag_prompt = (
+                "用户似乎在查找或了解某个人，而不是上传简历进行解析。"
+                "请根据你的知识尽可能回答用户的问题。"
+                "如果你无法获取该人物的实时信息，请诚实说明，并建议用户通过正规渠道核实。\n\n"
+                f"用户问题：{query}\n\n"
+                f"回答："
+            )
+            answer = _call_llm(rag_prompt) or "我暂时无法获取该人物的详细信息，建议通过 LinkedIn 或相关学校/公司官网核实。"
+            return {"answer": answer, "intent_redirected": "rag", "slots": slots}
+
         if text:
             try:
                 from src.agents.document_agents import run_document_analysis
@@ -262,7 +420,8 @@ def dispatch(
                     theme = random.choice(POETRY_RECOMMEND_THEMES)
                     search_query = theme
 
-                poems = search_poems(search_query, n_results=3)
+                poetry_k = int(get_ask_mode_preset(context.get("ask_mode"))["top_k"])
+                poems = search_poems(search_query, n_results=poetry_k)
                 if poems:
                     context_text = "\n\n".join(
                         f"【{p.get('dynasty', '')}】{p.get('title', '')} — {p.get('author', '')}\n{p.get('content', '')}"
@@ -428,7 +587,7 @@ def dispatch(
 
             # ── Build chat history ──
             history_text = ""
-            for msg in session_history[-4:]:
+            for msg in (session_history or [])[-4:]:
                 role = "用户" if msg.get("role") == "user" else "Navigator"
                 content = msg.get("content", "")[:80]
                 history_text += f"{role}：{content}\n"
@@ -506,17 +665,48 @@ def dispatch(
     # ── Unknown ──
     # Fallback to general LLM chat so trivial / ambiguous inputs are not met with a dead-end.
     try:
+        preset = get_ask_mode_preset(context.get("ask_mode"))
+        history_block = _format_session_history(
+            context.get("session_history"), int(preset["history_turns"])
+        )
+        report_block = _format_match_report_block(context)
+        style = (
+            "请分步骤深入分析后再回答。"
+            if preset["reasoning"]
+            else (
+                "请用一两句话直接回应。"
+                if int(preset["top_k"]) <= 1
+                else "回答简洁友好，可结合对话历史延续话题。"
+            )
+        )
         prompt = (
             "你是 PlanetX 星际导航员，一位热情、简洁的 AI 助手。"
             "请自然、友好地回应用户的话。"
             "如果用户的话含义不太明确，请主动介绍 PlanetX 的六域探索体系："
             "职业域、学习域、生活域、社交域、健康域、创意域，并邀请用户选择一个方向继续探索。"
-            "语气要有陪伴感，让用户感受到这是一个可以长期成长的地方。\n\n"
+            "语气要有陪伴感，让用户感受到这是一个可以长期成长的地方。\n"
+            f"{style}\n\n"
+            f"{history_block}"
+            f"{report_block}"
             f"用户：{query}\n\n"
             "回答："
         )
-        answer = _call_llm(prompt) or "嗨，我是你的星际导航员，PlanetX 有六域探索等你开启：职业、学习、生活、社交、健康、创意，想从哪个开始？"
+        answer = _call_llm(
+            prompt,
+            temperature=float(preset["temperature"]),
+            max_tokens=int(preset["max_tokens"]),
+        )
+        if not answer:
+            # Do not masquerade as a successful navigator greeting when all providers fail
+            # (common overseas cause: DeepSeek 402 Payment Required / empty balance).
+            answer = (
+                "星际导航暂时连不上 AI 服务（常见原因：DeepSeek 配额不足或密钥失效）。"
+                "请稍后重试，或联系客服 zervi@genz.ltd。"
+            )
     except Exception as e:
         logger.warning(f"Unknown fallback LLM failed: {e}")
-        answer = "嗨，我是你的星际导航员，PlanetX 有六域探索等你开启：职业、学习、生活、社交、健康、创意，想从哪个开始？"
-    return {"answer": answer, "slots": slots}
+        answer = (
+            "星际导航暂时连不上 AI 服务（常见原因：DeepSeek 配额不足或密钥失效）。"
+            "请稍后重试，或联系客服 zervi@genz.ltd。"
+        )
+    return {"answer": answer, "slots": slots, "ask_mode": resolve_ask_mode(context.get("ask_mode"))}

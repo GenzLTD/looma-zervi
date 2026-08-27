@@ -16,6 +16,8 @@
  *   --px-badge-*       Badge / chip tokens
  *   --px-modal-*       Modal / overlay tokens
  *   --px-bar-*         XP bar / progress tokens
+ *   --px-chat-*        Chat component tokens
+ *   --px-tooltip-*     Tooltip component tokens
  *   --px-anim-*        Animation timing tokens
  *   --px-z-*           Z-index scale
  */
@@ -262,6 +264,7 @@
   --px-z-dropdown: 50;
   --px-z-sticky: 80;
   --px-z-modal: 100;
+  --px-z-tooltip: 150;
   --px-z-toast: 200;
   --px-z-popup: 300;
 
@@ -308,4 +311,35 @@
   --px-color-domain-trust: #a29bfe;
   --px-color-domain-self: #fd79a8;
   --px-color-domain-mist: #636e72;
+
+  /* ========================================================
+   * CHAT — component tokens（深色主题，接口对齐 T空间 --chat-*）
+   * ======================================================== */
+  --px-chat-bubble-bg-user: var(--px-color-primary);
+  --px-chat-bubble-text-user: var(--px-color-text-on-primary);
+  --px-chat-bubble-bg-ai: var(--px-color-bg-surface);
+  --px-chat-bubble-text-ai: var(--px-color-text);
+  --px-chat-bubble-radius: var(--px-radius-lg);
+  --px-chat-bubble-padding: 12px 16px;
+  --px-chat-bubble-gap: 8px;
+
+  --px-chat-input-bg: var(--px-color-bg-surface);
+  --px-chat-input-border: 1px solid var(--px-border-default);
+  --px-chat-input-radius: var(--px-radius-lg);
+  --px-chat-input-height: 48px;
+
+  --px-chat-streaming-cursor: var(--px-color-accent);
+  --px-chat-streaming-cursor-width: 2px;
+
+  /* ========================================================
+   * TOOLTIP — component tokens（深色主题，接口对齐 T空间 --tooltip-*）
+   * ======================================================== */
+  --px-tooltip-bg: var(--px-color-bg-elevated);
+  --px-tooltip-color: var(--px-color-text-bright);
+  --px-tooltip-padding: 8px 12px;
+  --px-tooltip-radius: var(--px-radius-sm);
+  --px-tooltip-font-size: 0.75rem;
+  --px-tooltip-line-height: 1.4;
+  --px-tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --px-tooltip-arrow-size: 6px;
 }

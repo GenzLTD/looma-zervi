@@ -68,8 +68,18 @@ export default function MatchScreen() {
       void loadPendingConsensus()
     } catch (err: any) {
       setPhase('error')
+      const code = err?.body?.error || err?.details?.error
+      const friendlyByCode: Record<string, string> = {
+        personality_required: '请先完成星际人格测试',
+        fleet_required: '请先创建或加入舰队（舰队 Tab）',
+        fleet_too_small: '舰队内需要至少另一名成员。复制邀请链接给队友后再试',
+      }
       setErrorMessage(
-        err?.body?.message || err?.message || err?.error || '匹配信号中断，请稍后重试',
+        (code && friendlyByCode[code]) ||
+          err?.body?.message ||
+          err?.message ||
+          err?.error ||
+          '匹配信号中断，请稍后重试',
       )
     }
   }
@@ -77,23 +87,33 @@ export default function MatchScreen() {
   async function onConfirm() {
     if (completing || !result) return
     const ui = deriveMatchUiState(result)
-    if (!ui.canComplete) {
-      setToast('共识尚未验证，请先传播信号或完成双向确认')
+    // v0：后端 can_complete_mission 优先；缺省时匹配成功即可确认
+    const canComplete =
+      result.can_complete_mission === true ||
+      (result.can_complete_mission !== false && (ui.canComplete || result.matched === true))
+    if (!canComplete) {
+      setToast('契合度未达解锁阈值，可邀请更多舰员后再试')
       return
     }
     setCompleting(true)
     try {
       if (!missionsCompleted.includes('match')) {
-        completeMission('match')
+        const ok = await completeMission('match')
+        if (!ok) return
         setAchievement({
-          title: ui.view === 'verified' ? '🎯 共识共振达成！' : '🎯 首次星际匹配！',
-          desc:
-            ui.view === 'verified'
-              ? '舰队共识已验证 · 匹配星图已解锁'
-              : '你已与另一位星际公民完成匹配 · 匹配星图已解锁',
+          title: '🎯 首次星际匹配！',
+          desc: '你已与另一位星际公民完成匹配 · 匹配星图已解锁',
         })
       }
-      setTimeout(() => setScreen('hub'), 600)
+      // 闭环下一动机：凭证出口（信任档案）优先于空 Hub
+      const done = usePlanetXStore.getState().missionsCompleted
+      if (
+        (['personality', 'team', 'match', 'share'] as const).every((id) => done.includes(id))
+      ) {
+        setScreen('trust')
+      } else {
+        setScreen('hub')
+      }
     } finally {
       setCompleting(false)
     }
@@ -135,6 +155,11 @@ export default function MatchScreen() {
   }
 
   const uiState = result ? deriveMatchUiState(result) : null
+  const canComplete =
+    !!result &&
+    (result.can_complete_mission === true ||
+      (result.can_complete_mission !== false &&
+        (!!uiState?.canComplete || result.matched === true)))
 
   return (
     <div>
@@ -272,7 +297,7 @@ export default function MatchScreen() {
             </div>
           )}
 
-          {uiState.canComplete ? (
+          {canComplete ? (
             <button
               onClick={() => void onConfirm()}
               disabled={completing}
@@ -290,11 +315,11 @@ export default function MatchScreen() {
                 marginBottom: 10,
               }}
             >
-              {completing ? '同步中…' : '确认共振 · 解锁星图 +40 XP'}
+              {completing ? '同步中…' : '确认匹配 · 解锁星图 +40 XP'}
             </button>
           ) : (
             <SpreadPanel
-              uiState={uiState}
+              uiState={uiState!}
               sharing={sharing}
               onShare={() => void onShareSpread()}
             />

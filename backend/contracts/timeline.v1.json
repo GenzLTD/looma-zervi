@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Looma Timeline Protocol v1",
+  "version": "0.1.0",
+  "description": "职业时间序列契约：timeline_events 结构、event_kind/source_system 枚举、API 输入输出。真源：docs/TIMELINE_EVENT_MODEL.md。战略：参赛噪声无关；服务个人拥有的持续行为数据。",
+  "enums": {
+    "event_kind": {
+      "phase1_required": [
+        "initial_hypothesis",
+        "quiz_completed",
+        "project_record",
+        "check_in",
+        "interaction_log",
+        "share_authorized",
+        "match_scan",
+        "resume_ingest",
+        "mission_completed",
+        "learning_activity"
+      ],
+      "phase1_stub": [
+        "career_decision",
+        "interview_session",
+        "fleet_co_presence",
+        "external_signal",
+        "emotion_signal"
+      ]
+    },
+    "source_system": [
+      "quiz",
+      "trust_memory",
+      "match",
+      "share",
+      "resume",
+      "ask",
+      "fleet",
+      "manual",
+      "interview",
+      "external",
+      "system"
+    ],
+    "signal_quality": [
+      "self_report",
+      "observed",
+      "external",
+      "hypothesis"
+    ],
+    "weight_role": [
+      "hypothesis",
+      "evidence",
+      "calibration"
+    ],
+    "visibility": [
+      "private",
+      "l1",
+      "l2",
+      "l3"
+    ],
+    "status": [
+      "active",
+      "superseded",
+      "deleted"
+    ]
+  },
+  "timeline_event": {
+    "description": "用户拥有的职业时间线节点；非 product_events，非 narrative_events",
+    "schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "event_kind",
+        "occurred_at",
+        "recorded_at",
+        "source_system",
+        "signal_quality",
+        "weight_role",
+        "visibility",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "tle_{uuid_short}",
+          "examples": [
+            "tle_a1b2c3d4"
+          ]
+        },
+        "user_id": {
+          "type": "string"
+        },
+        "event_kind": {
+          "type": "string"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "recorded_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source_system": {
+          "type": "string"
+        },
+        "source_ref": {
+          "type": "string",
+          "default": ""
+        },
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "payload": {
+          "type": "object",
+          "description": "出站已解析的 payload_json；禁止 PII"
+        },
+        "signal_quality": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "weight_role": {
+          "type": "string"
+        },
+        "visibility": {
+          "type": "string"
+        },
+        "consent_scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "type": "string"
+        },
+        "superseded_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  "idempotency": {
+    "key": [
+      "user_id",
+      "source_system",
+      "source_ref",
+      "event_kind"
+    ],
+    "except_kinds": [
+      "check_in",
+      "interaction_log",
+      "match_scan"
+    ],
+    "on_conflict": "update payload_json and updated_at"
+  },
+  "boundaries": {
+    "not_timeline": [
+      "product_events",
+      "narrative_events"
+    ],
+    "feeds_from": [
+      "quiz_sessions",
+      "trust_memories",
+      "match_reports",
+      "share_codes",
+      "documents/resume",
+      "ask"
+    ],
+    "feeds_to": [
+      "derived_profiles",
+      "trust_attestations(future timeline_refs)"
+    ]
+  },
+  "hypothesis_decay": {
+    "description": "initial_hypothesis 权重上限随活跃月数衰减",
+    "caps_by_active_months": {
+      "0_1": 1.0,
+      "1_3": 0.7,
+      "3_6": 0.3,
+      "6_plus": 0.1
+    }
+  },
+  "api": {
+    "base": "/v1/timeline",
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/v1/timeline",
+        "auth": "required",
+        "query": [
+          "cursor",
+          "limit",
+          "kind",
+          "since"
+        ]
+      },
+      {
+        "method": "POST",
+        "path": "/v1/timeline/events",
+        "auth": "required",
+        "body": "manual event_kind only"
+      },
+      {
+        "method": "PATCH",
+        "path": "/v1/timeline/events/{id}",
+        "auth": "required"
+      },
+      {
+        "method": "DELETE",
+        "path": "/v1/timeline/events/{id}",
+        "auth": "required"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/timeline/growth",
+        "auth": "required",
+        "notes": "sparse => confidence=low"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/timeline/bridge/backfill",
+        "auth": "required",
+        "notes": "idempotent for current user"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/timeline/export",
+        "auth": "required",
+        "notes": "GDPR full export: active events + l1_summary (paginated server-side)"
+      },
+      {
+        "method": "DELETE",
+        "path": "/v1/timeline/me",
+        "auth": "required",
+        "query": ["confirm=yes"],
+        "notes": "GDPR soft-delete all timeline events; requires ?confirm=yes"
+      }
+    ]
+  },
+  "privacy": {
+    "default_visibility": "private",
+    "forbidden_payload_keys": [
+      "email",
+      "phone",
+      "mobile",
+      "id_card",
+      "password",
+      "token",
+      "resume_fulltext",
+      "wechat_openid",
+      "openid"
+    ],
+    "soft_delete": true
+  }
+}

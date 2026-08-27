@@ -7,6 +7,9 @@ Scanned documents or complex table/chart layouts may produce suboptimal results;
 this layer focuses on the text layer.
 
 Migrated from Tatha project (markitdown_convert.py).
+
+Note: MarkItDown ``[docx]`` supports modern ``.docx`` (OOXML). Legacy Word 97-2003
+``.doc`` (OLE) is NOT supported without extra system tools (antiword/LibreOffice).
 """
 from __future__ import annotations
 
@@ -21,6 +24,77 @@ from markitdown._stream_info import StreamInfo
 
 
 _converter_instance: MarkItDown | None = None
+
+# OLE Compound File (legacy .doc / .xls) vs ZIP (OOXML .docx / .xlsx) vs PDF
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0"
+_ZIP_MAGIC = b"PK\x03\x04"
+_PDF_MAGIC = b"%PDF"
+
+
+class UnsupportedDocumentFormat(ValueError):
+    """Raised when bytes are a known-but-unsupported binary format (e.g. legacy .doc)."""
+
+    def __init__(self, message: str, *, code: str = "unsupported_format"):
+        super().__init__(message)
+        self.code = code
+
+
+def sniff_document_kind(content: bytes) -> str:
+    """Return coarse kind from magic bytes: docx|doc|pdf|text|unknown."""
+    if not content:
+        return "unknown"
+    head = content[:8]
+    if head.startswith(_PDF_MAGIC):
+        return "pdf"
+    if head.startswith(_ZIP_MAGIC):
+        # OOXML packages (.docx/.xlsx/.pptx) are ZIPs
+        return "docx"
+    if head.startswith(_OLE_MAGIC):
+        return "doc"
+    # UTF-8 / UTF-16 text-ish
+    sample = content[:4096]
+    if b"\x00" not in sample[:200]:
+        try:
+            sample.decode("utf-8")
+            return "text"
+        except UnicodeDecodeError:
+            pass
+    return "unknown"
+
+
+def resolve_convert_filename(filename: str | None, content: bytes) -> str:
+    """
+    Normalize upload filename for MarkItDown using magic bytes.
+
+    - Misnamed ``.doc`` that is actually OOXML → treat as ``.docx``
+    - Real legacy ``.doc`` (OLE) → raise UnsupportedDocumentFormat with actionable copy
+    """
+    name = (filename or "upload.bin").strip() or "upload.bin"
+    stem, ext = os.path.splitext(name)
+    ext_l = ext.lower()
+    kind = sniff_document_kind(content)
+
+    if kind == "doc":
+        # Legacy Word binary — MarkItDown [docx] cannot convert this.
+        raise UnsupportedDocumentFormat(
+            f"「{name}」是旧版 Word（.doc）格式，当前仅支持 PDF / DOCX。"
+            "请用 Word / WPS 另存为「.docx」或导出 PDF 后再上传。",
+            code="legacy_doc_unsupported",
+        )
+
+    if kind == "docx" and ext_l in (".doc", "", ".bin"):
+        return f"{stem or 'upload'}.docx"
+    if kind == "pdf" and ext_l not in (".pdf",):
+        return f"{stem or 'upload'}.pdf"
+
+    # Extension claims .doc but magic is neither OLE nor OOXML — still guide the user.
+    if ext_l == ".doc" and kind not in ("docx", "pdf", "text"):
+        raise UnsupportedDocumentFormat(
+            f"「{name}」无法识别为可用的 Word/PDF。"
+            "请另存为 .docx 或 PDF 后重试。",
+            code="legacy_doc_unsupported",
+        )
+    return name
 
 
 def _converter() -> MarkItDown:
@@ -92,3 +166,9 @@ def stream_to_markdown(
     return convert_stream(
         stream, filename=filename, file_extension=file_extension
     ).markdown
+
+
+def bytes_to_markdown(content: bytes, *, filename: str | None = None) -> str:
+    """Upload helper: sniff format, reject legacy .doc, then convert."""
+    effective = resolve_convert_filename(filename, content)
+    return stream_to_markdown(io.BytesIO(content), filename=effective)

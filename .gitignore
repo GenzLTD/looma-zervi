@@ -77,10 +77,16 @@ web/
 # Playwright
 frontend/playwright-report/
 frontend/test-results/
+test-results/
+.cursor/
+.playwright-cli/
 
 # Local agent memory (do not commit)
 frontend/.workbuddy/
 .workbuddy/
+
+# Deployment SSH keys
+.ssh/
 
 # Internal test credentials (copy from 内测志愿者账号与入口.example.md)
 docs/内测志愿者账号与入口.md

@@ -54,8 +54,10 @@ export function deriveMatchUiState(data: FleetMatchResponse): MatchUiState {
       canComplete = true;
     } else if (status === "consensus_passed" || status === "consensus_weak" || status === "consensus_failed") {
       canComplete = false;
+    } else if (data.matched) {
+      // v0：无共识字段时，只要匹配成功即可确认任务（不再卡死在 85 分）
+      canComplete = true;
     } else {
-      // v0：无共识字段时高契合度仍可完成（后端门控就绪后改由 can_complete_mission 覆盖）
       canComplete = score >= threshold;
     }
   }

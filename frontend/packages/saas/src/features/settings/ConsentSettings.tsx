@@ -1,25 +1,103 @@
 /**
  * ConsentSettings - PIPL consent status & revoke (T-space SaaS).
- * Owner: szbenyx (adapted for MCP/consent P0联调)
+ * Three primary tiers for the jobseeker path + other scopes.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  CONSENT_PACKAGES,
+  CONSENT_PRIMARY_TIERS,
   CONSENT_SCOPE_DESCRIPTIONS,
   CONSENT_SCOPE_LABELS,
   createComplianceApi,
   type ConsentScope,
+  type PrimaryConsentScope,
 } from "@looma/shared-core";
 import { createSaasApiClient } from "../../api/saasApiClient";
 
-/** Scopes surfaced on B-end SaaS */
-const SAAS_SCOPES: ConsentScope[] = [
+const OTHER_SCOPES: ConsentScope[] = [
   "ask_rag",
-  "job_match",
-  "resume_upload",
-  "resume_parse",
-  "credit_query",
-  "credit_analyze",
+  "profile_share",
+  "mbti_analyze",
+  "navigator_memory",
 ];
+
+const TIER_HINT: Record<PrimaryConsentScope, string> = {
+  jobseeker_core: "第 1 层 · 求职主路径必选",
+  credit_query: "第 2 层 · 查企业风险时单独同意",
+  report_share: "第 3 层 · 对外分享时单独同意",
+};
+
+function ScopeCard({
+  scope,
+  granted,
+  revoking,
+  onRevoke,
+  hint,
+  covered,
+}: {
+  scope: ConsentScope;
+  granted: boolean;
+  revoking: boolean;
+  onRevoke: () => void;
+  hint?: string;
+  covered?: ConsentScope[];
+}) {
+  return (
+    <div
+      className="rounded-lg p-4 flex items-start justify-between gap-4"
+      style={{
+        backgroundColor: "var(--color-bg-card)",
+        boxShadow: "var(--shadow-sm)",
+        border: "1px solid #f0f0f0",
+      }}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <span className="font-medium text-sm" style={{ color: "var(--color-text-primary)" }}>
+            {CONSENT_SCOPE_LABELS[scope]}
+          </span>
+          <span
+            className="text-xs px-2 py-0.5 rounded"
+            style={{
+              backgroundColor: granted ? "#e8f5e9" : "#f5f5f5",
+              color: granted ? "var(--color-success)" : "var(--color-text-muted)",
+            }}
+          >
+            {granted ? "已授权" : "未授权"}
+          </span>
+          {hint && (
+            <span className="text-xs" style={{ color: "var(--color-primary)" }}>
+              {hint}
+            </span>
+          )}
+        </div>
+        <p className="text-xs leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
+          {CONSENT_SCOPE_DESCRIPTIONS[scope]}
+        </p>
+        {covered && covered.length > 0 && (
+          <p className="text-xs mt-2" style={{ color: "var(--color-text-muted)" }}>
+            包含：{covered.map((s) => CONSENT_SCOPE_LABELS[s]).join("、")}
+          </p>
+        )}
+      </div>
+      {granted && (
+        <button
+          type="button"
+          onClick={onRevoke}
+          disabled={revoking}
+          className="shrink-0 text-xs px-3 py-1.5 rounded border cursor-pointer bg-transparent transition-colors"
+          style={{
+            borderColor: "#e0e0e0",
+            color: "var(--color-danger)",
+            opacity: revoking ? 0.5 : 1,
+          }}
+        >
+          {revoking ? "撤回中…" : "撤回授权"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 export default function ConsentSettings() {
   const api = useMemo(() => createSaasApiClient(), []);
@@ -70,7 +148,7 @@ export default function ConsentSettings() {
         隐私授权管理
       </h1>
       <p className="text-sm mb-6" style={{ color: "var(--color-text-muted)" }}>
-        依据《个人信息保护法》，您可对已同意的数据处理范围进行查看与撤回。撤回后再次使用相关功能时将重新征求同意。
+        求职主路径按三层授权：核心处理 → 企业风险 → 对外分享。依据《个人信息保护法》，您可随时查看与撤回；撤回后再次使用相关功能时将重新征求同意。
       </p>
 
       {msg && (
@@ -85,57 +163,39 @@ export default function ConsentSettings() {
       {loading ? (
         <p style={{ color: "var(--color-text-muted)" }}>加载中…</p>
       ) : (
-        <div className="space-y-3">
-          {SAAS_SCOPES.map((scope) => {
-            const granted = Boolean(status[scope]);
-            return (
-              <div
+        <>
+          <h2 className="text-sm font-semibold mb-3" style={{ color: "var(--color-text-primary)" }}>
+            求职三层授权
+          </h2>
+          <div className="space-y-3 mb-8">
+            {CONSENT_PRIMARY_TIERS.map((scope) => (
+              <ScopeCard
                 key={scope}
-                className="rounded-lg p-4 flex items-start justify-between gap-4"
-                style={{
-                  backgroundColor: "var(--color-bg-card)",
-                  boxShadow: "var(--shadow-sm)",
-                  border: "1px solid #f0f0f0",
-                }}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-medium text-sm" style={{ color: "var(--color-text-primary)" }}>
-                      {CONSENT_SCOPE_LABELS[scope]}
-                    </span>
-                    <span
-                      className="text-xs px-2 py-0.5 rounded"
-                      style={{
-                        backgroundColor: granted ? "#e8f5e9" : "#f5f5f5",
-                        color: granted ? "var(--color-success)" : "var(--color-text-muted)",
-                      }}
-                    >
-                      {granted ? "已授权" : "未授权"}
-                    </span>
-                  </div>
-                  <p className="text-xs leading-relaxed" style={{ color: "var(--color-text-muted)" }}>
-                    {CONSENT_SCOPE_DESCRIPTIONS[scope]}
-                  </p>
-                </div>
-                {granted && (
-                  <button
-                    type="button"
-                    onClick={() => void handleRevoke(scope)}
-                    disabled={revoking === scope}
-                    className="shrink-0 text-xs px-3 py-1.5 rounded border cursor-pointer bg-transparent transition-colors"
-                    style={{
-                      borderColor: "#e0e0e0",
-                      color: "var(--color-danger)",
-                      opacity: revoking === scope ? 0.5 : 1,
-                    }}
-                  >
-                    {revoking === scope ? "撤回中…" : "撤回授权"}
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                scope={scope}
+                granted={Boolean(status[scope])}
+                revoking={revoking === scope}
+                onRevoke={() => void handleRevoke(scope)}
+                hint={TIER_HINT[scope]}
+                covered={CONSENT_PACKAGES[scope]}
+              />
+            ))}
+          </div>
+
+          <h2 className="text-sm font-semibold mb-3" style={{ color: "var(--color-text-primary)" }}>
+            其他能力授权
+          </h2>
+          <div className="space-y-3">
+            {OTHER_SCOPES.map((scope) => (
+              <ScopeCard
+                key={scope}
+                scope={scope}
+                granted={Boolean(status[scope])}
+                revoking={revoking === scope}
+                onRevoke={() => void handleRevoke(scope)}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       <button

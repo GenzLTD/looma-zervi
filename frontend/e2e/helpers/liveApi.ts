@@ -75,8 +75,10 @@ export async function seedSeekerWithShareCode(
   };
 }
 
-export function uniqueHrEmail(suffix = String(Date.now())): string {
-  return `e2e-hr-${suffix}@test.local`;
+export function uniqueHrEmail(suffix?: string): string {
+  const random = Math.random().toString(36).slice(2, 8);
+  const fullSuffix = suffix ? `${suffix}-${random}` : `${Date.now()}-${random}`;
+  return `e2e-hr-${fullSuffix}@test.local`;
 }
 
 export async function registerAndGetToken(
@@ -113,6 +115,22 @@ export async function checkCompanyCredit(
   });
   const body = (await resp.json()) as Record<string, unknown>;
   return { status: resp.status, body };
+}
+
+/**
+ * Upgrade a user token to a higher tier via stub payment API.
+ * Returns the new access_token with updated tier claims.
+ */
+export async function upgradeToken(
+  token: string,
+  tier: "supporter" | "pro" = "supporter",
+): Promise<string> {
+  const resp = await apiJson<{ access_token: string }>("/v1/payment/upgrade", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ tier }),
+  });
+  return resp.access_token;
 }
 
 export { TEST_PASS };

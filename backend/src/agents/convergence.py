@@ -66,6 +66,31 @@ DOMAIN_TONES = {
 }
 
 
+# T-Space product context — 注入 Navigator system prompt，让 DeepSeek 知道 PlanetX 是什么
+T_SPACE_DOMAINS = {
+    "求职域 (job)":    "找方向、找工作、找团队的地方。这里发布岗位、内推、面试匹配。",
+    "身份域 (identity)": "构建你的 DID 人格身份（人 DID），沉淀链上信任凭证 VC。",
+    "诗域 (poetry)":   "表达情感和美感的空间。你对这里不擅长，但你能感觉到用户想说什么。",
+    "信任域 (trust)":  "志同道合的人在这里形成「舰队」(fleet)——一种基于印迹匹配的协作关系。",
+    "自我域 (self)":   "用户做人格测试、沉淀三轴印迹（生存/自由/归属）的地方。",
+    "迷雾域 (mist)":   "未探索的未知。confidence 恒为 0，你不解释这里——你也不知道。",
+}
+
+# 用户问题 → 域的快速映射
+QUERY_DOMAIN_HINTS = {
+    "志同道合": "信任域 — 这是一个舰队匹配问题，印迹相近的人会自然形成连接。",
+    "朋友":   "信任域 — 朋友在 PlanetX 里是 fleet 成员，不是泛泛之交。",
+    "伙伴":   "信任域 — 同上，但更强调协作（求职域也可能用到）。",
+    "工作":   "求职域 — 帮用户找方向、找团队、找机会。",
+    "找工作": "求职域 — 同上，结合用户的印迹推荐匹配度高的团队。",
+    "团队":   "求职域 + 信任域 — 团队是舰队 + 岗位的组合。",
+    "迷茫":   "迷雾域 — 不解释，让用户自己走。",
+    "我是谁": "身份域 + 自我域 — 让人做人格测试，沉淀印迹。",
+    "信任":   "信任域 — 链上 VC、信任凭证。",
+    "诗":     "诗域 — 情感表达。",
+}
+
+
 @dataclass
 class NavigatorState:
     """Runtime state of Navigator for a single conversation turn."""
@@ -245,6 +270,9 @@ class ConvergenceOrchestrator:
         # Build prompt sections
         sections: list[str] = []
 
+        # 0. Product context (T-Space / PlanetX) — 必须先注入，让 Navigator 知道自己是什么
+        sections.append(self._product_context_section(query))
+
         # 1. Core persona (Act-aware)
         sections.append(self._persona_section(state.estimated_act))
 
@@ -336,8 +364,40 @@ class ConvergenceOrchestrator:
             "绝不可以说：\n"
             f"- '我理解你的感受'——{NEVER_SAY['我理解你的感受']}\n"
             f"- '你应该选择...'——{NEVER_SAY['你应该选择']}\n"
-            f"- '一切都会好的'——{NEVER_SAY['一切都会好的']}"
+            f"- '一切都会好的'——{NEVER_SAY['一切都会好的']}\n"
+            "\n"
+            "[响应原则 — T-Space 必备]\n"
+            "- 用户的问题要在 T-Space 的六个域中找到对应。不要泛泛而谈。\n"
+            "- '志同道合的朋友' = 信任域的舰队匹配 — 你可以说'你的印迹决定了你会遇到谁'。\n"
+            "- '找工作' = 求职域 — 你可以说'让我看看你的印迹，匹配度高的团队会自己找到你'。\n"
+            "- '我是谁' = 身份域 / 自我域 — 让人去自我域做人格测试。\n"
+            "- 不要说'我不太擅长这个'。你的擅长就是引导用户找到对应的域。\n"
+            "- 不要做心理咨询师。你是 T-Space 的引路人，不是治疗师。\n"
+            "- 把模糊问题转成 T-Space 里的具体动作（测试、匹配、入域）。"
         )
+
+    def _product_context_section(self, query: str = "") -> str:
+        """Inject T-Space / PlanetX product context so DeepSeek knows what it is."""
+        lines = [
+            "[你是谁 — 必读]",
+            "你是 Navigator —— PlanetX T 空间的引导者。",
+            "PlanetX 是一个基于「人格印迹」(imprint) 的协作平台，用户在这里找工作、找团队、形成舰队。",
+            "T 空间有六个域：",
+        ]
+        for domain, desc in T_SPACE_DOMAINS.items():
+            lines.append(f"- {domain}：{desc}")
+        lines.append("")
+        lines.append("印迹系统：每个用户都有三轴印迹（生存/自由/归属），印迹相近的用户形成「舰队」(fleet)——一种不是朋友、但比朋友更可靠的协作关系。")
+        lines.append("")
+        lines.append("你的职责：当用户来到 T 空间，判断他/她想去哪个域，然后给出具体的引导动作。不要泛泛而谈。")
+        if query:
+            matched = [hint for kw, hint in QUERY_DOMAIN_HINTS.items() if kw in query]
+            if matched:
+                lines.append("")
+                lines.append(f"[当前问题映射] 用户说：「{query}」")
+                for h in matched[:2]:
+                    lines.append(f"→ {h}")
+        return "\n".join(lines)
 
     def _imprint_section(self, ctx: dict) -> str:
         imprint = ctx.get("imprint", {})

@@ -1,30 +1,37 @@
 # ============================================================
-# Deploy Overseas — tag 触发部署到 Vultr 新加坡
+# Deploy Overseas — tag overseas-* → Vultr 新加坡（仅 tag 触发）
 #
-# 目标机: 139.180.184.25 (Vultr Singapore)
-# 域名:   api.genz.ltd (Cloudflare → Vultr :80)
-# 前端:   genz.ltd (Vercel 自动部署，此 workflow 不处理)
+# 目标机: 139.180.184.25 · genz.ltd + tspace.genz.ltd + api.genz.ltd
 #
-# 触发方式:
-#   1. 推送 tag 匹配 overseas-* (例: overseas-v1.1, overseas-20260714)
-#   2. 手动 workflow_dispatch
+# URL 契约（与独立营销仓 szpeter2026/genz-web 对齐）:
+#   营销 CTA appRegisterUrl = https://tspace.genz.ltd/register
+#   本 CI 发布 SaaS → /var/www/saas/dist → nginx host tspace.genz.ltd
+#   genz.ltd 营销站由 Vercel 独立部署，本 workflow 不发布 genz-web
 #
-# GitHub Secrets (必填):
-#   VULTR_SSH_HOST          - 139.180.184.25
-#   VULTR_SSH_USER          - root (或 ubuntu)
-#   VULTR_SSH_PRIVATE_KEY   - SSH 私钥全文
-#   VULTR_JWT_SECRET        - JWT 签名密钥 (>=32 字符)
-#   VULTR_DEEPSEEK_API_KEY  - DeepSeek API Key
+# 触发: git tag overseas-v1.4.3 && git push origin overseas-v1.4.3
+#       或 Actions 页 workflow_dispatch 手动部署
 #
-# GitHub Secrets (可选，有默认值):
-#   VULTR_DEPLOY_PATH       - 默认 /opt/looma-zervi
-#   VULTR_DEEPSEEK_BASE_URL - 默认 https://api.deepseek.com/v1
+# 发版建议（避免 Actions 列表出现两次）:
+#   1. 先 push 分支提交: git push origin release/overseas
+#   2. 再只 push tag:   git push origin overseas-vX.Y.Z
+#   分支 push 不会跑本部署（on.tags only）；但若 workflow YAML 有语法错误，
+#   GitHub 仍可能为「校验失败」各记一条 0-job run。
+#   正确做法: 分支上先保证 workflow 可解析，再打 tag；或一次只推 tag
+#   （tag 指向的 commit 需已在远端）。
 #
-# 前置条件:
-#   - Vultr 服务器已安装 Docker + Docker Compose
-#   - SSH 公钥已添加到服务器 authorized_keys
-#   - Cloudflare DNS: api.genz.ltd → 139.180.184.25 (Proxied)
-#   - Cloudflare SSL: Full (不加密到源站) 或 Flexible
+# Secrets 任选一组（overseas-v1.3 成功部署用的是 VULTR_*）:
+#   VULTR_SSH_HOST / VULTR_SSH_USER / VULTR_SSH_PRIVATE_KEY / VULTR_JWT_SECRET
+#   或 SSH_HOST_OVERSEAS / SSH_USER_OVERSEAS / SSH_PRIVATE_KEY_OVERSEAS / ENV_JWT_SECRET_SG
+#
+# GitHub Secrets（建议）:
+#   ENV_DEEPSEEK_API_KEY / VULTR_DEEPSEEK_API_KEY
+#   ENV_QCC_AUTH_TOKEN / VULTR_QCC_AUTH_TOKEN  (企查查 MCP Authorization，含 Bearer 前缀)
+#   ENV_OPENAI_API_KEY
+#   ENV_GOOGLE_CLIENT_ID / ENV_GOOGLE_CLIENT_SECRET
+#   ENV_STRIPE_SECRET_KEY / ENV_STRIPE_WEBHOOK_SECRET
+#
+# Repository Variables（可选）:
+#   DEPLOY_PATH_SG         - 默认 /opt/looma-zervi
 # ============================================================
 name: Deploy Overseas
 
@@ -33,32 +40,20 @@ on:
     tags:
       - 'overseas-*'
   workflow_dispatch:
-    inputs:
-      skip_tests:
-        description: 'Skip backend tests (faster deploy)'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
 
 concurrency:
   group: deploy-overseas
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
-  DEPLOY_PATH: ${{ secrets.VULTR_DEPLOY_PATH != '' && secrets.VULTR_DEPLOY_PATH || '/opt/looma-zervi' }}
-  DEEPSEEK_BASE_URL: ${{ secrets.VULTR_DEEPSEEK_BASE_URL != '' && secrets.VULTR_DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1' }}
+  DEPLOY_PATH: ${{ vars.DEPLOY_PATH_SG != '' && vars.DEPLOY_PATH_SG || secrets.VULTR_DEPLOY_PATH || '/opt/looma-zervi' }}
+  OVERSEAS_DOMAIN: genz.ltd
+  OVERSEAS_API_HOST: api.genz.ltd
 
 jobs:
-  # ============================================
-  # 后端测试 (可跳过)
-  # ============================================
   backend-test:
     name: "Backend Tests"
     runs-on: ubuntu-latest
-    if: github.event.inputs.skip_tests != 'true'
     defaults:
       run:
         working-directory: backend
@@ -87,116 +82,199 @@ jobs:
           DEEPSEEK_API_KEY: skip
           DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
           CHROMA_PERSIST_DIR: /tmp/chroma_ci
+          DEPLOY_REGION: SG
         run: python -m pytest tests/ -v --tb=short
 
-  # ============================================
-  # Docker 构建验证
-  # ============================================
-  docker-build-check:
-    name: "Docker Build Check"
+  saas-build:
+    name: "Build SaaS (tspace)"
     runs-on: ubuntu-latest
-    if: github.event.inputs.skip_tests != 'true'
-    needs: [backend-test]
+    defaults:
+      run:
+        working-directory: frontend
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build backend image
-        run: |
-          docker build \
-            -f docker/Dockerfile.backend \
-            -t looma-backend:overseas-check \
-            backend/
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
-  # ============================================
-  # 部署到 Vultr 新加坡
-  # ============================================
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build overseas SaaS
+        env:
+          # Same-origin /v1 via tspace nginx — avoids cross-origin CORS to api.genz.ltd
+          VITE_API_BASE: ""
+          VITE_DEPLOY_REGION: SG
+        run: pnpm --filter @looma/saas build
+
+      - name: Upload saas dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: saas-dist
+          path: frontend/packages/saas/dist
+          retention-days: 1
+
+  # genz.ltd marketing is owned by independent repo szpeter2026/genz-web (Vercel).
+  # Do not dual-publish monorepo frontend/packages/genz-web here.
+
   deploy:
-    name: "Deploy to Vultr Singapore"
+    name: "Deploy to Vultr SG"
     runs-on: ubuntu-latest
-    needs: [backend-test]
-    if: always() && (needs.backend-test.result == 'success' || needs.backend-test.result == 'skipped')
-    environment: overseas
+    needs: [backend-test, saas-build]
+    if: success()
+    env:
+      SSH_HOST: ${{ secrets.VULTR_SSH_HOST || secrets.SSH_HOST_OVERSEAS || secrets.SSH_HOST_SG }}
+      SSH_USER: ${{ secrets.VULTR_SSH_USER || secrets.SSH_USER_OVERSEAS || secrets.SSH_USER_SG }}
+      ENV_JWT_SECRET: ${{ secrets.VULTR_JWT_SECRET || secrets.ENV_JWT_SECRET_SG || secrets.ENV_JWT_SECRET }}
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download saas dist
+        uses: actions/download-artifact@v4
+        with:
+          name: saas-dist
+          path: artifacts/saas
+
+      - name: Validate SSH secrets
+        env:
+          KEY_VULTR: ${{ secrets.VULTR_SSH_PRIVATE_KEY }}
+          KEY_OVERSEAS: ${{ secrets.SSH_PRIVATE_KEY_OVERSEAS }}
+          KEY_SG: ${{ secrets.SSH_PRIVATE_KEY_SG }}
+          KEY_ALT: ${{ secrets.OVERSEAS_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY_VULTR" ] && [ -z "$KEY_OVERSEAS" ] && [ -z "$KEY_SG" ] && [ -z "$KEY_ALT" ]; then
+            echo "::error::Missing SSH private key secret."
+            echo "Add VULTR_SSH_PRIVATE_KEY (overseas-v1.3 style) or SSH_PRIVATE_KEY_OVERSEAS."
+            exit 1
+          fi
+          if [ -z "${{ env.SSH_HOST }}" ] || [ -z "${{ env.SSH_USER }}" ]; then
+            echo "::error::Missing SSH host/user."
+            echo "Add VULTR_SSH_HOST=139.180.184.25 and VULTR_SSH_USER=root"
+            exit 1
+          fi
 
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.1
         with:
-          ssh-private-key: ${{ secrets.VULTR_SSH_PRIVATE_KEY }}
+          ssh-private-key: ${{ secrets.VULTR_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY_OVERSEAS || secrets.SSH_PRIVATE_KEY_SG || secrets.OVERSEAS_SSH_PRIVATE_KEY }}
 
       - name: Add host key
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.VULTR_SSH_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
 
       - name: Setup SSH env
         run: |
           echo 'SSH_CMD=ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o StrictHostKeyChecking=accept-new' >> $GITHUB_ENV
-          echo "DEPLOY_TARGET=${{ secrets.VULTR_SSH_USER }}@${{ secrets.VULTR_SSH_HOST }}" >> $GITHUB_ENV
+          echo "DEPLOY_TARGET=${{ env.SSH_USER }}@${{ env.SSH_HOST }}" >> $GITHUB_ENV
 
       - name: Bootstrap server
         run: |
           $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << BOOTSTRAP
           set -euo pipefail
           DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          echo "=== Bootstrap Vultr server (DEPLOY_PATH=\${DEPLOY_PATH}) ==="
+          DOMAIN="${{ env.OVERSEAS_DOMAIN }}"
+          API_HOST="${{ env.OVERSEAS_API_HOST }}"
+          TSPACE_HOST="tspace.${DOMAIN}"
 
-          # Install Docker if missing
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "=== Installing Docker ==="
-            curl -fsSL https://get.docker.com | sh
-            systemctl enable docker
-            systemctl start docker
-          fi
+          echo "=== Bootstrap overseas server (DEPLOY_PATH=\${DEPLOY_PATH}) ==="
+          mkdir -p "\${DEPLOY_PATH}" /var/www/genz-web /var/www/saas/dist "\${DEPLOY_PATH}/data" "\${DEPLOY_PATH}/logs" "\${DEPLOY_PATH}/data/chroma_models"
 
-          # Create directories
-          mkdir -p "\${DEPLOY_PATH}" "\${DEPLOY_PATH}/data" "\${DEPLOY_PATH}/logs"
-          mkdir -p "\${DEPLOY_PATH}/data/chroma_models"
-
-          # Ensure .env exists with overseas config
           ENV_FILE="\${DEPLOY_PATH}/backend/.env"
           mkdir -p "\$(dirname "\${ENV_FILE}")"
           if [ ! -f "\${ENV_FILE}" ]; then
-            echo "=== Creating backend/.env for overseas ==="
+            echo "=== Creating backend/.env (overseas template) ==="
             printf '%s\n' \
-              '# Auto-generated by GitHub Actions (overseas deploy)' \
+              '# Auto-generated by GitHub Actions (overseas)' \
               'FLASK_ENV=production' \
               'FLASK_PORT=5200' \
-              "JWT_SECRET=${{ secrets.VULTR_JWT_SECRET }}" \
-              "DEEPSEEK_API_KEY=${{ secrets.VULTR_DEEPSEEK_API_KEY }}" \
-              "DEEPSEEK_BASE_URL=${{ env.DEEPSEEK_BASE_URL }}" \
+              "JWT_SECRET=${{ env.ENV_JWT_SECRET }}" \
+              "DEEPSEEK_API_KEY=${{ secrets.VULTR_DEEPSEEK_API_KEY || secrets.ENV_DEEPSEEK_API_KEY }}" \
+              'DEEPSEEK_BASE_URL=https://api.deepseek.com/v1' \
               'DEEPSEEK_MODEL=deepseek-chat' \
+              "QCC_AUTH_TOKEN=${{ secrets.VULTR_QCC_AUTH_TOKEN || secrets.ENV_QCC_AUTH_TOKEN }}" \
+              'QCC_ENABLED=true' \
+              "QCC_MCP_BASE_URL=${{ vars.QCC_MCP_BASE_URL || 'http://1.14.202.161:8998/mcp' }}" \
+              "OPENAI_API_KEY=${{ secrets.ENV_OPENAI_API_KEY }}" \
+              'OPENAI_BASE_URL=https://api.openai.com/v1' \
+              'OPENAI_MODEL=gpt-4o-mini' \
+              'LLM_PROVIDER_ORDER=openai,deepseek,ollama' \
               'DATABASE_PATH=/app/data/looma.db' \
               'POETRY_CHROMA_PATH=/app/poetry_data' \
               'CHROMA_MODE=remote' \
               'CHROMA_HOST=chromadb' \
               'CHROMA_PORT=8000' \
+              'RATE_LIMIT_STORAGE_URI=redis://redis:6379/1' \
+              'DEPLOY_REGION=SG' \
+              "CORS_ORIGINS=https://\${DOMAIN},https://www.\${DOMAIN},https://\${TSPACE_HOST},https://\${API_HOST},https://app.\${DOMAIN},https://tspace.szbolent.cn,http://localhost:5173,http://localhost:5174,http://localhost:3000" \
+              "GOOGLE_REDIRECT_URI=https://\${API_HOST}/v1/auth/google/callback" \
+              "GOOGLE_CLIENT_ID=${{ secrets.ENV_GOOGLE_CLIENT_ID }}" \
+              "GOOGLE_CLIENT_SECRET=${{ secrets.ENV_GOOGLE_CLIENT_SECRET }}" \
+              "STRIPE_SECRET_KEY=${{ secrets.ENV_STRIPE_SECRET_KEY }}" \
+              "STRIPE_WEBHOOK_SECRET=${{ secrets.ENV_STRIPE_WEBHOOK_SECRET }}" \
+              'STRIPE_CURRENCY=USD' \
+              "STRIPE_SUCCESS_URL=https://\${DOMAIN}/pricing?status=success" \
+              "STRIPE_CANCEL_URL=https://\${DOMAIN}/pricing?status=cancel" \
               'WECHAT_DEV_MODE=true' \
-              'CORS_ORIGINS=https://genz.ltd,https://www.genz.ltd,https://app.genz.ltd' \
               > "\${ENV_FILE}"
-            echo "=== .env created ==="
           else
-            echo "=== .env already exists, normalizing paths ==="
+            echo "=== .env exists, normalize overseas keys ==="
           fi
 
-          # Normalize key config values
           set_kv() {
             local key="\$1" val="\$2"
+            [ -n "\${val}" ] || return 0
+            # Use awk (not sed) so URLs like https://tspace.genz.ltd are not mangled.
+            # Do not nest python heredocs here — they break Actions YAML parsing (L222).
             if grep -q "^\${key}=" "\${ENV_FILE}"; then
-              sed -i "s|^\${key}=.*|\${key}=\${val}|" "\${ENV_FILE}"
+              awk -v key="\${key}" -v val="\${val}" '
+                BEGIN { done=0 }
+                index(\$0, key "=")==1 { print key "=" val; done=1; next }
+                { print }
+                END { if (!done) print key "=" val }
+              ' "\${ENV_FILE}" > "\${ENV_FILE}.tmp" && mv "\${ENV_FILE}.tmp" "\${ENV_FILE}"
             else
               echo "\${key}=\${val}" >> "\${ENV_FILE}"
             fi
           }
+
           set_kv FLASK_PORT 5200
           set_kv DATABASE_PATH /app/data/looma.db
           set_kv POETRY_CHROMA_PATH /app/poetry_data
           set_kv CHROMA_MODE remote
           set_kv CHROMA_HOST chromadb
           set_kv CHROMA_PORT 8000
-          set_kv CORS_ORIGINS https://genz.ltd,https://www.genz.ltd,https://app.genz.ltd
+          set_kv RATE_LIMIT_STORAGE_URI redis://redis:6379/1
+          set_kv DEPLOY_REGION SG
+          set_kv CORS_ORIGINS "https://\${DOMAIN},https://www.\${DOMAIN},https://\${TSPACE_HOST},https://\${API_HOST},https://app.\${DOMAIN},https://tspace.szbolent.cn,http://localhost:5173,http://localhost:5174,http://localhost:3000"
+          set_kv GOOGLE_REDIRECT_URI "https://\${API_HOST}/v1/auth/google/callback"
+          set_kv JWT_SECRET "${{ env.ENV_JWT_SECRET }}"
+          set_kv DEEPSEEK_API_KEY "${{ secrets.VULTR_DEEPSEEK_API_KEY || secrets.ENV_DEEPSEEK_API_KEY }}"
+          set_kv DEEPSEEK_BASE_URL "https://api.deepseek.com/v1"
+          set_kv DEEPSEEK_MODEL deepseek-chat
+          # Prefer DeepSeek overseas; OpenAI only if secret present. Do not rely on host Ollama.
+          set_kv LLM_PROVIDER_ORDER deepseek,openai,ollama
+          set_kv QCC_AUTH_TOKEN "${{ secrets.VULTR_QCC_AUTH_TOKEN || secrets.ENV_QCC_AUTH_TOKEN }}"
+          set_kv QCC_ENABLED true
+          set_kv QCC_MCP_BASE_URL "${{ vars.QCC_MCP_BASE_URL || 'http://1.14.202.161:8998/mcp' }}"
+          set_kv OPENAI_API_KEY "${{ secrets.ENV_OPENAI_API_KEY }}"
+          set_kv GOOGLE_CLIENT_ID "${{ secrets.ENV_GOOGLE_CLIENT_ID }}"
+          set_kv GOOGLE_CLIENT_SECRET "${{ secrets.ENV_GOOGLE_CLIENT_SECRET }}"
+          set_kv STRIPE_SECRET_KEY "${{ secrets.ENV_STRIPE_SECRET_KEY }}"
+          set_kv STRIPE_WEBHOOK_SECRET "${{ secrets.ENV_STRIPE_WEBHOOK_SECRET }}"
+          set_kv STRIPE_SUCCESS_URL "https://\${DOMAIN}/pricing?status=success"
+          set_kv STRIPE_CANCEL_URL "https://\${DOMAIN}/pricing?status=cancel"
+
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "Docker not installed. Run scripts/deploy-overseas.sh once on the VPS first." >&2
+            exit 1
+          fi
 
           echo "=== Bootstrap done ==="
           BOOTSTRAP
@@ -207,23 +285,18 @@ jobs:
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='frontend/node_modules' \
-            --exclude='frontend/' \
             --exclude='**/__pycache__' \
             --exclude='**/*.pyc' \
             --exclude='backend/venv' \
-            --exclude='backend/.venv' \
             --exclude='backend/data' \
             --exclude='data/poetry_full' \
             --exclude='.env' \
             --exclude='backend/.env' \
-            --exclude='.pnpm-store' \
-            --exclude='.workbuddy' \
-            --exclude='.idea' \
-            --exclude='.pytest_cache' \
+            --exclude='frontend/' \
             ./ \
             ${{ env.DEPLOY_TARGET }}:${{ env.DEPLOY_PATH }}/
 
-      - name: Sync poetry ChromaDB data (if exists locally)
+      - name: Sync poetry ChromaDB data
         run: |
           if [ -d "data/poetry_full" ]; then
             echo "=== Syncing poetry ChromaDB data ==="
@@ -234,37 +307,91 @@ jobs:
             echo "=== data/poetry_full/ not in repo — using server copy if present ==="
           fi
 
+      - name: Deploy SaaS to tspace.genz.ltd
+        run: |
+          rsync -avz -e "$SSH_CMD" --delete \
+            artifacts/saas/ \
+            ${{ env.DEPLOY_TARGET }}:/var/www/saas/dist/
+          $SSH_CMD ${{ env.DEPLOY_TARGET }} "find /var/www/saas/dist -type f | wc -l"
+
       - name: Deploy nginx config
         run: |
           $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'NGINX'
           set -euo pipefail
           DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          NGINX_SRC="\${DEPLOY_PATH}/nginx-vultr.conf"
-
-          if [ ! -f "\${NGINX_SRC}" ]; then
-            echo "Missing \${NGINX_SRC}, skipping nginx config"
-            exit 0
+          DOMAIN="${{ env.OVERSEAS_DOMAIN }}"
+          SSL_DIR="/etc/nginx/ssl"
+          SRC="${DEPLOY_PATH}/docker/nginx.conf"
+          if [ ! -f "${SRC}" ]; then
+            echo "Missing ${SRC}" >&2
+            exit 1
           fi
 
-          # Install nginx if missing
+          # Origin TLS for Cloudflare Full mode (see scripts/deploy-overseas.sh)
+          mkdir -p "${SSL_DIR}"
+          if [ ! -f "${SSL_DIR}/fullchain.pem" ] || [ ! -f "${SSL_DIR}/privkey.pem" ]; then
+            echo "=== Generating self-signed origin SSL (${SSL_DIR}) ==="
+            if ! command -v openssl >/dev/null 2>&1; then
+              apt-get update -y && apt-get install -y openssl
+            fi
+            openssl req -x509 -nodes -days 3650 \
+              -newkey rsa:2048 \
+              -keyout "${SSL_DIR}/privkey.pem" \
+              -out "${SSL_DIR}/fullchain.pem" \
+              -subj "/C=SG/ST=Singapore/L=Singapore/O=Looma/CN=${DOMAIN}" \
+              -addext "subjectAltName=DNS:${DOMAIN},DNS:*.${DOMAIN}"
+            chmod 600 "${SSL_DIR}/privkey.pem"
+          else
+            echo "=== Origin SSL already present (${SSL_DIR}) ==="
+          fi
+
+          cp "${SRC}" /etc/nginx/nginx.conf
+          # Stock Ubuntu snippets can conflict when we ship a full replacement nginx.conf
+          rm -f /etc/nginx/sites-enabled/*
+
           if ! command -v nginx >/dev/null 2>&1; then
-            echo "=== Installing nginx ==="
-            apt-get update -qq && apt-get install -y -qq nginx
+            apt-get update -y && apt-get install -y nginx
           fi
+          if ! command -v lsof >/dev/null 2>&1; then
+            apt-get update -y && apt-get install -y lsof
+          fi
+          mkdir -p /var/log/nginx /run/nginx /var/cache/nginx
+          nginx -t
 
-          # Vultr uses a monolithic nginx.conf (not sites-enabled/*.conf),
-          # so we deploy the full config directly.
-          sudo cp "\${NGINX_SRC}" /etc/nginx/nginx.conf
+          echo "=== Stopping existing nginx and freeing :80 / :443 ==="
+          systemctl stop nginx 2>/dev/null || true
+          for port in 80 443; do
+            for pid in $(lsof -t -i TCP:"${port}" -sTCP:LISTEN 2>/dev/null || true); do
+              cmd=$(ps -p "${pid}" -o comm= 2>/dev/null || true)
+              echo "=== Killing ${cmd} (pid ${pid}) on port ${port} ==="
+              kill "${pid}" 2>/dev/null || kill -9 "${pid}" 2>/dev/null || true
+            done
+          done
+          rm -f /run/nginx.pid /var/run/nginx.pid
+          sleep 1
+          echo "=== Listeners after cleanup ==="
+          ss -tlnp 2>/dev/null | grep -E ':80|:443' || echo "(none)"
 
-          # Allow port 80 through firewall
-          if command -v ufw >/dev/null 2>&1; then sudo ufw allow 80/tcp 2>/dev/null || true; fi
-
-          sudo nginx -t
-          sudo nginx -s reload || sudo nginx
-          echo "=== Nginx reloaded (monolithic nginx.conf for api.genz.ltd) ==="
+          systemctl enable nginx
+          systemctl reset-failed nginx 2>/dev/null || true
+          if systemctl is-active --quiet nginx; then
+            systemctl reload nginx || true
+          else
+            systemctl start nginx || true
+          fi
+          if ! systemctl is-active --quiet nginx; then
+            echo "=== nginx failed to start — diagnostics ==="
+            nginx -t || true
+            systemctl status nginx --no-pager -l || true
+            journalctl -u nginx.service -n 80 --no-pager || true
+            tail -n 40 /var/log/nginx/error.log 2>/dev/null || true
+            ss -tlnp 2>/dev/null | grep -E ':80|:443' || netstat -tlnp 2>/dev/null | grep -E ':80|:443' || true
+            exit 1
+          fi
+          echo "=== Nginx running (overseas) ==="
           NGINX
 
-      - name: Build & restart Docker backend
+      - name: Build & restart Docker stack
         run: |
           $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'DOCKER'
           set -euo pipefail
@@ -272,22 +399,21 @@ jobs:
           COMPOSE="docker compose -f ${DEPLOY_PATH}/docker/docker-compose.yml -p looma-zervi"
           COMPOSE_FILE="${DEPLOY_PATH}/docker/docker-compose.yml"
 
-          echo "=== Stop legacy containers ==="
-          docker rm -f looma-backend looma-chromadb 2>/dev/null || true
-          ${COMPOSE} down --remove-orphans 2>/dev/null || true
+          for proj in looma-zervi docker; do
+            docker compose -f "${COMPOSE_FILE}" -p "${proj}" down --remove-orphans 2>/dev/null || true
+          done
+          docker rm -f looma-backend looma-chromadb looma-redis 2>/dev/null || true
 
-          echo "=== Free port 5200 (native gunicorn if running) ==="
           if command -v lsof >/dev/null 2>&1; then
             for pid in $(lsof -t -i :5200 2>/dev/null || true); do
               cmd=$(ps -p "$pid" -o comm= 2>/dev/null || true)
               if [ "$cmd" != "docker-proxy" ]; then
-                kill "$pid" 2>/dev/null || sudo kill "$pid" 2>/dev/null || true
+                kill "$pid" 2>/dev/null || true
               fi
             done
           fi
           sleep 2
 
-          echo "=== Populate poetry Docker volume if empty ==="
           VOLUME_NAME="looma-zervi_poetry-data"
           if ! docker run --rm -v ${VOLUME_NAME}:/data alpine test -f /data/chroma.sqlite3 2>/dev/null; then
             if [ -d "${DEPLOY_PATH}/data/poetry_full" ]; then
@@ -296,14 +422,10 @@ jobs:
                 -v ${DEPLOY_PATH}/data/poetry_full:/src:ro \
                 alpine cp -a /src/. /dest/
               echo "=== Poetry volume populated ==="
-            else
-              echo "=== No poetry source on server, skip volume init ==="
             fi
           fi
 
           cd "${DEPLOY_PATH}/docker"
-
-          # Smart rebuild: only rebuild if requirements.txt or Dockerfile changed
           HASH=$(sha256sum "${DEPLOY_PATH}/backend/requirements.txt" "${DEPLOY_PATH}/docker/Dockerfile.backend" | sha256sum | awk '{print $1}')
           MARKER="/tmp/looma-backend-image.hash"
           NEED_BUILD=1
@@ -319,11 +441,8 @@ jobs:
             echo "${HASH}" > "${MARKER}"
           fi
 
-          echo "=== Start / recreate containers ==="
-          ${COMPOSE} up -d --remove-orphans --force-recreate --no-build backend
-          ${COMPOSE} up -d --no-build chromadb
+          ${COMPOSE} up -d --remove-orphans --force-recreate --no-build backend redis chromadb
 
-          echo "=== Wait for backend health ==="
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:5200/health >/dev/null 2>&1; then
               echo "Backend healthy after ${i}s"
@@ -334,65 +453,57 @@ jobs:
           curl -sf http://127.0.0.1:5200/health || { ${COMPOSE} logs --tail 40 backend; exit 1; }
           DOCKER
 
-      - name: Import poetry into SQLite (first run only)
-        run: |
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'POETRY_IMPORT'
-          set -euo pipefail
-          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          COMPOSE="docker compose -f ${DEPLOY_PATH}/docker/docker-compose.yml -p looma-zervi"
-
-          COUNT=$(${COMPOSE} exec -T backend \
-            python -c "from src.db.manager import DatabaseManager; db=DatabaseManager('/app/data/looma.db'); db.init_schema(); print(db.get_poetry_stats()['total'])" 2>/dev/null || echo "0")
-
-          if [ "${COUNT:-0}" -gt 0 ] 2>/dev/null; then
-            echo "=== Poems table already has ${COUNT} entries, skipping import ==="
-            exit 0
-          fi
-
-          echo "=== Running poetry import (ChromaDB -> SQLite) ==="
-          ${COMPOSE} exec -T backend \
-            python scripts/import_poetry.py \
-              --source-dir /app/poetry_data \
-              --db-path /app/data/looma.db \
-              --batch-size 1000
-          echo "=== Poetry import complete ==="
-          POETRY_IMPORT
-
-      - name: Health check (local via nginx)
+      - name: Health check (local)
         run: |
           $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'HEALTH'
           set -euo pipefail
           echo "=== Backend :5200 ==="
           curl -sf http://127.0.0.1:5200/health
           echo ""
-          echo "=== Nginx :80 /health ==="
+          echo "=== Nginx api host /health ==="
           curl -sf -H "Host: api.genz.ltd" http://127.0.0.1/health
-          echo ""
-          echo "=== Poetry stats ==="
-          curl -sf -H "Host: api.genz.ltd" http://127.0.0.1/v1/poetry/stats | head -c 200
           echo ""
           HEALTH
 
-      - name: Public health check (via Cloudflare)
+      - name: Public health check
         run: |
           echo "=== Public https://api.genz.ltd/health ==="
-          curl -sf --connect-timeout 15 "https://api.genz.ltd/health"
+          curl -sf --connect-timeout 20 "https://api.genz.ltd/health"
+          echo ""
+          echo "=== CORS for tspace.genz.ltd (informational) ==="
+          CORS_HDR=$(curl -sf -D - -o /dev/null -X POST "https://api.genz.ltd/v1/auth/login" \
+            -H "Content-Type: application/json" \
+            -H "Origin: https://tspace.genz.ltd" \
+            -d '{"email":"beta_free@looma.test","password":"looma123"}' | grep -i access-control-allow-origin || true)
+          if [ -n "$CORS_HDR" ]; then
+            echo "$CORS_HDR"
+          else
+            echo "WARN: no CORS header for tspace (SaaS uses same-origin /v1 proxy)"
+          fi
+          echo ""
+          echo "=== tspace same-origin login proxy ==="
+          curl -sf -X POST "https://tspace.genz.ltd/v1/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"beta_free@looma.test","password":"looma123"}' | head -c 80
+          echo ""
+          echo "=== Public https://genz.ltd/ (first bytes) ==="
+          curl -sf --connect-timeout 20 "https://genz.ltd/" | head -c 120
+          echo ""
+          echo "=== Marketing CTA target: https://tspace.genz.ltd/register ==="
+          # Must match szpeter2026/genz-web SITE_CONFIG.appRegisterUrl
+          REG_CODE=$(curl -sS -o /tmp/tspace-register.html -w '%{http_code}' --connect-timeout 20 \
+            "https://tspace.genz.ltd/register")
+          echo "HTTP ${REG_CODE}"
+          if [ "${REG_CODE}" != "200" ]; then
+            echo "::error::tspace register URL not reachable (expected 200, got ${REG_CODE})"
+            exit 1
+          fi
+          head -c 160 /tmp/tspace-register.html; echo ""
+          if ! grep -q 'PlanetX\|root\|assets/' /tmp/tspace-register.html; then
+            echo "::warning::register HTML unexpected; check SaaS deploy"
+          fi
           echo ""
 
       - name: Clean up old images
         run: |
           $SSH_CMD ${{ env.DEPLOY_TARGET }} "docker image prune -f"
-
-      - name: Deployment summary
-        if: always()
-        run: |
-          echo "========================================"
-          echo "  Overseas deployment summary"
-          echo "========================================"
-          echo "  Tag:        ${{ github.ref_name }}"
-          echo "  Commit:     ${{ github.sha }}"
-          echo "  Server:     ${{ secrets.VULTR_SSH_HOST }} (Vultr Singapore)"
-          echo "  Deploy URL: https://api.genz.ltd"
-          echo "  Frontend:   https://genz.ltd (Vercel auto-deploy)"
-          echo "  Health:     https://api.genz.ltd/health"
-          echo "========================================"

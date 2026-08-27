@@ -6,12 +6,10 @@
  * Uses createChatApi().ask() instead of SSE streaming.
  * Backend compatibility: matches mini-program and shared-core contract.
  */
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
+import { ApiError, createChatApi, type DocSource as ApiDocSource } from "@looma/shared-core";
 import { createSaasApiClient } from "../../api/saasApiClient";
-import { createChatApi, type DocSource as ApiDocSource } from "@looma/shared-core";
-
-const RETRY_DELAYS = [1000, 2000, 5000];
-const MAX_RETRIES = 3;
+import { useSaasAuthStore } from "../auth/authStore";
 
 export interface DocSource {
   filename: string;
@@ -29,9 +27,12 @@ export interface ChatMessage {
 
 interface UseChatNonStreamingOptions {
   mode?: "chat" | "deepseek" | "fast";
-  top_k?: number;
   /** Pre-check / retry when backend returns consent_required */
   ensureAskConsent?: () => Promise<boolean>;
+  /** Saved match report id for summary-level Ask context */
+  reportId?: string | null;
+  /** Default true: backend may attach latest report when reportId omitted */
+  useLatestReport?: boolean;
 }
 
 let _uid = 0;
@@ -47,12 +48,31 @@ function mapSources(sources?: ApiDocSource[]): DocSource[] | undefined {
   }));
 }
 
+function errorBody(err: unknown): Record<string, any> {
+  if (err instanceof ApiError) return err.body ?? {};
+  if (err && typeof err === "object" && "body" in err) {
+    const body = (err as { body?: Record<string, any> }).body;
+    if (body && typeof body === "object") return body;
+  }
+  return {};
+}
+
+function errorStatus(err: unknown): number | undefined {
+  if (err instanceof ApiError) return err.status;
+  if (err && typeof err === "object" && "status" in err) {
+    const status = (err as { status?: number }).status;
+    return typeof status === "number" ? status : undefined;
+  }
+  return undefined;
+}
+
 export function useChatNonStreaming(options: UseChatNonStreamingOptions = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const retryCountRef = useRef(0);
-  
+  const [quotaExhausted, setQuotaExhausted] = useState(false);
+  const fetchQuota = useSaasAuthStore((s) => s.fetchQuota);
+
   const apiClient = useMemo(() => createSaasApiClient(), []);
   const chatApi = useMemo(() => createChatApi(apiClient), [apiClient]);
 
@@ -60,8 +80,8 @@ export function useChatNonStreaming(options: UseChatNonStreamingOptions = {}) {
   const send = useCallback(
     async (query: string) => {
       setError(null);
+      setQuotaExhausted(false);
       setIsLoading(true);
-      retryCountRef.current = 0;
 
       const userMsg: ChatMessage = {
         id: uid(),
@@ -84,15 +104,23 @@ export function useChatNonStreaming(options: UseChatNonStreamingOptions = {}) {
 
       const attemptRequest = async (): Promise<void> => {
         try {
+          const mode = options.mode ?? "chat";
+          // 对话模式带多轮；深度带少量上下文；快速不带历史以降低延迟
+          const historyLimit = mode === "chat" ? 10 : mode === "deepseek" ? 4 : 0;
           const response = await chatApi.ask({
             query,
-            session_history: messages.slice(-10).map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
+            mode,
+            session_history:
+              historyLimit > 0
+                ? messages.slice(-historyLimit).map((m) => ({
+                    role: m.role,
+                    content: m.content,
+                  }))
+                : undefined,
+            report_id: options.reportId || undefined,
+            use_latest_report: options.useLatestReport ?? true,
           });
 
-          // Update assistant message with full answer
           setMessages((prev) =>
             prev.map((m): ChatMessage =>
               m.id === assistantId
@@ -105,14 +133,17 @@ export function useChatNonStreaming(options: UseChatNonStreamingOptions = {}) {
             )
           );
 
+          void fetchQuota();
           setIsLoading(false);
-        } catch (err: any) {
-          const errMsg = err.message || "请求失败";
-          const errData = err.data || {};
-          
-          // Handle consent required
+        } catch (err: unknown) {
+          const status = errorStatus(err);
+          const errData = errorBody(err);
+          const errMsg =
+            (err instanceof Error && err.message) || "请求失败";
+
+          // Handle consent required (single re-attempt after consent — not a quota burn loop)
           if (
-            err.status === 403 &&
+            status === 403 &&
             errData.error === "consent_required" &&
             options.ensureAskConsent
           ) {
@@ -123,37 +154,54 @@ export function useChatNonStreaming(options: UseChatNonStreamingOptions = {}) {
             return;
           }
 
-          // Retry logic
-          if (retryCountRef.current < MAX_RETRIES) {
-            const delay = RETRY_DELAYS[retryCountRef.current] ?? 5000;
-            retryCountRef.current++;
-            setError(`请求失败，${delay / 1000}s 后重试 (${retryCountRef.current}/${MAX_RETRIES})...`);
-            await new Promise((r) => setTimeout(r, delay));
-            setError(null);
-            return attemptRequest();
+          // Handle quota exhausted (429)
+          if (status === 429 || errData.error === "quota_exceeded") {
+            setError(errData.message || "当日配额已用尽");
+            setQuotaExhausted(true);
+            void fetchQuota();
+            setIsLoading(false);
+            return;
           }
 
-          setError(errMsg);
+          // Never auto-retry: each /v1/ask consumes quota server-side.
+          setError(errData.message || errMsg);
+          void fetchQuota();
           setIsLoading(false);
         }
       };
 
       await attemptRequest();
     },
-    [messages, options.mode, options.top_k, options.ensureAskConsent, chatApi]
+    [
+      messages,
+      options.mode,
+      options.ensureAskConsent,
+      options.reportId,
+      options.useLatestReport,
+      chatApi,
+      fetchQuota,
+    ]
   );
 
   const clear = useCallback(() => {
     setMessages([]);
     setError(null);
+    setQuotaExhausted(false);
     setIsLoading(false);
   }, []);
 
-  return { 
-    messages, 
+  const resetQuotaError = useCallback(() => {
+    setError(null);
+    setQuotaExhausted(false);
+  }, []);
+
+  return {
+    messages,
     isStreaming: isLoading, // Keep same interface as useChat
-    error, 
+    error,
+    quotaExhausted,
     sendStream: send, // Keep same interface as useChat
-    clear 
+    clear,
+    resetQuotaError,
   };
 }

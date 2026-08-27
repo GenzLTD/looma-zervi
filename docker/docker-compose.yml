@@ -15,6 +15,25 @@ services:
       - "5200:5200"
     environment:
       - FLASK_PORT=5200
+      # Explicit CORS for SaaS hosts (also set via backend/.env; keep both in sync)
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://genz.ltd,https://www.genz.ltd,https://tspace.genz.ltd,https://api.genz.ltd,https://app.genz.ltd,https://tspace.szbolent.cn,http://localhost:5173,http://localhost:5174,http://localhost:3000}
+      # Overseas: Google OAuth + payment providers + rate limiting
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_CURRENCY=${STRIPE_CURRENCY:-USD}
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID:-}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET:-}
+      - PAYPAL_MODE=${PAYPAL_MODE:-sandbox}
+      - PAYPAL_WEBHOOK_ID=${PAYPAL_WEBHOOK_ID:-}
+      - AIRWALLEX_API_KEY=${AIRWALLEX_API_KEY:-}
+      - AIRWALLEX_CLIENT_KEY=${AIRWALLEX_CLIENT_KEY:-}
+      - AIRWALLEX_MODE=${AIRWALLEX_MODE:-demo}
+      - AIRWALLEX_WEBHOOK_SECRET=${AIRWALLEX_WEBHOOK_SECRET:-}
+      - RATE_LIMIT_STORAGE_URI=${RATE_LIMIT_STORAGE_URI:-memory://}
+      - DEPLOY_REGION=${DEPLOY_REGION:-US}
     env_file:
       - ../backend/.env
     volumes:
@@ -22,8 +41,11 @@ services:
       - ../backend:/app
       - backend-data:/app/data
       - chroma-data:/app/chroma_data
-      - poetry-data:/app/poetry_data
+      # 本地诗词向量库（宿主机 data/poetry_full → 容器内 /app/poetry_data）
+      - ../data/poetry_full:/app/poetry_data:ro
       - ../data/chroma_models:/root/.cache/chroma/onnx_models
+    depends_on:
+      - redis
     networks:
       - looma-net
 
@@ -44,10 +66,25 @@ services:
     networks:
       - looma-net
 
+  # ============================================
+  # Redis (overseas: rate limiting + cache)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: looma-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - looma-net
+
 volumes:
   backend-data:
   chroma-data:
-  poetry-data:
+  redis-data:
 
 networks:
   looma-net:

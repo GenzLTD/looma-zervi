@@ -56,3 +56,18 @@ export const TOP_N_LIMIT = {
   pro: 10,
   enterprise: 20,
 } as const;
+
+/** Aligned with backend `tier_limits.py`. null = unlimited. */
+export const CANDIDATE_LIMITS = {
+  free: 0,
+  supporter: 20,
+  pro: 200,
+  enterprise: null,
+} as const;
+
+export const JOB_POST_LIMITS = {
+  free: 0,
+  supporter: 3,
+  pro: 20,
+  enterprise: null,
+} as const;

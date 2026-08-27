@@ -1,6 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { PlanetXModal, PlanetXDropdown, PlanetXTabs } from "../index";
+import {
+  PlanetXModal,
+  PlanetXDropdown,
+  PlanetXTabs,
+  PlanetXChatBubble,
+  PlanetXStreamingText,
+  PlanetXTooltip,
+  PlanetXIcon,
+} from "../index";
 import PlanetXButton from "../PlanetXButton";
+import type { PlanetXIconName } from "../PlanetXIcon";
+import { ICON_GLYPHS } from "../icons/glyphs";
 
 const meta: Meta = {
   title: "PlanetX/New Components",
@@ -60,16 +70,16 @@ export const ModalExample: StoryObj = {
 export const DropdownExample: StoryObj = {
   render: () => {
     const items = [
-      { value: "profile", label: "Profile", icon: "👤" },
-      { value: "settings", label: "Settings", icon: "⚙️" },
-      { value: "achievements", label: "Achievements", icon: "🏆" },
-      { value: "logout", label: "Log Out", icon: "🚪" },
+      { value: "profile", label: "Profile", icon: <PlanetXIcon name="profile" size={14} /> },
+      { value: "settings", label: "Settings", icon: <PlanetXIcon name="settings" size={14} /> },
+      { value: "achievements", label: "Achievements", icon: <PlanetXIcon name="trophy" size={14} /> },
+      { value: "logout", label: "Log Out", icon: <PlanetXIcon name="logout" size={14} /> },
     ];
 
     return (
       <PlanetXDropdown
         trigger={
-          <PlanetXButton variant="ghost" rightIcon="▼">
+          <PlanetXButton variant="ghost" rightIcon={<PlanetXIcon name="chevron-down" size={14} />}>
             User Menu
           </PlanetXButton>
         }
@@ -305,6 +315,77 @@ export const ComponentComposition: StoryObj = {
             </div>
           </div>
         </PlanetXModal>
+      </div>
+    );
+  },
+};
+
+export const ChatBubbleExample: StoryObj = {
+  render: () => (
+    <div style={{ width: 420 }}>
+      <PlanetXChatBubble role="user" content="星系匹配结果怎么样？" />
+      <PlanetXChatBubble
+        role="ai"
+        content="你的适配度 87%。舰队已为你锁定 3 个高潜岗位。"
+        timestamp="刚刚"
+      />
+      <PlanetXChatBubble role="ai" content="" loading />
+    </div>
+  ),
+};
+
+export const StreamingTextExample: StoryObj = {
+  render: () => (
+    <div style={{ width: 360, color: "var(--px-color-text)" }}>
+      <PlanetXStreamingText text="正在解析你的星际档案" done={false} />
+    </div>
+  ),
+};
+
+export const TooltipExample: StoryObj = {
+  render: () => (
+    <div style={{ display: "flex", gap: "var(--px-spacing-xl)" }}>
+      <PlanetXTooltip content="深空提示：完成每日任务可获得 XP" position="top">
+        <PlanetXButton variant="outline">悬停查看</PlanetXButton>
+      </PlanetXTooltip>
+      <PlanetXTooltip content="右侧提示" position="right">
+        <PlanetXButton variant="ghost">右侧</PlanetXButton>
+      </PlanetXTooltip>
+    </div>
+  ),
+};
+
+export const IconSystemExample: StoryObj = {
+  render: () => {
+    const names = Object.keys(ICON_GLYPHS) as PlanetXIconName[];
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(100px, 1fr))",
+          gap: "var(--px-spacing-md)",
+          width: 480,
+          color: "var(--px-color-accent)",
+        }}
+      >
+        {names.map((name) => (
+          <div
+            key={name}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 8,
+              padding: "var(--px-spacing-sm)",
+              borderRadius: "var(--px-radius-md)",
+              background: "var(--px-color-bg-surface)",
+              border: "1px solid var(--px-border-default)",
+            }}
+          >
+            <PlanetXIcon name={name} size={24} color="currentColor" />
+            <span style={{ fontSize: 11, color: "var(--px-color-text-muted)" }}>{name}</span>
+          </div>
+        ))}
       </div>
     );
   },

@@ -106,6 +106,19 @@ export default function ResultScreen() {
         <div style={{ fontSize: '48px', marginBottom: '8px' }}>{p.emoji}</div>
         <div style={{ fontSize: '18px', fontWeight: 900, color: 'var(--px-color-accent)' }}>{p.name}</div>
         <div style={{ fontSize: '12px', color: 'var(--px-color-text-muted)', letterSpacing: '1px', marginTop: '4px' }}>{p.tagline}</div>
+        <div
+          style={{
+            marginTop: 10,
+            display: 'inline-block',
+            fontSize: 11,
+            padding: '4px 10px',
+            borderRadius: 999,
+            background: 'rgba(255,180,80,0.12)',
+            color: 'rgba(255,200,120,0.95)',
+          }}
+        >
+          初始假设 · 将随行为沉淀被修正
+        </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', margin: '16px 0' }}>
           {p.traits.map((t, i) => (
@@ -141,7 +154,7 @@ export default function ResultScreen() {
         >
           <div style={{ fontSize: '48px', position: 'relative', zIndex: 10 }}>{p.emoji}</div>
           <div style={{ fontSize: '18px', fontWeight: 900, color: 'var(--px-color-accent)', position: 'relative', zIndex: 10 }}>{p.name}</div>
-          <div style={{ fontSize: '12px', color: 'var(--px-color-text-muted)', position: 'relative', zIndex: 10 }}>PlanetX · 星际人格认证</div>
+          <div style={{ fontSize: '12px', color: 'var(--px-color-text-muted)', position: 'relative', zIndex: 10 }}>PlanetX · 初始假设（行为将更新它）</div>
           <div
             style={{
               width: '80px', height: '80px', margin: '12px auto 0',
@@ -178,6 +191,22 @@ export default function ResultScreen() {
             }}
           >
             📸 保存分享卡片图片
+          </button>
+          <button
+            onClick={() => setScreen('timeline')}
+            style={{
+              padding: '12px 0',
+              borderRadius: '16px',
+              fontWeight: 'bold',
+              fontSize: '14px',
+              color: 'var(--px-color-accent)',
+              border: '1px solid rgba(200,255,80,0.2)',
+              background: 'transparent',
+              cursor: 'pointer',
+              width: '100%',
+            }}
+          >
+            🌀 查看职业时间线
           </button>
           <button
             onClick={() => setScreen('hub')}

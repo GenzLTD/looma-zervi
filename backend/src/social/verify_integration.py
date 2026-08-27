@@ -3,10 +3,11 @@
 
 用实际的 looma.db 数据库测试：
   1. 构建社交图谱
-  2. 查找用户间最短路径
-  3. 计算信任度评分
-  4. 统计 6 步内可达用户
-  5. 网络拓扑分析
+  2. 查找用户间最短路径（几何层 degrees）
+  3. 统计 6 步内可达用户
+  4. 网络拓扑分析
+
+注意：不做 degrees→trust_score 映射（TRUST_LAYER 红线）。
 
 运行方式:
   cd C:/Users/szben/Desktop/GenzLTD/looma-zervi/backend
@@ -23,8 +24,6 @@ from src.db.manager import DatabaseManager
 from src.social.graph_builder import build_social_graph, get_graph_stats
 from src.social.social_bfs import (
     bfs_shortest_path,
-    compute_degrees_of_separation,
-    compute_trust_score,
     bfs_reachable_users,
     compute_network_stats,
 )
@@ -50,7 +49,7 @@ def main():
         db.init_schema()
 
     # Step 1: 构建社交图谱
-    print("\n[1/5] 构建社交图谱...")
+    print("\n[1/4] 构建社交图谱...")
     adj = build_social_graph(db)
     stats = get_graph_stats(adj)
     print(f"  节点数: {stats['nodes']}")
@@ -71,7 +70,7 @@ def main():
             print(f"    {hub['user_id'][:8]}... → 度数 {hub['degree']}")
 
     # Step 2: 找两个随机用户的最短路径
-    print("\n[2/5] 查找最短社交路径...")
+    print("\n[2/4] 查找最短社交路径...")
     nodes = list(adj.keys())
     if len(nodes) >= 2:
         source = random.choice(nodes)
@@ -89,14 +88,8 @@ def main():
         else:
             print(f"  {source[:8]}... → {target[:8]}... : 无法建立连接")
 
-    # Step 3: 信任度评分
-    print("\n[3/5] 信任度评分...")
-    for d in range(7):
-        score = compute_trust_score(d)
-        print(f"  {d} 度分隔 → 信任度 {score}")
-
-    # Step 4: 6 步内可达用户
-    print("\n[4/5] 6 步内可达用户统计...")
+    # Step 3: 6 步内可达用户
+    print("\n[3/4] 6 步内可达用户统计...")
     if len(nodes) >= 1:
         source = random.choice(nodes)
         distances = bfs_reachable_users(adj, source, max_depth=6)
@@ -112,16 +105,15 @@ def main():
             print(f"    第 {d} 度: {by_degree[d]} 人")
         print(f"  总计可达: {total_reach} / {len(adj) - 1} 人")
 
-    # Step 5: 网络拓扑分析
-    print("\n[5/5] 网络拓扑分析...")
+    # Step 4: 网络拓扑分析
+    print("\n[4/4] 网络拓扑分析...")
     net_stats = compute_network_stats(adj, sample_size=min(100, len(adj)))
     print(f"  平均路径长度: {net_stats['avg_path_length']}")
     print(f"  6 步内可达比例: {net_stats['reachable_6step_pct']}%")
     print(f"  平均度数: {net_stats['avg_degree']}")
 
     print("\n" + "=" * 60)
-    print("  集成验证完成!")
-    print("  下一步: 在 app.py 中注册 social_bp 蓝图")
+    print("  集成验证完成!（几何层 only，无 trust_score）")
     print("=" * 60)
 
 

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>H1 · 鸿蒙元服务 系统级入口</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{--bg:#fff;--card:#F7F8FA;--hm:#007DFF;--brand:#FF6B35;--purple:#8B5CF6;--t1:#182431;--t2:#99A2B1}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:390px;height:844px;overflow:hidden;font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--t1)}
+.phone{width:390px;height:844px;padding:0 16px;background:linear-gradient(180deg,#F3F6FB 0%,#fff 40%)}
+.status{height:44px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 8px 6px;font-size:14px;font-weight:600}
+.search{margin-top:8px;height:44px;border-radius:999px;background:#fff;box-shadow:0 2px 8px rgba(24,36,49,.06);display:flex;align-items:center;gap:10px;padding:0 16px;color:var(--t2);font-size:14px}
+.chips{display:flex;gap:8px;margin:12px 0 16px;overflow:hidden}
+.chip{white-space:nowrap;background:#fff;border:1px solid #E8ECF2;border-radius:999px;padding:6px 12px;font-size:12px;color:var(--t1)}
+.chip.on{background:#E8F2FF;border-color:#B7D6FF;color:var(--hm)}
+.svc{background:#fff;border-radius:16px;box-shadow:0 6px 20px rgba(24,36,49,.08);padding:16px;border:1px solid rgba(255,107,53,.18);margin-bottom:16px}
+.svc-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.brand-row{display:flex;align-items:center;gap:10px}
+.icon{width:36px;height:36px;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--purple));display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700}
+.brand-row .n{font-size:14px;font-weight:600}
+.meta{font-size:11px;color:var(--hm);background:#E8F2FF;padding:2px 6px;border-radius:4px;margin-left:6px}
+.svc h2{font-size:16px;font-weight:700;margin-bottom:6px}
+.svc p{font-size:13px;color:var(--t2);margin-bottom:10px}
+.proof{font-size:12px;color:var(--t2);margin-bottom:14px}
+.cta-row{display:flex;align-items:center;justify-content:space-between}
+.cta{background:var(--hm);color:#fff;border:none;border-radius:24px;padding:10px 22px;font-size:14px;font-weight:600}
+.deco{width:48px;height:48px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#ffb089,var(--brand));box-shadow:0 0 16px rgba(255,107,53,.35)}
+.block{margin-bottom:16px}
+.block h3{font-size:14px;font-weight:600;margin-bottom:10px}
+.suggest{display:flex;gap:10px}
+.sc{flex:1;background:var(--card);border-radius:16px;padding:12px}
+.sc .t{font-size:12px;line-height:1.4;margin-bottom:10px;min-height:34px}
+.sc button{border:none;background:#fff;color:var(--hm);font-size:12px;font-weight:600;padding:6px 12px;border-radius:999px;border:1px solid #D6E6FF}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.entry{text-align:center}
+.entry .i{width:48px;height:48px;margin:0 auto 6px;border-radius:12px;background:#fff;box-shadow:0 2px 8px rgba(24,36,49,.06);display:grid;place-items:center;font-size:18px}
+.entry .n{font-size:12px;color:var(--t1)}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="status"><span>9:41</span><span>▮▮▮ ▾ 🔋</span></div>
+  <div class="search">🔍 搜索应用、服务、内容</div>
+  <div class="chips">
+    <span class="chip">今日天气</span>
+    <span class="chip">行程提醒</span>
+    <span class="chip on">PlanetX测试</span>
+  </div>
+  <div class="svc">
+    <div class="svc-top">
+      <div class="brand-row"><div class="icon">PX</div><div><span class="n">PlanetX</span><span class="meta">元服务</span></div></div>
+      <span style="color:var(--t2)">⋯</span>
+    </div>
+    <h2>你的星际人格是？</h2>
+    <p>3分钟测试，解锁职场潜能</p>
+    <div class="proof">● 12,847人已测试</div>
+    <div class="cta-row"><button class="cta">立即测试</button><div class="deco"></div></div>
+  </div>
+  <div class="block">
+    <h3>小艺建议</h3>
+    <div class="suggest">
+      <div class="sc"><div class="t">明天10:00 有AI模拟面试</div><button>准备</button></div>
+      <div class="sc"><div class="t">你的舰队升到了 Lv.12</div><button>查看</button></div>
+    </div>
+  </div>
+  <div class="block">
+    <h3>服务快捷入口</h3>
+    <div class="grid">
+      <div class="entry"><div class="i">✦</div><div class="n">PlanetX测试</div></div>
+      <div class="entry"><div class="i">🎤</div><div class="n">AI面试</div></div>
+      <div class="entry"><div class="i">📄</div><div class="n">简历优化</div></div>
+      <div class="entry"><div class="i">🗺</div><div class="n">职业图谱</div></div>
+      <div class="entry"><div class="i">🚀</div><div class="n">舰队动态</div></div>
+      <div class="entry"><div class="i">🏆</div><div class="n">成就墙</div></div>
+      <div class="entry"><div class="i">💬</div><div class="n">消息中心</div></div>
+      <div class="entry"><div class="i">⚙</div><div class="n">设置</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

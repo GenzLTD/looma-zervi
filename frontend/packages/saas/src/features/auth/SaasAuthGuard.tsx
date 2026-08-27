@@ -8,9 +8,11 @@
  */
 import { ReactNode, useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useSaasAuthStore } from "./authStore";
 
 export function SaasAuthGuard({ children }: { children?: ReactNode }) {
+  const { t } = useTranslation();
   const { token, isAuthenticated, fetchProfile } = useSaasAuthStore();
   const location = useLocation();
   const [validating, setValidating] = useState(false);
@@ -39,7 +41,7 @@ export function SaasAuthGuard({ children }: { children?: ReactNode }) {
           fontFamily: "system-ui, sans-serif",
         }}
       >
-        <p>验证登录状态...</p>
+        <p>{t("auth.validating")}</p>
       </div>
     );
   }

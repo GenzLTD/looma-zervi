@@ -32,8 +32,8 @@ export default function SaasChatBubble({
         alignItems: "center",
         justifyContent: "center",
         fontSize: 14,
-        background: isUser ? "var(--color-primary)" : "var(--color-bg-surface)",
-        color: isUser ? "#fff" : "var(--color-text-secondary)",
+        background: isUser ? "var(--chat-bubble-bg-user)" : "var(--color-bg-surface)",
+        color: isUser ? "var(--chat-bubble-text-user)" : "var(--color-text-secondary)",
         border: isUser ? "none" : "1px solid var(--color-border)",
       }}>
         {avatar || (isUser ? "我" : "AI")}

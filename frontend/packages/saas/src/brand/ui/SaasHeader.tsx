@@ -2,6 +2,7 @@
  * SaaS Header — pure UI component.
  * Top bar with title, search, notifications, user menu.
  */
+import { useTranslation } from "react-i18next";
 import type { SaasHeaderProps } from "./types";
 
 export default function SaasHeader({
@@ -10,9 +11,11 @@ export default function SaasHeader({
   notifications = 0,
   onLogout,
   onNotificationsClick,
-  searchPlaceholder = "搜索...",
+  searchPlaceholder,
   onSearch,
 }: SaasHeaderProps) {
+  const { t } = useTranslation();
+  const placeholder = searchPlaceholder ?? t("common.searchPlaceholder");
   return (
     <header
       style={{
@@ -54,7 +57,7 @@ export default function SaasHeader({
             <span style={{ color: "var(--color-text-muted)", fontSize: 14 }}>🔍</span>
             <input
               type="text"
-              placeholder={searchPlaceholder}
+              placeholder={placeholder}
               onChange={(e) => onSearch(e.target.value)}
               style={{
                 flex: 1,
@@ -142,7 +145,7 @@ export default function SaasHeader({
                   padding: "4px 8px",
                 }}
               >
-                退出
+                {t("auth.logoutShort")}
               </button>
             )}
           </div>

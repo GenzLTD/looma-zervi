@@ -486,6 +486,36 @@ export function createAnalyticsApi(client: MiniApiClientInterface) {
 // ============================================================
 // Compliance API (PIPL consent gate)
 // ============================================================
+// ============================================================
+// Trust API (PlanetX attestations)
+// ============================================================
+export function createTrustApi(client: MiniApiClientInterface) {
+  return {
+    /** List current user attestations */
+    listAttestations: () =>
+      client.get<import("../types/trust").TrustAttestationsResponse>(API_ROUTES.TRUST_ATTESTATIONS),
+
+    /** Refresh attestation cache */
+    refresh: () =>
+      client.post<import("../types/trust").TrustAttestationsResponse>(API_ROUTES.TRUST_REFRESH),
+
+    /** Create a profile share code */
+    createShareCode: (payload?: import("../types/trust").CreateShareCodeRequest) =>
+      client.post<import("../types/trust").CreateShareCodeResponse>(API_ROUTES.TRUST_SHARE_CODE, payload ?? {}),
+
+    /** List user's share codes */
+    listShareCodes: () =>
+      client.get<import("../types/trust").TrustShareCodesResponse>(API_ROUTES.TRUST_SHARE_CODES),
+
+    /** Revoke a share code */
+    revokeShareCode: (codeId: string) =>
+      client.delete<{ message: string }>(`${API_ROUTES.TRUST_SHARE_CODE}/${codeId}`),
+  };
+}
+
+// ============================================================
+// Compliance API (PIPL consent gate)
+// ============================================================
 export function createComplianceApi(client: MiniApiClientInterface) {
   return {
     grant: (scope: import("../types/compliance").ConsentScope, purpose?: string) =>

@@ -3,19 +3,19 @@
  * Shows a centered popup with bounceIn animation + claimPulse.
  */
 import type { PlanetXAchievementPopupProps } from "./types";
+import PlanetXIcon from "./PlanetXIcon";
 
 export default function PlanetXAchievementPopup({
   visible,
   title,
   description,
-  icon = "🏆",
+  icon,
   onClose,
 }: PlanetXAchievementPopupProps) {
   if (!visible) return null;
 
   return (
     <>
-      {/* Overlay */}
       <div
         onClick={onClose}
         style={{
@@ -25,7 +25,6 @@ export default function PlanetXAchievementPopup({
           zIndex: "var(--px-z-popup)",
         }}
       />
-      {/* Popup */}
       <div
         className="px-anim-bounceIn"
         style={{
@@ -46,9 +45,14 @@ export default function PlanetXAchievementPopup({
       >
         <div
           className="px-anim-claimPulse"
-          style={{ fontSize: 48, marginBottom: "var(--px-spacing-sm)" }}
+          style={{
+            marginBottom: "var(--px-spacing-sm)",
+            display: "flex",
+            justifyContent: "center",
+            color: "var(--px-color-gold)",
+          }}
         >
-          {icon}
+          {icon ?? <PlanetXIcon name="trophy" size={48} color="currentColor" />}
         </div>
         <div
           style={{

@@ -136,17 +136,17 @@ class TestOrderLifecycle:
         )
         assert resp.status_code in (200, 500)
 
-    def test_plans_response_includes_stub_mode(self, client):
+    def test_plans_response_excludes_stub_mode(self, client):
+        """stub_mode must not leak to public API responses."""
         resp = client.get("/v1/payment/plans")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert "stub_mode" in data
-        assert data["stub_mode"] is True
+        assert "stub_mode" not in data
 
-    def test_payment_status_includes_stub_mode(self, client):
+    def test_payment_status_excludes_stub_mode(self, client):
         token = _register(client, "status_test@test.com")
         resp = client.get("/v1/payment/status", headers=_auth_headers(token))
         assert resp.status_code == 200
         data = resp.get_json()
-        assert "stub_mode" in data
+        assert "stub_mode" not in data
         assert data["tier"] == "free"

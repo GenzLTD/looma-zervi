@@ -2,6 +2,7 @@
   "pages": [
     "pages/splash/index",
     "pages/hub/index",
+    "pages/trust/index",
     "pages/ask/index",
     "pages/profile/index",
     "pages/quiz/index",

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=390, initial-scale=1" />
+<title>P1 · PlanetX 星际人格测试首页</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --px-bg:#0A0E27;--px-card:#131A3A;--px-ter:#1C2550;
+  --px-orange:#FF6B35;--px-purple:#8B5CF6;--px-cyan:#00D4FF;
+  --px-t1:#fff;--px-t2:#A0AEC0;--px-t3:#6B7280;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:390px;height:844px;overflow:hidden;font-family:'Noto Sans SC',sans-serif;background:linear-gradient(135deg,#0A0E27 0%,#1C2550 50%,#131A3A 100%);color:var(--px-t1)}
+.phone{position:relative;width:390px;height:844px;padding:0 16px}
+.status{height:44px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 8px 6px;font-size:14px;font-weight:600}
+.status .icons{display:flex;gap:6px;font-size:12px;opacity:.9}
+.nav{height:56px;display:flex;align-items:center;justify-content:space-between}
+.logo{font-family:Orbitron,sans-serif;font-size:18px;font-weight:900;background:linear-gradient(90deg,var(--px-orange),var(--px-purple));-webkit-background-clip:text;color:transparent}
+.nav-right{display:flex;align-items:center;gap:12px}
+.bell{position:relative;width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.06);display:grid;place-items:center;font-size:14px}
+.bell::after{content:'';position:absolute;top:4px;right:5px;width:7px;height:7px;background:#EF4444;border-radius:50%;border:1.5px solid var(--px-bg)}
+.avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--px-orange),var(--px-purple));display:grid;place-items:center;font-size:12px;font-weight:700}
+.hero{position:relative;height:300px;margin-top:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;border-radius:16px}
+.nebula{position:absolute;border-radius:50%;filter:blur(1px);pointer-events:none}
+.n1{width:180px;height:180px;top:-40px;right:-30px;background:radial-gradient(circle,rgba(139,92,246,.45),transparent 70%)}
+.n2{width:140px;height:140px;bottom:10px;left:-20px;background:radial-gradient(circle,rgba(255,107,53,.35),transparent 70%)}
+.stars{position:absolute;inset:0;background-image:radial-gradient(1.5px 1.5px at 20px 30px,#fff,transparent),radial-gradient(1px 1px at 80px 90px,#fff,transparent),radial-gradient(1.5px 1.5px at 160px 40px,#fff,transparent),radial-gradient(1px 1px at 240px 120px,#fff,transparent),radial-gradient(1.5px 1.5px at 300px 70px,#fff,transparent),radial-gradient(1px 1px at 50px 160px,#fff,transparent);opacity:.55}
+.hero h1{position:relative;font-size:24px;font-weight:700;margin-bottom:8px}
+.hero p{position:relative;font-size:14px;color:var(--px-t2);margin-bottom:20px}
+.cta{position:relative;background:var(--px-orange);color:#fff;border:none;border-radius:999px;padding:12px 36px;font-size:16px;font-weight:700;box-shadow:0 0 20px rgba(255,107,53,.45)}
+.social-proof{position:relative;margin-top:14px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--px-t2)}
+.stack{display:flex}
+.stack span{width:22px;height:22px;border-radius:50%;border:2px solid var(--px-bg);margin-left:-8px;background:linear-gradient(135deg,#334,#667);font-size:9px;display:grid;place-items:center;color:#fff}
+.stack span:first-child{margin-left:0}
+.section{margin-top:16px}
+.section-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:14px;font-weight:500}
+.section-h a{color:var(--px-cyan);font-size:12px;text-decoration:none}
+.fleet{display:flex;gap:10px;overflow:hidden}
+.fleet-card{min-width:148px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px}
+.fleet-card .name{font-size:13px;font-weight:500;margin-bottom:4px}
+.fleet-card .lv{font-size:11px;color:var(--px-orange);margin-bottom:8px}
+.bar{height:6px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--px-orange),var(--px-purple));border-radius:999px}
+.tasks{display:flex;flex-direction:column;gap:10px}
+.task{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px}
+.task .ico{width:28px;height:28px;border-radius:8px;background:var(--px-ter);display:grid;place-items:center;font-size:14px}
+.task .t{font-size:13px;margin-bottom:6px}
+.task .xp{font-size:11px;color:var(--px-orange);font-weight:600}
+.tabbar{position:absolute;left:0;right:0;bottom:0;height:83px;background:rgba(10,14,39,.92);border-top:1px solid rgba(255,255,255,.08);display:grid;grid-template-columns:repeat(4,1fr);padding:10px 8px 24px;backdrop-filter:blur(12px)}
+.tab{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--px-t3)}
+.tab.active{color:var(--px-orange)}
+.tab .i{font-size:18px}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="status"><span>09:41</span><span class="icons">▮▮▮ ▾ 🔋</span></div>
+  <div class="nav">
+    <div class="logo">PlanetX</div>
+    <div class="nav-right"><div class="bell">🔔</div><div class="avatar">J</div></div>
+  </div>
+  <div class="hero">
+    <div class="nebula n1"></div><div class="nebula n2"></div><div class="stars"></div>
+    <h1>发现你的星际人格</h1>
+    <p>3分钟测试，解锁你的职场星际坐标</p>
+    <button class="cta">开始测试</button>
+    <div class="social-proof">
+      <div class="stack"><span>A</span><span>李</span><span>陈</span></div>
+      已有 12,847 人完成测试
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-h"><span>我的舰队</span><a href="#">查看全部 ›</a></div>
+    <div class="fleet">
+      <div class="fleet-card"><div class="name">🪐 探索者号</div><div class="lv">Lv.12</div><div class="bar"><i style="width:72%"></i></div></div>
+      <div class="fleet-card"><div class="name">🚀 领航员号</div><div class="lv">Lv.8</div><div class="bar"><i style="width:48%"></i></div></div>
+      <div class="fleet-card"><div class="name">🛰 守望者号</div><div class="lv">Lv.5</div><div class="bar"><i style="width:30%"></i></div></div>
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-h"><span>本周任务</span></div>
+    <div class="tasks">
+      <div class="task"><div class="ico">🎤</div><div><div class="t">完成模拟面试</div><div class="bar"><i style="width:80%"></i></div></div><div class="xp">+150 XP</div></div>
+      <div class="task"><div class="ico">📄</div><div><div class="t">优化简历</div><div class="bar"><i style="width:45%"></i></div></div><div class="xp">+100 XP</div></div>
+    </div>
+  </div>
+  <div class="tabbar">
+    <div class="tab active"><div class="i">⌂</div>首页</div>
+    <div class="tab"><div class="i">✦</div>测试</div>
+    <div class="tab"><div class="i">🚀</div>舰队</div>
+    <div class="tab"><div class="i">☺</div>我的</div>
+  </div>
+</div>
+</body>
+</html>

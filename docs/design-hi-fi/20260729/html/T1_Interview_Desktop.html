@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>T1 · T空间 AI模拟面试</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{--bg:#F8FAFC;--card:#fff;--blue:#2563EB;--green:#059669;--indigo:#4F46E5;--t1:#1E293B;--t2:#64748B;--t3:#94A3B8;--bd:#E2E8F0;--sh:0 4px 6px -1px rgba(0,0,0,.07),0 2px 4px -2px rgba(0,0,0,.05)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1920px;height:1080px;overflow:hidden;font-family:Inter,'Noto Sans SC',sans-serif;background:var(--bg);color:var(--t1)}
+.top{height:64px;background:var(--card);border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;padding:0 28px}
+.brand{display:flex;align-items:center;gap:16px;font-weight:600}
+.logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--blue),var(--indigo))}
+.crumb{color:var(--t2);font-size:13px;font-weight:400}
+.timer{font-variant-numeric:tabular-nums;font-size:18px;font-weight:700;color:var(--blue)}
+.user{display:flex;align-items:center;gap:12px;font-size:14px}
+.av{width:32px;height:32px;border-radius:50%;background:#DBEAFE;display:grid;place-items:center;font-weight:700;color:var(--blue);font-size:12px}
+.main{display:grid;grid-template-columns:320px 1fr 360px;gap:20px;padding:20px 28px;height:calc(1080px - 64px)}
+.panel{background:var(--card);border-radius:8px;box-shadow:var(--sh);padding:20px;display:flex;flex-direction:column}
+.panel h2{font-size:14px;font-weight:600;margin-bottom:14px;color:var(--t2)}
+.q-card{background:#F1F5F9;border-radius:8px;padding:16px;margin-bottom:16px}
+.q-no{display:inline-block;background:var(--blue);color:#fff;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;margin-bottom:8px}
+.q-card p{font-size:15px;line-height:1.6}
+.hints{flex:1}
+.hints h3{font-size:13px;margin-bottom:8px}
+.hints li{font-size:13px;color:var(--t2);margin:6px 0 6px 16px;line-height:1.4}
+.nav-btns{display:flex;gap:8px;margin-top:auto}
+.btn{flex:1;height:40px;border-radius:8px;border:1px solid var(--bd);background:#fff;font-size:13px;font-weight:500;color:var(--t1)}
+.btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+.video{position:relative;flex:1;border-radius:8px;background:linear-gradient(160deg,#0f172a,#1e293b 60%,#334155);display:flex;align-items:center;justify-content:center;color:#94A3B8;min-height:420px}
+.video .cam{font-size:48px;opacity:.5}
+.video .label{position:absolute;left:16px;bottom:16px;background:rgba(0,0,0,.45);padding:6px 10px;border-radius:6px;color:#fff;font-size:13px}
+.ai-pip{position:absolute;top:16px;right:16px;width:96px;height:96px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--indigo));border:3px solid #fff;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:600;text-align:center;box-shadow:0 8px 20px rgba(0,0,0,.35)}
+.controls{display:flex;justify-content:center;gap:12px;padding:14px 0}
+.ctrl{width:44px;height:44px;border-radius:50%;background:#fff;border:1px solid var(--bd);display:grid;place-items:center;font-size:16px;box-shadow:var(--sh)}
+.ctrl.end{background:#EF4444;border-color:#EF4444;color:#fff}
+.transcript{background:#F8FAFC;border:1px solid var(--bd);border-radius:8px;padding:12px;font-size:13px;line-height:1.6;color:var(--t2);min-height:88px}
+.transcript mark{background:#DBEAFE;color:var(--blue);padding:0 3px;border-radius:3px}
+.score{text-align:center;padding:12px 0 18px;border-bottom:1px solid var(--bd);margin-bottom:16px}
+.score .big{font-size:42px;font-weight:700;color:var(--blue)}
+.score .meta{font-size:13px;color:var(--green);margin-top:4px}
+.dim{margin-bottom:12px}
+.dim .row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;color:var(--t2)}
+.bar{height:8px;background:#E2E8F0;border-radius:99px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--blue);border-radius:99px}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 16px}
+.tag{background:#EEF2FF;color:var(--indigo);font-size:12px;padding:4px 10px;border-radius:999px}
+.tip{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px;font-size:13px;color:var(--t1);line-height:1.5}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="brand"><div class="logo"></div>T空间 <span class="crumb">面试中心 › AI模拟面试</span></div>
+  <div class="timer">12:34</div>
+  <div class="user"><span>🔔</span><div class="av">J</div>Jason</div>
+</div>
+<div class="main">
+  <div class="panel">
+    <h2>当前问题</h2>
+    <div class="q-card"><span class="q-no">Q3</span><p>请描述一个你主导的技术项目，遇到的最大挑战是什么？你是如何解决的？</p></div>
+    <div class="hints">
+      <h3>AI追问建议</h3>
+      <ul>
+        <li>项目规模与团队角色是否清晰？</li>
+        <li>挑战是否可量化（时间/成本/风险）？</li>
+        <li>决策过程与结果验证方式</li>
+      </ul>
+    </div>
+    <div class="nav-btns"><button class="btn">上一题</button><button class="btn primary">下一题</button></div>
+  </div>
+  <div class="panel" style="padding-bottom:16px">
+    <div class="video">
+      <div class="cam">📷</div>
+      <div class="label">Jason · 候选人</div>
+      <div class="ai-pip">AI<br>面试官</div>
+    </div>
+    <div class="controls">
+      <div class="ctrl">🎤</div><div class="ctrl">📹</div><div class="ctrl">🖥</div><div class="ctrl end">⏹</div>
+    </div>
+    <div class="transcript">
+      「当时项目周期只剩 <mark>三周</mark>，核心难点是跨组依赖。我先做了 <mark>风险分层</mark>，把阻塞项拆成可并行模块，再和产品对齐 MVP 范围……」
+    </div>
+  </div>
+  <div class="panel">
+    <h2>AI实时评估</h2>
+    <div class="score"><div class="big">82/100</div><div class="meta">良好 ↑</div></div>
+    <div class="dim"><div class="row"><span>表达清晰度</span><span>85%</span></div><div class="bar"><i style="width:85%"></i></div></div>
+    <div class="dim"><div class="row"><span>逻辑结构</span><span>78%</span></div><div class="bar"><i style="width:78%"></i></div></div>
+    <div class="dim"><div class="row"><span>专业深度</span><span>80%</span></div><div class="bar"><i style="width:80%"></i></div></div>
+    <div class="dim"><div class="row"><span>沟通自信</span><span>84%</span></div><div class="bar"><i style="width:84%"></i></div></div>
+    <div class="tags"><span class="tag">项目管理</span><span class="tag">团队协作</span><span class="tag">技术决策</span><span class="tag">风险控制</span></div>
+    <div class="tip">建议在回答中增加具体数据支撑，如项目规模、ROI 等。</div>
+  </div>
+</div>
+</body>
+</html>

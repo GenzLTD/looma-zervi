@@ -1,6 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 import type { ApiClient, ConsentScope } from "@looma/shared-core";
-import { ensureConsent as ensureConsentApi } from "@looma/shared-core";
+import {
+  ensureConsent as ensureConsentApi,
+  resolveConsentPromptScope,
+} from "@looma/shared-core";
 import ConsentModal from "../brand/components/ConsentModal";
 
 interface PendingConsent {
@@ -21,9 +24,13 @@ export function useConsent(getClient: () => ApiClient) {
 
   const ensureConsent = useCallback(
     async (scope: ConsentScope): Promise<boolean> => {
-      if (cacheRef.current[scope]) return true;
+      const promptScope = resolveConsentPromptScope(scope);
+      if (cacheRef.current[promptScope] || cacheRef.current[scope]) return true;
       const ok = await ensureConsentApi(getClient(), scope, promptUser);
-      if (ok) cacheRef.current[scope] = true;
+      if (ok) {
+        cacheRef.current[promptScope] = true;
+        cacheRef.current[scope] = true;
+      }
       return ok;
     },
     [getClient, promptUser],

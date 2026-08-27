@@ -53,6 +53,13 @@ export interface WechatAuthRequest {
 
 export interface WechatAuthResponse extends AuthResponse {}
 
+/** Google OAuth (overseas) — ID token from GIS / One Tap */
+export interface GoogleAuthRequest {
+  id_token: string;
+}
+
+export interface GoogleAuthResponse extends AuthResponse {}
+
 export interface QuotaRecord {
   resource: string;
   daily_limit: number;

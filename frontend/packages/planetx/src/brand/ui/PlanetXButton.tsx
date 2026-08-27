@@ -6,6 +6,7 @@
  * No store, no API — all data via props.
  */
 import type { PlanetXButtonProps } from "./types";
+import PlanetXIcon from "./PlanetXIcon";
 
 export default function PlanetXButton({
   variant = "primary",
@@ -87,7 +88,11 @@ export default function PlanetXButton({
         if (variant === "outline" || variant === "ghost") e.currentTarget.style.background = "transparent";
       }}
     >
-      {loading && <span className="px-anim-xSpin" style={{ display: "inline-block", width: 16, height: 16 }}>⏳</span>}
+      {loading && (
+        <span className="px-anim-xSpin" style={{ display: "inline-flex" }}>
+          <PlanetXIcon name="spinner" size={16} color="currentColor" />
+        </span>
+      )}
       {!loading && leftIcon}
       {children}
       {!loading && rightIcon}

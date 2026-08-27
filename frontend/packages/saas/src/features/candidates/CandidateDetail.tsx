@@ -3,34 +3,70 @@
  */
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { createEnterpriseApi, type Candidate } from "@looma/shared-core";
+import { useTranslation } from "react-i18next";
+import {
+  ApiError,
+  createEnterpriseApi,
+  hasMinTier,
+  type Candidate,
+} from "@looma/shared-core";
 import { createSaasApiClient } from "../../api/saasApiClient";
+import { useSaasAuthStore } from "../auth/authStore";
+import TierGatePanel from "../../brand/components/TierGatePanel";
+import TimelineL1Card from "./TimelineL1Card";
 
 export default function CandidateDetail() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
+  const { user } = useSaasAuthStore();
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tierBlocked, setTierBlocked] = useState(false);
+
+  const canUseCandidates = hasMinTier(user?.tier, "supporter");
 
   useEffect(() => {
     if (!id) return;
+    if (!canUseCandidates) {
+      setTierBlocked(true);
+      return;
+    }
     const client = createSaasApiClient();
     createEnterpriseApi(client)
       .getCandidate(id)
       .then(setCandidate)
-      .catch(() => setError("无法加载候选人"));
-  }, [id]);
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 403) {
+          setTierBlocked(true);
+        } else {
+          setError(t("candidates.loadFailed"));
+        }
+      });
+  }, [id, canUseCandidates, t]);
+
+  if (!canUseCandidates || tierBlocked) {
+    return (
+      <TierGatePanel
+        title={t("candidates.title")}
+        description={t("candidates.tierRequired")}
+        minTier="supporter"
+      />
+    );
+  }
 
   if (error) {
     return (
       <div>
         <p style={{ color: "var(--color-text-muted)" }}>{error}</p>
-        <Link to="/candidates" style={{ color: "var(--color-primary)" }}>← 返回列表</Link>
+        <Link to="/candidates" style={{ color: "var(--color-primary)" }}>
+          {t("candidates.backToList")}
+        </Link>
       </div>
     );
   }
 
   if (!candidate) {
-    return <p style={{ color: "var(--color-text-muted)" }}>加载中…</p>;
+    return <p style={{ color: "var(--color-text-muted)" }}>{t("candidates.loadingDetail")}</p>;
   }
 
   const profile = candidate.profile_data as {
@@ -47,7 +83,7 @@ export default function CandidateDetail() {
   return (
     <div className="max-w-2xl">
       <Link to="/candidates" className="text-sm mb-4 inline-block" style={{ color: "var(--color-primary)" }}>
-        ← 返回候选人列表
+        {t("candidates.backToList")}
       </Link>
 
       <div
@@ -94,13 +130,17 @@ export default function CandidateDetail() {
         )}
       </div>
 
-      <Link
-        to="/pricing"
-        className="inline-block px-5 py-2 rounded-lg text-sm text-white no-underline"
-        style={{ backgroundColor: "var(--color-primary)" }}
-      >
-        升级 Pro，解锁更多匹配能力 →
-      </Link>
+      <TimelineL1Card summary={candidate.timeline_l1} />
+
+      {!hasMinTier(user?.tier, "pro") && (
+        <Link
+          to="/pricing"
+          className="inline-block px-5 py-2 rounded-lg text-sm text-white no-underline"
+          style={{ backgroundColor: "var(--color-primary)" }}
+        >
+          {t("candidates.upgradeForMore")}
+        </Link>
+      )}
     </div>
   );
 }

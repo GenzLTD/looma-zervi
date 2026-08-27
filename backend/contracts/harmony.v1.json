@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Looma HarmonyOS Cloud Contract v1",
+  "version": "0.1.0",
+  "description": "鸿蒙元服务客户端 ↔ Flask 后端契约聚合（Auth / IAP / Push / Card / Timeline 写入面）。UI 粗糙不影响本契约；真源对齐 shared-core routes + 本文件。",
+  "client": {
+    "bundleType": "atomicService",
+    "deveco_path": "/Users/jason/DevEcoStudioProjects/MyApplication",
+    "base_url_debug": "http://<host-lan-ip>:5200",
+    "base_url_prod": "https://api.genz.ltd",
+    "auth_header": "Authorization: Bearer <access_token>",
+    "notes": [
+      "原生 @ohos.net.http 通常不带 Origin，不受 CORS 限制",
+      "模拟器勿用 localhost，用宿主机局域网 IP",
+      "请求体字段以 camelCase 为准（与华为 SDK 一致）"
+    ]
+  },
+  "auth": {
+    "login": {
+      "method": "POST",
+      "path": "/v1/auth/huawei",
+      "body": {
+        "authorizationCode": "string (required) — Account Kit 授权码",
+        "state": "string (optional)"
+      },
+      "response_200": {
+        "access_token": "JWT",
+        "token_type": "bearer",
+        "expires_in": "number",
+        "user": {
+          "id": "uuid",
+          "name": "string",
+          "tier": "string",
+          "role": "string",
+          "is_new_user": "boolean"
+        }
+      },
+      "identity": {
+        "provider": "huawei",
+        "provider_uid": "openID",
+        "metadata": ["union_id", "avatar_url", "display_name"]
+      },
+      "env": ["HUAWEI_CLIENT_ID", "HUAWEI_CLIENT_SECRET", "HUAWEI_OAUTH_REGION"]
+    }
+  },
+  "iap": {
+    "notify": {
+      "method": "POST",
+      "path": "/v1/payment/huawei/notify",
+      "auth": "required",
+      "status": "implemented"
+    },
+    "verify": {
+      "method": "POST",
+      "path": "/v1/payment/huawei/verify",
+      "auth": "required",
+      "status": "stub_501"
+    }
+  },
+  "push": {
+    "register": {
+      "method": "POST",
+      "path": "/v1/push/huawei/register",
+      "auth": "required",
+      "body": { "pushToken": "string" }
+    },
+    "unregister": {
+      "method": "POST",
+      "path": "/v1/push/huawei/unregister",
+      "auth": "required",
+      "body": { "pushToken": "string" }
+    },
+    "send": {
+      "method": "POST",
+      "path": "/v1/push/huawei/send",
+      "auth": "required",
+      "body": {
+        "title": "string",
+        "body": "string",
+        "category": "MARKETING|SOCIAL|SERVICE",
+        "clickData": "object?",
+        "testMode": "boolean?"
+      },
+      "env": ["HUAWEI_PUSH_CLIENT_ID", "HUAWEI_PUSH_CLIENT_SECRET", "HUAWEI_PROJECT_ID"]
+    },
+    "batch": {
+      "method": "POST",
+      "path": "/v1/push/huawei/batch",
+      "auth": "required"
+    }
+  },
+  "card": {
+    "get": {
+      "method": "GET",
+      "path": "/v1/card/{cardId}",
+      "auth": "required",
+      "query": { "type": "weather|profile|status|activity" }
+    },
+    "batch": {
+      "method": "POST",
+      "path": "/v1/card/batch",
+      "auth": "required",
+      "body": {
+        "cards": [{ "cardId": "string", "type": "string" }]
+      }
+    },
+    "notes": "activity.recentCount 来自 timeline_events active 计数"
+  },
+  "timeline_auto_writers": {
+    "description": "鸿蒙客户端调用下列业务 API 时，后端自动写入 timeline（best-effort，失败不阻断主流程）",
+    "flows": [
+      {
+        "client_action": "AI 对话",
+        "api": "POST /v1/ask",
+        "event_kind": "interaction_log",
+        "notes": "含 cache HIT"
+      },
+      {
+        "client_action": "人格测评同步",
+        "api": "POST /v1/game/profile-sync",
+        "event_kind": ["quiz_completed", "initial_hypothesis"]
+      },
+      {
+        "client_action": "任务完成",
+        "api": "POST /v1/game/mission-complete",
+        "event_kind": "mission_completed"
+      },
+      {
+        "client_action": "鸿蒙答题完成",
+        "api": "GET /v1/game/result?session_id=",
+        "event_kind": "learning_activity",
+        "notes": "首次 complete 时写入"
+      },
+      {
+        "client_action": "职位匹配",
+        "api": "POST /v1/jobs/match",
+        "event_kind": "match_scan"
+      },
+      {
+        "client_action": "简历解析/上传",
+        "api": ["POST /v1/resume/parse", "POST /v1/resume/upload"],
+        "event_kind": "resume_ingest"
+      }
+    ],
+    "read_api": {
+      "list": "GET /v1/timeline",
+      "growth": "GET /v1/timeline/growth",
+      "export": "GET /v1/timeline/export",
+      "delete_all": "DELETE /v1/timeline/me?confirm=yes"
+    }
+  },
+  "shared_core": {
+    "routes": "frontend/packages/shared-core/src/constants/routes.ts",
+    "types": "frontend/packages/shared-core/src/types/harmony.ts",
+    "factories": [
+      "createAuthApi().huawei",
+      "createHuaweiIapApi",
+      "createHuaweiPushApi",
+      "createCardApi",
+      "createTimelineApi"
+    ],
+    "deveco_sync": "MyApplication/scripts/sync-shared-core.mjs <shared-core/src>"
+  }
+}

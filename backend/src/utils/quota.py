@@ -186,6 +186,26 @@ def consume_with_boost(user_id: str, tier: str, resource: str) -> dict:
     return {"ok": ok, "source": "daily" if ok else "none", "daily_remaining": -1, "boost_remaining": -1}
 
 
+def refund_consumption(user_id: str, resource: str, source: str = "daily") -> bool:
+    """Best-effort refund after a failed request that already consumed quota."""
+    if source != "daily":
+        # Boost credits are not auto-refunded in v1.
+        return False
+    date = _today_key()
+    try:
+        db = current_app._db
+        return db.refund_quota(user_id, resource, date)
+    except Exception:
+        pass
+    key = _storage_key(user_id, resource)
+    with _lock:
+        used = _memory.get(key, 0)
+        if used <= 0:
+            return False
+        _memory[key] = used - 1
+    return True
+
+
 def get_boost_credit_remaining(user_id: str) -> int:
     """Get user's boost pack remaining credits."""
     try:

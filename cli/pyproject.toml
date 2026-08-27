@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "looma-cli"
+version = "1.0.0"
+description = "Looma CLI — 带运维大脑的职业成长平台命令行工具"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Looma-Zervi Team"}
+]
+keywords = ["cli", "devops", "career", "credit", "monitoring"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "click>=8.0.0",
+]
+
+[project.scripts]
+looma = "looma_cli.main:main"
+
+[project.urls]
+Homepage = "https://genz.ltd"
+Repository = "https://github.com/looma-zervi/looma-zervi"
+
+[tool.setuptools.packages.find]
+where = ["."]

@@ -30,6 +30,8 @@ export {
   createResumeApi,
   createJobsApi,
   createReportsApi,
+  createMatchReportsApi,
+  createTrustApi,
   createPaymentApi,
   createQuotaApi,
   createNarrativeApi,
@@ -37,6 +39,11 @@ export {
   createCreditApi,
   createAnalyticsApi,
   createComplianceApi,
+  createAdminApi,
+  createTimelineApi,
+  createHuaweiIapApi,
+  createHuaweiPushApi,
+  createCardApi,
 } from "./api/createApi";
 
 // Types
@@ -53,14 +60,33 @@ export type {
   RegisterRequest,
   WechatAuthRequest,
   WechatAuthResponse,
+  GoogleAuthRequest,
+  GoogleAuthResponse,
   QuotaRecord,
   QuotaResponse,
   TokenPayload,
 } from "./types/auth";
 
 export type {
+  HuaweiAuthRequest,
+  HuaweiAuthResponse,
+  HuaweiIapNotifyRequest,
+  HuaweiIapNotifyResponse,
+  HuaweiIapVerifyRequest,
+  HuaweiIapVerifyResponse,
+  HuaweiPushTokenRequest,
+  HuaweiPushRegisterResponse,
+  HuaweiPushSendRequest,
+  HuaweiPushSendResponse,
+  HarmonyCardType,
+  HarmonyCardItem,
+  HarmonyCardBatchRequest,
+} from "./types/harmony";
+
+export type {
   ChatMessage,
   DocSource,
+  AskMode,
   AskRequest,
   AskResponse,
   StreamCallbacks,
@@ -143,16 +169,24 @@ export type {
   ResumeEducation,
   ResumeProject,
   ResumeUploadResult,
+  ResumeIngestRequest,
+  ResumeIngestResponse,
   Job,
   JobMatchItem,
   JobMatchResult,
   JobMatchRequest,
   JobMatchResponse,
+  GapItem,
   ParsedJob,
   JobUploadResult,
   JobMatchScore,
   CreditAnalysis,
   CheckCompanyRequest,
+  CheckCompanyResponse,
+  CreditExtended,
+  QccCompanyInfo,
+  QccRiskData,
+  QccOperationData,
 } from "./types/resume";
 
 export type {
@@ -177,7 +211,9 @@ export type {
   UseReferralResponse,
   ReferralCodeEntry,
   ProfileShareView,
+  TimelineL1Summary,
   ImportShareRequest,
+  ImportShareResponse,
 } from "./types/referral";
 
 export type {
@@ -190,6 +226,50 @@ export type {
   ApiError as ApiErrorType,
   Poem,
 } from "./types/misc";
+
+export type {
+  MatchReport,
+  MatchReportSummary,
+  MatchReportItem,
+  MatchReportMetadata,
+  CreateMatchReportRequest,
+  MatchReportListResponse,
+  ReportSharing,
+  ShareDimension,
+  ShareMatchReportRequest,
+} from "./types/matchReport";
+
+export type {
+  TrustClaimType,
+  TrustEvidenceType,
+  TrustVerificationStatus,
+  TrustAttestation,
+  TrustAttestationsResponse,
+  CreateShareCodeRequest,
+  CreateShareCodeResponse,
+  TrustShareCode,
+  TrustShareCodesResponse,
+  TrustVerifyRequest,
+  TrustVerifyResponse,
+  TrustAuditLogEntry,
+  TrustAuditLogResponse,
+  TrustPublicKeyResponse,
+} from "./types/trust";
+
+export type {
+  TimelineEvent,
+  TimelineEventKind,
+  TimelineListResponse,
+  CreateTimelineEventRequest,
+  TimelineGrowthResponse,
+  TimelineGrowthDimension,
+  TimelineBackfillResponse,
+  TimelineExportResponse,
+  TimelineDeleteAllResponse,
+  TimelineSignalQuality,
+  TimelineWeightRole,
+  TimelineVisibility,
+} from "./types/timeline";
 
 export type {
   PaymentPlan,
@@ -242,6 +322,13 @@ export {
   BRAND_PLANETX,
   BRAND_SAAS,
 } from "./types/brand";
+export type {
+  ChallengePoem,
+  ChallengeRound,
+  ChallengeEntry,
+  ChallengeCurrentResponse,
+} from "./types/poetry-challenge";
+
 export type { BrandId, BrandConfig } from "./types/brand";
 
 // Constants
@@ -249,6 +336,8 @@ export {
   QUOTA_LIMITS,
   TIER_ORDER,
   TOP_N_LIMIT,
+  CANDIDATE_LIMITS,
+  JOB_POST_LIMITS,
   RESOURCE_ASK,
   RESOURCE_JOB_MATCH,
   RESOURCE_RESUME_PARSE,
@@ -256,6 +345,16 @@ export {
 } from "./constants/quota";
 
 export { API_ROUTES } from "./constants/routes";
+
+export {
+  CLAIM_LABEL,
+  STATUS_LABEL,
+  STATUS_COLOR,
+  EVIDENCE_LABEL,
+  EVIDENCE_FALLBACK,
+  CLAIM_FALLBACK,
+  STATUS_FALLBACK_KEY,
+} from "./constants/trustLabels";
 
 // Utils
 export {
@@ -275,6 +374,13 @@ export {
   isValidPhone,
   isValidUrl,
 } from "./utils/validation";
+
+export {
+  hasMinTier,
+  isPaidTier,
+  isAdmin,
+} from "./utils/entitlements";
+export type { TierLike } from "./utils/entitlements";
 
 export type {
   AnalyticsPlatform,
@@ -300,6 +406,7 @@ export {
 
 export type {
   ConsentScope,
+  PrimaryConsentScope,
   ConsentRecord,
   ConsentStatusResponse,
   ConsentGrantResponse,
@@ -310,6 +417,10 @@ export type {
 export {
   CONSENT_SCOPE_LABELS,
   CONSENT_SCOPE_DESCRIPTIONS,
+  CONSENT_PRIMARY_TIERS,
+  CONSENT_PACKAGES,
+  CONSENT_SCOPE_TO_PACKAGE,
+  resolveConsentPromptScope,
 } from "./constants/compliance";
 
 export {
@@ -318,3 +429,12 @@ export {
   hasConsent,
   isConsentRequiredError,
 } from "./compliance/ensureConsent";
+
+export type {
+  AdminStatsResponse,
+  AdminRecentUser,
+  AdminDauPoint,
+  AdminFunnelResponse,
+  AdminNarrativeResponse,
+  AdminHealthResponse,
+} from "./types/admin";

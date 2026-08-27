@@ -162,6 +162,18 @@ def create_share_code():
         expires_in_seconds=expires_in_seconds,
     )
 
+    try:
+        from src.timeline.events import record_share_authorized
+        record_share_authorized(
+            db,
+            g.user_id,
+            source_ref=sc["id"],
+            channel="trust_verify",
+            scope=scope,
+        )
+    except Exception as e:
+        logger.warning("timeline: share_authorized skipped for %s: %s", g.user_id, e)
+
     return jsonify(
         share_code=sc["code"],
         expires_at=sc["expires_at"],

@@ -68,7 +68,9 @@ export type PlanetXGameScreen =
   | "hub"
   | "quiz"
   | "result"
-  | "match";
+  | "match"
+  | "timeline"
+  | "trust";
 
 export interface PlanetXFleet {
   id: string;

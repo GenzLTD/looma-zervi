@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Looma PlanetX Game Contract v1",
+  "version": "1.0.0",
+  "description": "PlanetX 闯关 mission 契约；成就 Layer 5 映射此四 mission 后再扩展。真源：looma-zervi/backend/contracts/game.v1.json",
+  "cross_refs": {
+    "identity": "backend/contracts/identity.v1.json",
+    "payment": "backend/contracts/payment.v1.json",
+    "trust": "backend/contracts/trust.v1.json",
+    "match_spec": "首次星际匹配_子项目接口契约.md"
+  },
+
+  "mission_enum": ["personality", "team", "match", "share"],
+
+  "missions": [
+    {
+      "id": "personality",
+      "name": { "CN": "星际人格测试", "US": "Stellar Personality Quiz" },
+      "xp_reward": 50,
+      "requires": [],
+      "unlocks": ["team"],
+      "write_path": "POST /v1/game/profile-sync",
+      "complete_path": "POST /v1/game/mission-complete",
+      "identity_claims": ["personality_type", "personality_detail"],
+      "achievement_layer": 5,
+      "notes": "人格结果写入 game_profiles；同步 identity.v1 personality 声明"
+    },
+    {
+      "id": "team",
+      "name": { "CN": "组建舰队", "US": "Form a Fleet" },
+      "xp_reward": 80,
+      "requires": ["personality"],
+      "unlocks": ["match"],
+      "write_path": "POST /v1/game/fleet/create | POST /v1/game/fleet/join",
+      "complete_path": "POST /v1/game/mission-complete",
+      "min_fleet_members_for_match": 2,
+      "notes": "Hub 解锁 match 任务卡片 requires team"
+    },
+    {
+      "id": "match",
+      "name": { "CN": "首次星际匹配", "US": "First Stellar Match" },
+      "xp_reward": 40,
+      "requires": ["team"],
+      "unlocks": ["share"],
+      "scan_path": "POST /v1/game/match",
+      "complete_path": "POST /v1/game/mission-complete",
+      "phase": {
+        "v0": "舰队内算分 + 用户确认即完成",
+        "v1": "consensus_verified 后才可 mission-complete；见 match 契约 §5–8"
+      },
+      "consensus_threshold": 85,
+      "identity_claims": ["match_consensus_verified"],
+      "achievement_layer": 5,
+      "notes": "阶段二：双向 acknowledge + match_consensus 表门控"
+    },
+    {
+      "id": "share",
+      "name": { "CN": "发送星际信号", "US": "Send Stellar Signal" },
+      "xp_reward": 30,
+      "requires": ["personality"],
+      "unlocks": [],
+      "write_path": "referral / profile_share / wx.share",
+      "complete_path": "POST /v1/game/mission-complete",
+      "phase": {
+        "v0": "与 match 并行独立任务",
+        "v1": "match 未达标时的主增长 CTA"
+      },
+      "achievement_layer": 5,
+      "notes": "spread_hint 引导入口；影响类成就映射此 mission"
+    }
+  ],
+
+  "planetx_identity_enum_ref": "identity.v1.json#planetx_identity_enum",
+  "personality_type_enum_ref": "identity.v1.json#personality_type_enum",
+
+  "endpoints": {
+    "profile": "GET /v1/game/profile",
+    "profile_sync": "POST /v1/game/profile-sync",
+    "match": "POST /v1/game/match",
+    "match_consensus_list": "GET /v1/game/match/consensus",
+    "match_acknowledge": "POST /v1/game/match/acknowledge",
+    "mission_complete": "POST /v1/game/mission-complete"
+  },
+
+  "achievements_layer5": {
+    "description": "36 格成就体系见 docs/ACHIEVEMENTS_LAYER5.md（待建）；先映射上述四 mission，再扩 interview 域",
+    "mission_mapping": {
+      "personality": ["首次测试", "面试达人"],
+      "team": ["舰队指挥官"],
+      "match": ["验证组队成功", "星际完美共振"],
+      "share": ["影响类传播成就"]
+    },
+    "future_modules": ["interview_sim", "offer_tracking"]
+  }
+}
