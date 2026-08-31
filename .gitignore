@@ -91,3 +91,4 @@ frontend/.workbuddy/
 # Internal test credentials (copy from 内测志愿者账号与入口.example.md)
 docs/内测志愿者账号与入口.md
 .pnpm-store/ v11/
+.pnpm-store/ v11/
