@@ -64,12 +64,6 @@ export function HomePage() {
               <strong>{t("site.support")}:</strong>{" "}
               <a href={`mailto:${SITE_CONFIG.supportEmail}`}>{SITE_CONFIG.supportEmail}</a>
             </p>
-            <p>
-              <strong>{t("site.api")}:</strong>{" "}
-              <a href={SITE_CONFIG.apiBase} rel="noopener noreferrer">
-                {SITE_CONFIG.apiBase.replace("https://", "")}
-              </a>
-            </p>
             <p className="status-note">{t("home.paymentsNote")}</p>
           </div>
         </div>
