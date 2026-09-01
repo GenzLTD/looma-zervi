@@ -27,7 +27,9 @@ source "$ROOT/scripts/lib/cloud-ssh-env.sh" 2>/dev/null || true
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/Projects/looma-zervi}"
 THOMAS_DIR="${THOMAS_DIR:-$HOME/thomas/looma-zervi}"
 BRANCH="${BRANCH:-feat/tianyi-central-chainb}"
-CLOUD_API="${CLOUD_API:-http://${CLOUD_HOST:-1.14.202.161}}"
+# 云端入口走域名（nginx 按 server_name 匹配；:5200 与裸 IP:80 均不通；
+# 注意 CLOUD_HOST 是部署 IP，不能直接当 API 入口用）
+CLOUD_API="${CLOUD_API:-http://api.genz.ltd}"
 LOCAL_API="${LOCAL_API:-http://127.0.0.1:5200}"
 
 MODE="${1:-all}"
@@ -72,12 +74,15 @@ align_thomas() {
 
 restart_thomas() {
   section "2. 重启 thomas 后端 (:5200)"
-  local pids pid cwd
+  local pids pid cwd cwd_norm dir_norm
+  dir_norm="$(echo "$THOMAS_DIR" | tr '[:upper:]' '[:lower:]')"
   pids="$(lsof -t -i :5200 2>/dev/null || true)"
   if [ -n "$pids" ]; then
     for pid in $pids; do
       cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' || true)"
-      if [ -n "$cwd" ] && [[ "$cwd" != "$THOMAS_DIR"* ]]; then
+      # macOS 卷大小写不敏感：归一化后比较，避免 ~/thomas vs ~/THOMAS 误判
+      cwd_norm="$(echo "$cwd" | tr '[:upper:]' '[:lower:]')"
+      if [ -n "$cwd" ] && [[ "$cwd_norm" != "$dir_norm"* ]]; then
         fail ":5200 被非 thomas 进程占用 (cwd=$cwd) — 请先停止 Projects 的 dev server"
       fi
     done
@@ -112,7 +117,7 @@ compare_health() {
     || fail "本地 health 不可达"
   cloud_commit="$(curl -sf --connect-timeout 15 "$CLOUD_API/health" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('git_commit'))")" \
-    || fail "云端 health 不可达: $CLOUD_API（检查安全组 80 / nginx / gunicorn）"
+    || fail "云端 health 不可达: $CLOUD_API （检查安全组 80 / nginx / gunicorn）"
   echo "  源(Projects):  $SRC_COMMIT"
   echo "  本地(thomas):  $local_commit"
   echo "  云端(天翼):    $cloud_commit"
@@ -127,8 +132,8 @@ if [ "$MODE" = "all" ] || [ "$MODE" = "local" ]; then
 fi
 if [ "$MODE" = "all" ] || [ "$MODE" = "cloud" ]; then
   deploy_cloud
+  compare_health
 fi
-compare_health
 
 echo ""
 pass "围坐准备完成"

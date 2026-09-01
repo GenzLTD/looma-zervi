@@ -1055,6 +1055,16 @@ class DatabaseManager:
     def init_schema(self):
         """Initialize all tables. Safe to call on every startup."""
         with self.get_conn() as conn:
+            # Pre-migration: SCHEMA_SQL 里的 idx_users_email_hash 引用 email_hash 列，
+            # 而 CREATE TABLE IF NOT EXISTS 不改已有旧表结构 —— 旧库必须先 ALTER 补列，
+            # 否则 executescript 会在建索引时报 no such column（云端 /health 500 根因）
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN email_hash TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Pre-migration ALTER TABLE users ADD COLUMN email_hash failed: %s", e
+                    )
             conn.executescript(SCHEMA_SQL)
             # Migration: add invite_code to existing fleets tables
             try:
