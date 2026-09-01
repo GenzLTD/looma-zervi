@@ -143,11 +143,15 @@ def _call_llm(
     max_tokens: int | None = None,
 ) -> str | None:
     """Call the configured LLM provider via DeepSeek/OpenAI API.
-    Returns response text or None on failure."""
+    Returns response text or None on failure.
+    Every call is audited into llm_usage (provider/model/tokens/cost/latency)."""
     config = current_app.config
     provider_order = [p.strip().lower() for p in config.get("LLM_PROVIDER_ORDER", "deepseek").split(",")]
+    db = getattr(current_app, "_db", None)
 
     for provider in provider_order:
+        model = None
+        t0 = time.monotonic()
         try:
             if provider == "deepseek":
                 api_key = (config.get("DEEPSEEK_API_KEY") or "").strip()
@@ -155,8 +159,9 @@ def _call_llm(
                     continue
                 url = f"{config['DEEPSEEK_BASE_URL']}/chat/completions"
                 headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                model = config["DEEPSEEK_MODEL"]
                 payload: dict[str, Any] = {
-                    "model": config["DEEPSEEK_MODEL"],
+                    "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": temperature,
                 }
@@ -173,8 +178,9 @@ def _call_llm(
                     continue
                 url = f"{config.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')}/chat/completions"
                 headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
+                model = config.get("OPENAI_MODEL", "gpt-3.5-turbo")
                 payload = {
-                    "model": config.get("OPENAI_MODEL", "gpt-3.5-turbo"),
+                    "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": temperature,
                 }
@@ -182,7 +188,8 @@ def _call_llm(
                     payload["max_tokens"] = max_tokens
                 resp = requests.post(url, json=payload, headers=headers, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
+                data = resp.json()
+                text = data["choices"][0]["message"]["content"]
 
             elif provider == "ollama":
                 host = config.get("OLLAMA_HOST", "http://127.0.0.1:11434")
@@ -194,14 +201,47 @@ def _call_llm(
                 payload = {"model": model, "prompt": prompt, "stream": False, "options": options}
                 resp = requests.post(url, json=payload, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
-                return resp.json().get("response", "")
+                data = resp.json()
+                text = data.get("response", "")
+
+            _record_llm_usage(db, provider, model, data, t0, status="ok")
+            return text
 
         except Exception as e:
+            _record_llm_usage(db, provider, model, None, t0, status="error", error=str(e))
             logger.warning(f"LLM provider {provider} failed: {e}")
             continue
 
     logger.error("All LLM providers unavailable")
     return None
+
+
+def _record_llm_usage(db, provider, model, data, t0, status="ok", error=""):
+    """Audit one LLM call into llm_usage (ops dashboard). Never raises —
+    audit must not break the main flow."""
+    try:
+        if db is None:
+            return
+        tokens_in = tokens_out = 0
+        if isinstance(data, dict):
+            usage = data.get("usage") or {}
+            tokens_in = int(usage.get("prompt_tokens") or usage.get("prompt_eval_count") or 0)
+            tokens_out = int(usage.get("completion_tokens") or usage.get("eval_count") or 0)
+        from src.agents.llm_catalog import estimate_cost_yuan
+
+        cost = estimate_cost_yuan(provider or "", model or "", tokens_in, tokens_out)
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        user_id = None
+        try:
+            from flask import has_request_context, g
+
+            if has_request_context():
+                user_id = getattr(g, "user_id", None)
+        except Exception:
+            user_id = None
+        db.log_llm_usage(user_id, provider, model, tokens_in, tokens_out, cost, latency_ms, status, error)
+    except Exception:
+        pass
 
 
 def _parse_intent_llm(message: str) -> tuple[str, float, dict[str, Any]] | None:

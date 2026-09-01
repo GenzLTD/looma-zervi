@@ -403,6 +403,26 @@ CREATE TABLE IF NOT EXISTS usage_logs (
 CREATE INDEX IF NOT EXISTS idx_usage_logs_user_date ON usage_logs(user_id, created_at);
 
 -- ============================================
+-- LLM usage: llm_usage (joint) — 每次 LLM 调用埋点，供运维面审计
+-- ============================================
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT,                          -- NULL = 系统/后台调用
+    provider     TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    tokens_in    INTEGER DEFAULT 0,
+    tokens_out   INTEGER DEFAULT 0,
+    cost_yuan    REAL DEFAULT 0,                -- 按 llm_catalog 折算
+    latency_ms   INTEGER DEFAULT 0,
+    status       TEXT DEFAULT 'ok',             -- ok / error
+    error        TEXT,
+    created_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_usage_provider_date ON llm_usage(provider, created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_user_date ON llm_usage(user_id, created_at);
+
+-- ============================================
 -- Quota: quota_records (joint)
 -- ============================================
 CREATE TABLE IF NOT EXISTS quota_records (
@@ -1352,6 +1372,70 @@ class DatabaseManager:
                 (user_id,)
             ).fetchone()
         return row["cnt"] if row else 0
+
+    # ============================================
+    # LLM usage audit (joint) — 运维面 /v1/admin/llm-ops
+    # ============================================
+    def log_llm_usage(self, user_id, provider, model, tokens_in=0, tokens_out=0,
+                      cost_yuan=0.0, latency_ms=0, status="ok", error=""):
+        """Record one LLM call. user_id may be None (system/background calls)."""
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO llm_usage
+                   (id, user_id, provider, model, tokens_in, tokens_out,
+                    cost_yuan, latency_ms, status, error)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), user_id, provider, model,
+                 int(tokens_in or 0), int(tokens_out or 0),
+                 float(cost_yuan or 0.0), int(latency_ms or 0),
+                 status, (error or "")[:500]),
+            )
+
+    def get_llm_usage_stats(self, hours: int = 24):
+        """Aggregated LLM usage over the window: totals, latency, cost, top models/users."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) AS cnt,
+                          AVG(latency_ms) AS avg_ms,
+                          SUM(cost_yuan) AS cost,
+                          SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
+                          SUM(tokens_in) AS tin,
+                          SUM(tokens_out) AS tout
+                   FROM llm_usage
+                   WHERE created_at >= datetime('now', ?)""",
+                (f"-{hours} hours",),
+            ).fetchone()
+            top_models = [
+                dict(r) for r in conn.execute(
+                    """SELECT provider, model, COUNT(*) AS calls, SUM(cost_yuan) AS cost
+                       FROM llm_usage
+                       WHERE created_at >= datetime('now', ?)
+                       GROUP BY provider, model ORDER BY calls DESC LIMIT 6""",
+                    (f"-{hours} hours",),
+                ).fetchall()
+            ]
+            top_users = [
+                dict(r) for r in conn.execute(
+                    """SELECT user_id, COUNT(*) AS calls, SUM(cost_yuan) AS cost
+                       FROM llm_usage
+                       WHERE user_id IS NOT NULL
+                         AND created_at >= datetime('now', ?)
+                       GROUP BY user_id ORDER BY calls DESC LIMIT 6""",
+                    (f"-{hours} hours",),
+                ).fetchall()
+            ]
+        calls = row["cnt"] or 0
+        return {
+            "hours": hours,
+            "calls": calls,
+            "avg_latency_ms": round(row["avg_ms"] or 0),
+            "total_cost_yuan": round(row["cost"] or 0.0, 2),
+            "tokens_in": row["tin"] or 0,
+            "tokens_out": row["tout"] or 0,
+            "error_rate": round((row["errors"] or 0) / max(calls, 1), 4),
+            "top_models": top_models,
+            "top_users": top_users,
+        }
 
     # ============================================
     # Game profile operations (Jason)

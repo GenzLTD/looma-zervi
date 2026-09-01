@@ -334,6 +334,7 @@ def _is_expired(iso_str: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    global _API_BASE
     parser = argparse.ArgumentParser(
         prog="looma-cli",
         description="Looma Trust Profile — Terminal Client (Overseas Beta Demo)",
@@ -377,7 +378,6 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    global _API_BASE
     if args.api:
         _API_BASE = args.api.rstrip("/")
 
