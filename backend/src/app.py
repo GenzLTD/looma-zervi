@@ -3,6 +3,8 @@ Flask application factory.
 Registers all blueprints, middleware, and error handlers.
 """
 import os
+import subprocess
+from functools import lru_cache
 
 from flask import Flask, abort, jsonify, render_template, send_from_directory
 from flask_cors import CORS
@@ -196,6 +198,39 @@ def _collect_open_items(app):
     return load_open_items(app)
 
 
+@lru_cache(maxsize=1)
+def _git_commit() -> str:
+    """Resolve the deployed commit hash for /health (三级回退).
+
+    Priority: GIT_COMMIT env → backend/git_commit.txt → git rev-parse.
+    Cloud deploys rsync with --exclude='.git' (no git history), so deploy
+    scripts write backend/git_commit.txt at rsync time; local runs fall back
+    to rev-parse. Cached for the process lifetime.
+    """
+    env = os.getenv("GIT_COMMIT", "").strip()
+    if env:
+        return env
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    marker = os.path.join(backend_dir, "git_commit.txt")
+    try:
+        with open(marker, encoding="utf-8") as f:
+            val = f.read().strip()
+            if val:
+                return val
+    except OSError:
+        pass
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, cwd=backend_dir, timeout=2,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 def create_app(env="development"):
     app = Flask(__name__)
     _refresh_config()  # re-read env vars so per-test overrides are picked up
@@ -300,6 +335,7 @@ def create_app(env="development"):
             status="ok" if llm_ready else "degraded",
             service="looma-backend",
             version="v1",
+            git_commit=_git_commit(),
             llm_provider=primary_llm,
             llm_provider_order=llm_order,
             llm_configured=llm_ready,
