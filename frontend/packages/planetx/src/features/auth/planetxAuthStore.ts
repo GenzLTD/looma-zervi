@@ -26,6 +26,11 @@ import {
   type PlanetXFleet as Fleet,
   type PlanetXGameScreen as GameScreen,
 } from '@looma/shared-core'
+import {
+  getSupabaseClient,
+  isSupabaseEnabled,
+  persistSupabaseSession,
+} from '@looma/shared-core/supabase'
 
 export {
   IDENTITY_LABELS,
@@ -309,18 +314,41 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
     }
   },
 
-  // ======= Auth (Looma JWT) =======
+  // ======= Auth (Supabase 统一认证 / looma JWT 双路径) =======
   login: async (email, password) => {
     try {
-      const authApi = getAuthApi()
-      const resp = await authApi.login({ email, password })
-      set({
-        token: resp.access_token,
-        user: { ...resp.user, identity: undefined, personality_type: undefined } as any,
-        isAuthenticated: true,
-      })
-      // 写入共享 localStorage，T 空间可自动识别
-      getApiClient().setToken(resp.access_token)
+      if (isSupabaseEnabled()) {
+        // Supabase 统一认证：access_token 直接作 looma Bearer（后端 JWKS 验证）
+        const sb = getSupabaseClient()!
+        const { data, error } = await sb.auth.signInWithPassword({ email, password })
+        if (error) throw new Error(error.message)
+        const accessToken = data.session?.access_token
+        if (!accessToken) throw new Error('no session')
+        persistSupabaseSession(accessToken)
+        getApiClient().setToken(accessToken)
+        set({
+          token: accessToken,
+          user: { id: '', email, name: '', identity: undefined, personality_type: undefined } as any,
+          isAuthenticated: true,
+        })
+        // 从 looma 拉取完整用户信息（supabase_uid → 本地用户映射）
+        try {
+          const profile = await getAuthApi().profile()
+          set({
+            user: { ...(profile as unknown as User), identity: undefined, personality_type: undefined } as any,
+          })
+        } catch { /* profile 走 game/profile 补齐 */ }
+      } else {
+        const authApi = getAuthApi()
+        const resp = await authApi.login({ email, password })
+        set({
+          token: resp.access_token,
+          user: { ...resp.user, identity: undefined, personality_type: undefined } as any,
+          isAuthenticated: true,
+        })
+        // 写入共享 localStorage，T 空间可自动识别
+        getApiClient().setToken(resp.access_token)
+      }
       // 加载完整 profile
       await get().loadProfile()
       get().setToast('跃迁成功！欢迎回来 🪐')
@@ -332,7 +360,9 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
       const err = e as { body?: { message?: string }; message?: string }
       const detail = err.body?.message ?? err.message ?? '未知错误'
       const hint =
-        detail === 'invalid credentials' || detail === 'Unauthorized'
+        detail === 'invalid credentials' ||
+        detail === 'Unauthorized' ||
+        detail === 'Invalid login credentials'
           ? '邮箱或密码错误'
           : detail
       get().setToast('登录失败: ' + hint)
@@ -342,15 +372,34 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
 
   register: async (email, password) => {
     try {
-      const authApi = getAuthApi()
-      const resp = await authApi.register({ email, password })
-      set({
-        token: resp.access_token,
-        user: { ...resp.user, identity: undefined, personality_type: undefined } as any,
-        isAuthenticated: true,
-      })
-      // 写入共享 localStorage，T 空间可自动识别
-      getApiClient().setToken(resp.access_token)
+      if (isSupabaseEnabled()) {
+        const sb = getSupabaseClient()!
+        const { data, error } = await sb.auth.signUp({ email, password })
+        if (error) throw new Error(error.message)
+        const accessToken = data.session?.access_token
+        if (!accessToken) {
+          // 邮箱确认开启，未自动登录 → 提示查收邮件
+          get().setToast('注册成功！请查收邮箱完成确认后再登录 📬')
+          return true
+        }
+        persistSupabaseSession(accessToken)
+        getApiClient().setToken(accessToken)
+        set({
+          token: accessToken,
+          user: { id: '', email, name: '', identity: undefined, personality_type: undefined } as any,
+          isAuthenticated: true,
+        })
+      } else {
+        const authApi = getAuthApi()
+        const resp = await authApi.register({ email, password })
+        set({
+          token: resp.access_token,
+          user: { ...resp.user, identity: undefined, personality_type: undefined } as any,
+          isAuthenticated: true,
+        })
+        // 写入共享 localStorage，T 空间可自动识别
+        getApiClient().setToken(resp.access_token)
+      }
       get().setToast('注册成功！欢迎加入 PlanetX 🚀')
       get().setScreen('onboarding')
       return true
@@ -388,6 +437,10 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
   },
 
   logout: () => {
+    // Supabase 端退出（best-effort）
+    if (isSupabaseEnabled()) {
+      getSupabaseClient()?.auth.signOut().catch(() => {})
+    }
     // 清除共享 localStorage token
     getApiClient().clearToken()
     set({

@@ -6,15 +6,15 @@
 ## Architecture overview
 
 ```
-                    ┌─────────────────┐
-  WeChat MiniApp ──→│  CloudBase shell │── openid ──→
-                    │  (login +客服)    │
-                    └─────────────────┘               ┌──────────────────┐
-                                                       │  Looma Backend    │
-  Web Browser ────────── HTTPS ──────────────────────→ │  Flask + JWT      │
-                                                       │  ChromaDB + SQLite│
-                                                       │  DeepSeek API     │
-                                                       └──────┬───────────┘
+                    ┌─────────────────────────┐
+  WeChat MiniApp ──→│  Supabase Auth (统一身份) │── custom JWT ──→
+                    │  THOMAS 生态 IdP          │
+                    └─────────────────────────┘               ┌──────────────────┐
+                                                              │  Looma Backend    │
+  Web Browser ────────── HTTPS ─────────────────────────────→ │  Flask + JWT      │
+                                                              │  ChromaDB + SQLite│
+                                                              │  DeepSeek API     │
+                                                              └──────┬───────────┘
                                                               │
                                           ┌───────────────────┼───────────────┐
                                           │                   │               │
@@ -35,7 +35,6 @@ looma-zervi/
 │       ├── planetx/       # PlanetX C-end brand (Jason owns)
 │       ├── saas/          # T-space B-end brand (szbenyx owns)
 │       └── miniprogram/   # WeChat miniprogram shell (Jason owns)
-├── cloudbase/        # CloudBase deployment config
 ├── docker/           # Docker + nginx deployment
 └── docs/             # Architecture docs
     ├── DUAL_REPO_WORK_GUIDE.md   # 双仓协作工作指引（与 szbolent-portal 同文同步）
@@ -43,15 +42,16 @@ looma-zervi/
     └── TENCENT_CLOUD_COMMERCE.md   # 腾讯云备案 / 支付 / P0–P2
 ```
 
-## Auth flow (MVP - no Supabase)
+## Auth flow（THOMAS 生态统一认证 — Supabase，RFC docs/rfc/supabase-unified-auth-v1.md）
 
 | Entry point | Flow | Auth endpoint |
 |---|---|---|
-| WeChat MiniApp | wx.login → CloudBase openid → looma JWT | POST /v1/auth/wechat |
-| Web browser | email/password → looma JWT | POST /v1/auth/login |
-| Web register | email/password → looma JWT | POST /v1/auth/register |
-| Cross-platform bind | wechat_openid ↔ email | POST /v1/auth/bind |
-| (optional) Supabase bridge | Supabase JWT → looma JWT | POST /v1/auth/bridge |
+| Web browser | Supabase email/password → Supabase JWT（后端 JWKS 验证） | supabase-js（`/v1/auth/login` 旧路径保留兼容） |
+| Web register | Supabase signUp（邮箱确认）→ Supabase JWT | supabase-js |
+| WeChat MiniApp | wx.login → Supabase Admin API upsert → custom JWT | POST /v1/auth/wechat |
+| Cross-platform bind | wechat_openid ↔ email ↔ supabase_uid | POST /v1/auth/bind |
+
+> 未配置 `SUPABASE_URL` 的环境自动回退旧 looma JWT 路径（require_auth 双 token 兼容）。
 
 ## Quick start
 
@@ -120,5 +120,5 @@ pnpm --filter @looma/saas dev      # T-space on :5174
 
 - **Backend**: Python 3.10+, Flask, SQLite (WAL), ChromaDB, DeepSeek API
 - **Frontend**: React 18, TypeScript, Vite, Zustand, Tailwind CSS
-- **Miniprogram**: WeChat native + CloudBase
+- **Miniprogram**: WeChat native（认证走 Supabase Admin API + custom JWT）
 - **Deploy**: Docker + nginx on Aliyun ECS

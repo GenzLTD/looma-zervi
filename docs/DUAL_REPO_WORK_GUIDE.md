@@ -66,7 +66,7 @@ flowchart LR
 | **诗词数据** | SQLite `poems` + ChromaDB；`/v1/poetry/*` | `src/api/poetry.ts` 适配层 | 后端改字段 → portal 同步改 adapter |
 | **RAG / AI** | `/v1/ask`、`/v1/poetry/search` | 按需接入；**禁用** `tatha.ts` | 不部署独立 Tatha :8010 |
 | **静态门户** | — | `npm run build` → CDN/Nginx | portal 团队独立部署 |
-| **小程序** | miniprogram + CloudBase 过渡 | 不使用 CloudBase | 合法域名就绪后直连 API |
+| **小程序** | miniprogram + Supabase Auth | 不使用 CloudBase（已删除） | 合法域名就绪后直连 API |
 | **博客** | — | `wordpress.ts` + WP 运维 | 第三服务，portal 只读 REST |
 | **企业页 / 服务 / 案例** | 暂无 Looma 路由 | 当前 **静态数据**；`business.ts` 为 legacy | 见 §6.1 退役计划 |
 | **活动抽奖** | 暂无 Looma 路由 | `activity.ts` → legacy :8001 | 见 §6.1 退役计划 |
@@ -223,7 +223,7 @@ API_BASE=https://api.szbolent.com.cn ./scripts/verify-closed-loop.sh
 - [ ] **P2-1** 抽 `@looma/api-contract`（纯 TS types + fetch，Vue/React 共用）
 - [ ] **P2-2** API 网关或 Nginx 按路径隔离 Bolent 暴露面（仅 `/v1/poetry/*`、`/v1/auth/*` 等对公网）
 - [ ] **P2-3** genz.ltd 境外线单独立项，不混用 szbolent 域名与商户号（见 `COMMERCE_ENTITY_DECISION.md`）
-- [ ] **P2-4** CloudBase 登录透传正式下线（小程序直连 `api.szbolent.com.cn`）
+- [x] **P2-4** CloudBase 登录透传已下线（2026-09，Supabase 统一认证取代）
 
 ---
 
@@ -280,7 +280,7 @@ API_BASE=https://api.szbolent.com.cn ./scripts/verify-closed-loop.sh
 |------|------|------|------|
 | bolent Sanic `:8001` | vite proxy `/api`；`activity.ts`；`.env` `VITE_API_BASE` | **完全移除** | portal P0 + looma 若迁 activity |
 | Tatha `:8010` | `tatha.ts`，默认关闭 | 删除或仅留 archive 注释 | portal |
-| CloudBase 登录透传 | 合法域名未就绪时过渡 | 小程序直连 API 后下线 | looma |
+| CloudBase 登录透传 | 合法域名未就绪时过渡 | ✅ 已下线（2026-09） | looma |
 | `business.ts` → `/api` | 未被页面引用 | 删除或改静态 | portal |
 
 ---
@@ -311,7 +311,7 @@ diff -q looma-zervi/docs/DUAL_REPO_WORK_GUIDE.md szbolent-portal/docs/DUAL_REPO_
 ## 11. 常见误区（Review 时对照）
 
 1. **「门户要有自己的诗词后端」** — 否，SQLite/ChromaDB 只在 looma。  
-2. **「CloudBase 是身份中心」** — 否，JWT 真源是 Looma `/v1/auth/wechat`。  
+2. **「CloudBase 是身份中心」** — 否，身份真源是 Supabase Auth（THOMAS 统一认证，`cloudbase/` 已删除）。  
 3. **「Tatha 还要独立部署」** — 否，已融入 `backend/src/rag/`。  
 4. **「双仓应该合并」** — 否，问题在于 legacy 与契约，不是分仓本身。  
 5. **「CORS 生产不用配，因为 API 是独立域名」** — 错，跨域 + JWT 必须配。  

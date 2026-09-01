@@ -18,7 +18,7 @@
 | 诗词数据 | ✅ `db/manager.py` → SQLite `poems` + ChromaDB（诗词语义搜索）；HTTP 路由 `/v1/poetry/*` | `src/api/poetry.ts` 经 `/v1/poetry/browse` 等读取，**不直连数据库** |
 | AI / RAG | ✅ `backend/src/rag/`（原 Tatha RAG 已完全融入）：通用 RAG + 诗词语义搜索 + 嵌入生成 | 消费 `/v1/ask`（通用问答）和 `/v1/poetry/search`（诗词搜索）；**无需独立 Tatha 服务** |
 | 静态门户 | — | ✅ `npm run build` → CDN/Nginx |
-| CloudBase | ⚠️ **可选透传**（非核心） | 不使用 |
+| CloudBase | ❌ **已删除**（2026-09） | 认证统一走 Supabase |
 | 备案 / 商户号 | 运维 + 主体资质 | 同主体域名 `szbolent.com.cn` |
 
 **身份真源（纠正常见误解）：**
@@ -28,7 +28,7 @@
     → HTTPS api.szbolent.com.cn/v1/auth/wechat   ← 生产主路径
     → Looma code2session → openid → JWT
 
-CloudBase wechat-login 云函数 = 仅过渡透传（合法域名未就绪时）
+CloudBase wechat-login 云函数 = 已删除（2026-09，Supabase 统一认证取代）
                                   不是身份中心，不承载支付回调
 ```
 
@@ -82,7 +82,7 @@ Looma 无 poets 表、无 like/view 计数；门户侧做字段适配与作者�
 | uploadFile（若需） | `https://api.szbolent.com.cn` |
 | downloadFile（若需） | `https://api.szbolent.com.cn` 或 CDN 域 |
 
-**配置完成后：** 小程序 **直连** `api.szbolent.com.cn`，CloudBase 登录透传可下线。
+**当前状态：** 小程序 **直连** `api.szbolent.com.cn`，CloudBase 登录透传已下线（2026-09）。
 
 ### 1.3 Nginx 参考（api 节点）
 
@@ -157,37 +157,25 @@ VITE_BLOG_API_BASE=https://cms.szbolent.com.cn/wp-json/wp/v2
 - [ ] DNS：`www` / `@` → CDN 或服务器
 - [ ] 全站 HTTPS（腾讯云 SSL 证书）
 - [ ] 更新 `looma-zervi/frontend/packages/shared-core/src/types/brand.ts` 中 `domain` TODO
-- [ ] 更新 `cloudbase/functions/wechat-login/index.js` 中 `LOOMA_API_BASE`（若仍保留透传）
+- [x] ~~`cloudbase/functions/wechat-login/index.js`~~ 已删除（2026-09）
 - [ ] 更新 `frontend/packages/miniprogram/utils/config.ts` → `API_BASE = 'https://api.szbolent.com.cn'`
 - [ ] 微信公众平台配置合法域名
 - [ ] 运行联调脚本（见 §6）
 
 ---
 
-## 3. CloudBase 降级为可选组件
+## 3. CloudBase 已移除
 
-### 3.1 当前状态
+### 3.1 当前状态（2026-09）
 
-| 文件 | 现状 |
-|------|------|
-| `cloudbase/functions/wechat-login/index.js` | 透传至 `LOOMA_API_BASE`（占位域名） |
-| `cloudbase/cloudbaserc.json` | `envId` 占位 |
-| 小程序 `utils/api.ts` | 可直连 Looma API |
-
-### 3.2 目标态
+`cloudbase/` 目录已整体删除（`functions/wechat-login/`、`cloudbaserc.json`、`README.md`）。
+小程序登录不再经 CloudBase 透传，统一走 **Supabase Auth**（RFC `docs/rfc/supabase-unified-auth-v1.md`）：
 
 | 环境 | 登录路径 |
 |------|----------|
-| **生产** | 小程序 → `https://api.szbolent.com.cn/v1/auth/wechat` |
+| **生产** | 小程序 → `https://api.szbolent.com.cn/v1/auth/wechat`（Supabase Admin API + custom JWT） |
 | **开发** | 开发者工具「不校验合法域名」→ `http://127.0.0.1:5200` |
-| **CloudBase** | **停用或仅保留静态托管**；不再作为登录必经环节 |
-
-### 3.3 降级步骤
-
-- [ ] P0：备案域名可用后，小程序改直连 API，验证登录成功
-- [ ] P0：文档与 README 删除「CloudBase 身份中心」表述
-- [ ] P1：CloudBase 云函数 `wechat-login` 标记 `deprecated` 或删除
-- [ ] P2：若需腾讯云静态托管，仅用 CloudBase **静态网站**，不跑业务逻辑
+| **身份源** | Supabase Auth（THOMAS 生态统一身份层） |
 
 ---
 
@@ -439,7 +427,7 @@ VITE_LOOMA_API_BASE=
 | `backend/src/api/routes/payment_routes.py` | 支付 Stub（P1 改造） |
 | `backend/src/api/routes/auth_routes.py` | `/v1/auth/wechat` |
 | `backend/src/api/routes/poetry_routes.py` | 诗词 HTTP 路由（内部 `db/manager.py`） |
-| `cloudbase/functions/wechat-login/index.js` | 可选透传（P0 后 deprecated） |
+| ~~`cloudbase/`~~ | 已删除（2026-09，Supabase 统一认证取代） |
 | `frontend/packages/miniprogram/utils/config.ts` | 小程序 API_BASE |
 | `nginx-looma-zervi.conf` | Nginx 模板 |
 | `scripts/verify-closed-loop.sh` | 闭环烟雾测试 |

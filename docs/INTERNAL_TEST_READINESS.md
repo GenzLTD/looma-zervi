@@ -497,7 +497,7 @@ GitHub Actions Deploy 对应 Secrets：`ENV_JWT_SECRET`、`ENV_DEEPSEEK_API_KEY`
 | 3 | 脚本硬编码 Mac 路径 | ✅ 改为通用「请在仓库根目录运行」 |
 | 4 | backend/.env 缺失 | ✅ `backend/.env.example` + `start-full-mvp.sh` 从 `.env.example` 复制 |
 | 5 | poetry_full 缺失无提示 | ✅ `verify-mvp-setup.sh` / `start-full-mvp.sh` 显式警告 |
-| 6 | CloudBase 占位符 | 📄 `cloudbase/README.md` 说明非内测主路径 |
+| 6 | CloudBase 占位符 | ✅ `cloudbase/` 已删除（2026-09），认证统一走 Supabase（RFC supabase-unified-auth-v1） |
 | 7–8 | nginx / Docker 端口 | ✅ 见 #1 |
 | 9 | JWT_EXPIRATION_HOURS 等变量名 | ✅ 统一用 `.env.example` 真源 |
 | 10 | 小程序 build:npm | ✅ `start-full-mvp.sh` 失败时给出完整命令 |
