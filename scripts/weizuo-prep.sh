@@ -27,9 +27,10 @@ source "$ROOT/scripts/lib/cloud-ssh-env.sh" 2>/dev/null || true
 PROJECTS_DIR="${PROJECTS_DIR:-$HOME/Projects/looma-zervi}"
 THOMAS_DIR="${THOMAS_DIR:-$HOME/thomas/looma-zervi}"
 BRANCH="${BRANCH:-feat/tianyi-central-chainb}"
-# 云端入口走域名（nginx 按 server_name 匹配；:5200 与裸 IP:80 均不通；
-# 注意 CLOUD_HOST 是部署 IP，不能直接当 API 入口用）
-CLOUD_API="${CLOUD_API:-http://api.genz.ltd}"
+# 云端验证入口 = 裸 IP 直连源站 default server（looma-zervi → :5200）。
+# 注意: api.genz.ltd 走 Cloudflare，origin 可能是旧实例（生产正式链路），
+# 不作为天翼内测验证入口；:5200 被安全组挡掉也不能用。
+CLOUD_API="${CLOUD_API:-http://1.14.202.161}"
 LOCAL_API="${LOCAL_API:-http://127.0.0.1:5200}"
 
 MODE="${1:-all}"
