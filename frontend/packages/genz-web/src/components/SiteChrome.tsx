@@ -57,6 +57,15 @@ export function SiteFooter() {
             <p>
               © {year} {SITE_CONFIG.legalEntityName}. {t("site.footer.rights")}
             </p>
+            <p className="footer-beian">
+              <a
+                href="https://beian.miit.gov.cn/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {SITE_CONFIG.icpBeian}
+              </a>
+            </p>
           </div>
           <div className="footer-links">
             <Link to="/pricing">{t("site.nav.pricing")}</Link>

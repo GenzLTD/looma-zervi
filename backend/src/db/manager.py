@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS users (
     email_hash      TEXT,                      -- sha256(lower(trim(email))) for chain B user_id_hash
     password_hash   TEXT,                      -- bcrypt hash (nullable for miniprogram-only)
     wechat_openid   TEXT UNIQUE,               -- WeChat miniprogram login
+    supabase_uid    TEXT UNIQUE,               -- Supabase Auth user UUID (THOMAS 统一身份, RFC supabase-unified-auth-v1)
     name            TEXT DEFAULT '',
     tier            TEXT DEFAULT 'free',       -- free | supporter | pro
     role            TEXT DEFAULT 'user',       -- user | admin
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_email_hash ON users(email_hash);
 CREATE INDEX IF NOT EXISTS idx_users_wechat_openid ON users(wechat_openid);
+-- NOTE: idx_users_supabase_uid 由 init_schema 迁移块创建（旧库需先 ALTER 加列）
 
 -- ============================================
 -- Core: user_identities (multi-platform identity linking)
@@ -189,6 +191,18 @@ CREATE TABLE IF NOT EXISTS trust_attestations (
 
 CREATE INDEX IF NOT EXISTS idx_trust_attestations_candidate ON trust_attestations(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_trust_attestations_type ON trust_attestations(claim_type, verification_status);
+
+-- ============================================
+-- Signal bridge ingest (Bridge 2/3 inbound idempotency)
+-- ============================================
+CREATE TABLE IF NOT EXISTS signal_ingest (
+    signal_type      TEXT NOT NULL,
+    user_email_hash  TEXT NOT NULL,
+    nonce            TEXT NOT NULL,
+    payload_json     TEXT,
+    created_at       TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (signal_type, user_email_hash, nonce)
+);
 
 -- ============================================
 -- Enterprise: enterprises (szbenyx owns)
@@ -1098,6 +1112,22 @@ class DatabaseManager:
                     "UPDATE users SET email_hash = ?, updated_at = datetime('now') WHERE id = ?",
                     (email_hash(em), uid),
                 )
+            # Migration: supabase_uid for THOMAS unified auth (RFC supabase-unified-auth-v1)
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN supabase_uid TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE users ADD COLUMN supabase_uid failed: %s", e
+                    )
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_uid ON users(supabase_uid)"
+                )
+            except sqlite3.OperationalError as e:
+                logger.warning(
+                    "Migration UNIQUE INDEX idx_users_supabase_uid failed: %s", e
+                )
 
     # ============================================
     # User operations (joint)
@@ -1126,6 +1156,25 @@ class DatabaseManager:
             ).fetchone()
         return dict(row) if row else None
 
+    def record_signal_ingest(
+        self, signal_type: str, user_email_hash: str, nonce: str, payload_json: str
+    ) -> bool:
+        """Record an inbound signal for idempotency. Returns True if new, False if duplicate.
+
+        PRIMARY KEY (signal_type, user_email_hash, nonce) guarantees at-most-once
+        processing per signal instance (Bridge 2/3 envelope).
+        """
+        with self.get_conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO signal_ingest (signal_type, user_email_hash, nonce, payload_json)
+                       VALUES (?, ?, ?, ?)""",
+                    (signal_type, user_email_hash, nonce, payload_json),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
     def get_user_by_openid(self, openid: str):
         with self.get_conn() as conn:
             row = conn.execute("SELECT * FROM users WHERE wechat_openid = ?", (openid,)).fetchone()
@@ -1135,6 +1184,59 @@ class DatabaseManager:
         with self.get_conn() as conn:
             row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
+
+    def get_user_by_supabase_uid(self, supabase_uid: str):
+        """Resolve a looma user by Supabase Auth user UUID (THOMAS unified identity)."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE supabase_uid = ?", (supabase_uid,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def bind_supabase_to_user(self, user_id: str, supabase_uid: str):
+        """Link a Supabase Auth UUID to an existing looma user (legacy account binding)."""
+        with self.get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET supabase_uid = ?, updated_at = datetime('now') WHERE id = ?",
+                (supabase_uid, user_id),
+            )
+
+    def get_or_create_user_by_supabase(self, supabase_uid: str, email: str = "",
+                                       name: str = "", wechat_openid: str = None):
+        """Find-or-create a looma user for a Supabase identity.
+
+        1. supabase_uid 已映射 → 返回现有用户
+        2. email 匹配存量用户（排除 thomas.local 占位邮箱）→ 绑定 supabase_uid（存量迁移）
+        3. 否则创建新用户并绑定
+
+        Returns (user_dict, created_bool).
+        """
+        user = self.get_user_by_supabase_uid(supabase_uid)
+        if user:
+            return user, False
+
+        email = (email or "").strip().lower()
+        if email and not email.endswith(".thomas.local"):
+            legacy = self.get_user_by_email(email)
+            if legacy:
+                self.bind_supabase_to_user(legacy["id"], supabase_uid)
+                if name and not legacy.get("name"):
+                    with self.get_conn() as conn:
+                        conn.execute(
+                            "UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?",
+                            (name, legacy["id"]),
+                        )
+                return self.get_user_by_id(legacy["id"]), False
+
+        user_id = str(uuid.uuid4())
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO users (id, email, email_hash, supabase_uid, wechat_openid, name)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, email or None, email_hash(email or None), supabase_uid,
+                 wechat_openid, name),
+            )
+        return self.get_user_by_id(user_id), True
 
     def bind_wechat_to_user(self, user_id: str, wechat_openid: str):
         """Bind a WeChat openid to an existing user (cross-platform account linking)."""

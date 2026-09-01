@@ -226,9 +226,14 @@ def search_poetry_chroma(query: str, n_results: int = 5) -> list[dict]:
         return []
 
     try:
+        # Normalize Simplified -> Traditional before embedding so query vector
+        # aligns with the Traditional corpus (see src/utils/textnorm.py).
+        from src.utils.textnorm import to_traditional
+
+        normalized = to_traditional(query)
         coll = client.get_collection("poetry_full")
         results = coll.query(
-            query_texts=[query],
+            query_texts=[normalized],
             n_results=min(n_results, max(1, n_results)),
         )
 

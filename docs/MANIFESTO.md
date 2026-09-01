@@ -266,9 +266,9 @@ looma 生成 trust_attestations
                        ┌──────────────────────────────────────┐
   用户入口              │          Looma Backend               │
   ┌──────────┐         │  Flask + Gunicorn :5200              │
-  │ 微信小程序 │──CloudBase──→  /v1/auth/wechat               │
-  │ Web 浏览器 │────────────→  /v1/auth/login                 │
-  │ Google登录 │────────────→  /v1/auth/google  (海外)         │
+  │ 微信小程序 │─Supabase Auth→  /v1/auth/wechat               │
+  │ Web 浏览器 │─Supabase 登录─→  /v1/auth/login (旧路径兼容)   │
+  │ Google登录 │─Supabase OAuth→ /v1/auth/google  (海外)        │
   │ CLI 工具   │──MCP直连──→  /v1/credit/check-company        │
   └──────────┘         │                                      │
                        │  ┌─────────────────────────────────┐ │

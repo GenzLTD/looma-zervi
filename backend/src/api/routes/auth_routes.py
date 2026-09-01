@@ -115,8 +115,8 @@ def wechat_login():
     1. Client calls wx.login() -> gets code
     2. Client sends code to this endpoint
     3. Backend calls WeChat API to exchange code for openid
-    4. Backend finds or creates user by wechat_openid
-    5. Backend signs looma JWT
+    4. THOMAS 统一认证 (RFC supabase-unified-auth-v1): Admin API upsert Supabase 用户
+       → 签发 custom Supabase JWT；未配置 Supabase 时回退旧 looma JWT 路径
     """
     data = request.get_json() or {}
     code = data.get("code", "")
@@ -136,14 +136,49 @@ def wechat_login():
         openid = wechat_data["openid"]
     db = _get_db()
 
-    user = db.get_user_by_openid(openid)
-    if not user:
-        user_id = db.create_user(wechat_openid=openid)
-        user = db.get_user_by_id(user_id)
+    cfg = current_app.config
+    supabase_enabled = bool(cfg.get("SUPABASE_URL") and cfg.get("SUPABASE_SECRET_KEY")
+                            and cfg.get("SUPABASE_JWT_SECRET"))
 
-    token = sign_token(user["id"], extra_claims={
-        "tier": user.get("tier", "free"),
-    })
+    if supabase_enabled:
+        # ---- Supabase 统一认证路径（THOMAS 生态） ----
+        from src.api.auth.supabase_auth import upsert_supabase_user
+        from src.api.auth.jwt_handler import sign_supabase_custom_token
+
+        try:
+            sb_user = upsert_supabase_user(openid, provider="wechat")
+        except Exception as e:
+            logger.error(f"[wechat_auth] Supabase upsert failed: {e}")
+            return jsonify(error="upstream_error", message="identity provider unavailable"), 502
+
+        user = db.get_user_by_supabase_uid(sb_user["id"])
+        if not user:
+            user, _ = db.get_or_create_user_by_supabase(
+                sb_user["id"],
+                email=sb_user.get("email", ""),
+                name=(sb_user.get("user_metadata") or {}).get("full_name") or "",
+                wechat_openid=openid,
+            )
+        if not user:
+            return jsonify(error="server_error", message="failed to resolve user"), 500
+
+        token = sign_supabase_custom_token(
+            sb_user["id"],
+            email=sb_user.get("email", ""),
+            provider="wechat",
+            user_metadata={"wechat_openid": openid},
+        )
+    else:
+        # ---- 旧路径：looma 自签 JWT（Supabase 未配置时的兼容/开发环境） ----
+        user = db.get_user_by_openid(openid)
+        if not user:
+            user_id = db.create_user(wechat_openid=openid)
+            user = db.get_user_by_id(user_id)
+
+        token = sign_token(user["id"], extra_claims={
+            "tier": user.get("tier", "free"),
+        })
+
     return jsonify(
         access_token=token,
         token_type="bearer",

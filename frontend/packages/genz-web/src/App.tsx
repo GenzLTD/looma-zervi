@@ -5,6 +5,7 @@ import { PricingPage } from "./pages/PricingPage";
 import { PrivacyPage } from "./pages/PrivacyPage";
 import { RefundPage } from "./pages/RefundPage";
 import { TermsPage } from "./pages/TermsPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 
 export function App() {
   return (
@@ -20,7 +21,7 @@ export function App() {
           <Route path="/legal/privacy.html" element={<Navigate to="/legal/privacy" replace />} />
           <Route path="/legal/terms.html" element={<Navigate to="/legal/terms" replace />} />
           <Route path="/legal/refund.html" element={<Navigate to="/legal/refund" replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Layout>
     </BrowserRouter>

@@ -1,15 +1,47 @@
 """
 Authentication decorators for route protection.
 Replaces the old AUTH_STUB with real JWT verification.
+
+Dual-token support (RFC docs/rfc/supabase-unified-auth-v1.md D6):
+  - looma JWT (iss=looma, HS256) —— 存量 token，过渡期继续接受
+  - Supabase JWT (JWKS/ES256 或 custom HS256) —— 新统一认证源
 """
 from functools import wraps
 from flask import request, jsonify, g, current_app
-from src.api.auth.jwt_handler import verify_token
+from src.api.auth.jwt_handler import resolve_auth_token
+
+
+def _resolve_user(db, source: str, payload: dict):
+    """Resolve a looma user row from an authenticated token payload.
+
+    source='looma':   payload['sub'] is a looma user id.
+    source='supabase': payload['sub'] is a Supabase auth user UUID —
+                       mapped via users.supabase_uid, auto-created/bound on
+                       first sight (email matching covers legacy users).
+    Returns user dict or None.
+    """
+    if source == "supabase":
+        supabase_uid = payload.get("sub", "")
+        user = db.get_user_by_supabase_uid(supabase_uid) if supabase_uid else None
+        if user:
+            return user
+        # First contact: create local user or bind to a legacy email account
+        email = payload.get("email") or ""
+        name = (payload.get("user_metadata") or {}).get("full_name") or ""
+        try:
+            user, _ = db.get_or_create_user_by_supabase(
+                supabase_uid, email=email, name=name
+            )
+        except Exception as e:  # keep auth non-fatal on mapping edge cases
+            current_app.logger.warning(f"[auth] supabase user mapping failed: {e}")
+            return None
+        return user
+    return db.get_user_by_id(payload.get("sub", ""))
 
 
 def require_auth(f):
     """
-    Require a valid looma JWT in the Authorization header.
+    Require a valid looma or Supabase JWT in the Authorization header.
     Verifies token, loads user from DB, sets g.user_id / g.user_tier / g.user_role.
     """
     @wraps(f)
@@ -20,22 +52,22 @@ def require_auth(f):
 
         token = auth_header[7:]  # strip "Bearer "
         try:
-            payload = verify_token(token)
+            source, payload = resolve_auth_token(token)
         except Exception as e:
             return jsonify(error="unauthorized", message=f"Invalid token: {str(e)}"), 401
 
-        user_id = payload["sub"]
         db = getattr(current_app, "_db", None)
         if db is None:
             return jsonify(error="server_error", message="database unavailable"), 500
 
-        user = db.get_user_by_id(user_id)
+        user = _resolve_user(db, source, payload)
         if not user:
             return jsonify(error="unauthorized", message="user not found"), 401
 
-        g.user_id = user_id
+        g.user_id = user["id"]
         g.user_tier = user.get("tier", "free")
         g.user_role = user.get("role", "user")
+        g.auth_source = source
         return f(*args, **kwargs)
 
     return decorated
@@ -75,12 +107,19 @@ def optional_auth(f):
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
             try:
-                payload = verify_token(token)
+                source, payload = resolve_auth_token(token)
             except Exception:
                 pass  # Invalid token → fall through to guest
             else:
+                db = getattr(current_app, "_db", None)
+                if db is not None:
+                    user = _resolve_user(db, source, payload)
+                    if user:
+                        g.user_id = user["id"]
+                        g.user_tier = user.get("tier", "free")
+                        return f(*args, **kwargs)
                 g.user_id = payload["sub"]
-                g.user_tier = payload.get("tier", "free")
+                g.user_tier = "free"
                 return f(*args, **kwargs)
 
         import uuid

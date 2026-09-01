@@ -1,7 +1,0 @@
-{
-  "name": "wechat-login",
-  "version": "1.0.0",
-  "description": "Pass-through function: forwards wx.login code to looma backend",
-  "main": "index.js",
-  "dependencies": {}
-}

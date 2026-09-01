@@ -164,7 +164,8 @@ def _call_llm(
                     payload["max_tokens"] = max_tokens
                 resp = requests.post(url, json=payload, headers=headers, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
+                msg = resp.json()["choices"][0]["message"]
+                return msg.get("content") or msg.get("reasoning_content") or ""
 
             elif provider == "openai":
                 openai_key = (config.get("OPENAI_API_KEY") or "").strip()

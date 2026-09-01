@@ -999,6 +999,99 @@ def quiz_history():
     return jsonify(sessions=records, total=len(records))
 
 
+# ── Signal Bridge 2/3 inbound (HMAC + idempotency) ──
+
+_MATCH_MISSION_ID = "match"
+_MATCH_MISSION_XP = 50  # 种子期固定奖励；后续可改从 data.match_score 推导
+
+
+def _verify_signal_signature() -> bool:
+    """Verify X-Signal-Signature = HMAC-SHA256(raw_body, SIGNAL_BRIDGE_SECRET).
+
+    Uses raw request body bytes (not re-serialized JSON) so the digest matches
+    exactly what the sender computed over the transmitted payload.
+    """
+    secret = current_app.config.get("SIGNAL_BRIDGE_SECRET", "")
+    if not secret:
+        logger.warning("SIGNAL_BRIDGE_SECRET not configured; rejecting signal ingest")
+        return False
+    body = request.get_data()
+    signature = request.headers.get("X-Signal-Signature", "")
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+@game_bp.route("/signal-ingest", methods=["POST"])
+def signal_ingest():
+    """Bridge 2/3 inbound endpoint (no JWT — service-to-service HMAC only).
+
+    Envelope:
+      { "signal_type": "consensus_match", "user_email_hash": "<sha256 hex>",
+        "data": { "match_score": 0.87, "shared_tags": [...], "peer_email_hash": "..." },
+        "timestamp": "<iso8601>", "nonce": "<uuid>" }
+
+    Header:
+      X-Signal-Signature: HMAC-SHA256(raw_body, SIGNAL_BRIDGE_SECRET) as lowercase hex
+    """
+    if not _verify_signal_signature():
+        return jsonify(error="unauthorized", message="invalid or missing signature"), 401
+
+    data = request.get_json(silent=True) or {}
+    signal_type = (data.get("signal_type") or "").strip()
+    user_email_hash = (data.get("user_email_hash") or "").strip()
+    nonce = (data.get("nonce") or "").strip()
+
+    if not signal_type or not user_email_hash or not nonce:
+        return jsonify(
+            error="bad_request",
+            message="signal_type, user_email_hash, nonce are required",
+        ), 400
+
+    db = _get_db()
+
+    # Idempotency gate: at-most-once per (signal_type, user_email_hash, nonce)
+    payload_json = _json.dumps(data.get("data"), ensure_ascii=False)
+    if not db.record_signal_ingest(signal_type, user_email_hash, nonce, payload_json):
+        logger.info("duplicate signal ignored: type=%s nonce=%s", signal_type, nonce)
+        return jsonify(status="ok", duplicate=True)
+
+    if signal_type != "consensus_match":
+        # 种子期仅处理 consensus_match；未知类型幂等记录后忽略
+        logger.info("unknown signal_type ignored: %s", signal_type)
+        return jsonify(status="ok", ignored=True, reason="unknown_signal_type")
+
+    # consensus_match: resolve user → 若有进行中 match mission → mission-complete
+    user = db.get_user_by_email_hash(user_email_hash)
+    if not user:
+        logger.info("consensus_match: no user for hash %s", user_email_hash)
+        return jsonify(status="ok", matched=False)
+
+    # 确保有 game profile（complete_mission 依赖 profile 行累加 XP）
+    if not db.get_game_profile(user["id"]):
+        db.upsert_game_profile(user["id"], "", "")
+
+    # 种子期捷径：以 mission_completions 的 UNIQUE(user_id, mission_id) 幂等，
+    # 「进行中 match mission」≈「尚未完成过 match mission」；已完成则幂等忽略。
+    completion_id, was_new = db.complete_mission(
+        user["id"], _MATCH_MISSION_ID, _MATCH_MISSION_XP
+    )
+    if was_new:
+        logger.info(
+            "consensus_match: mission %s completed for user %s (+%d XP)",
+            _MATCH_MISSION_ID, user["id"], _MATCH_MISSION_XP,
+        )
+        return jsonify(
+            status="ok", matched=True, mission_completed=True,
+            mission_id=_MATCH_MISSION_ID, xp_earned=_MATCH_MISSION_XP,
+        )
+
+    logger.info(
+        "consensus_match: match mission already completed for user %s, ignore",
+        user["id"],
+    )
+    return jsonify(status="ok", matched=True, mission_completed=False)
+
+
 # ── Signal Bridge 3 outbound (personality_beacon egress) ──
 
 def _parse_personality_detail(detail):

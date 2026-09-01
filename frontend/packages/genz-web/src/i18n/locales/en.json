@@ -16,10 +16,10 @@
       "switchAria": "Switch language"
     },
     "footer": {
-      "rights": "All rights reserved."
+      "rights": "All rights reserved.",
+      "icp": "Yue ICP 2026092569-1"
     },
-    "support": "Support",
-    "api": "API"
+    "support": "Support"
   },
   "meta": {
     "home": {

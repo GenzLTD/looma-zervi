@@ -29,6 +29,18 @@ class Config:
     JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "24"))
     JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
+    # Supabase — THOMAS 生态统一认证 (RFC docs/rfc/supabase-unified-auth-v1.md)
+    SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+    SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+    # service_role secret key (sb_secret_*) — Admin API upsert 微信/华为用户
+    SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+    # HS256 custom token 签发（微信/华为无原生 provider，looma 代签）
+    SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+    # Auth 签发 token 验证走 JWKS (ES256) —— 由 SUPABASE_URL 推导
+    SUPABASE_JWKS_URL = (
+        os.getenv("SUPABASE_URL", "").rstrip("/") + "/auth/v1/.well-known/jwks.json"
+    ) if os.getenv("SUPABASE_URL", "") else ""
+
     # WeChat
     WECHAT_APPID = os.getenv("WECHAT_APPID", "")
     WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
@@ -200,6 +212,13 @@ def _refresh_config():
     Config.JWT_SECRET = os.getenv("JWT_SECRET", "looma-zervi-default-jwt-secret-change-in-production-2026")
     Config.JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "24"))
     Config.JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+    Config.SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+    Config.SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+    Config.SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+    Config.SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+    Config.SUPABASE_JWKS_URL = (
+        os.getenv("SUPABASE_URL", "").rstrip("/") + "/auth/v1/.well-known/jwks.json"
+    ) if os.getenv("SUPABASE_URL", "") else ""
     Config.WECHAT_APPID = os.getenv("WECHAT_APPID", "")
     Config.WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
     Config.WECHAT_DEV_MODE = os.getenv("WECHAT_DEV_MODE", "false").lower() == "true"

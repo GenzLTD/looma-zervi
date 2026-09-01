@@ -12,6 +12,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    host: "127.0.0.1",
+    allowedHosts: ["planetx.servbay.host"],
     proxy: {
       "/v1": {
         target: process.env.VITE_API_BASE || "http://localhost:5200",
