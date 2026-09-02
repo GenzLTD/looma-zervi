@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_users_email_hash ON users(email_hash);
+-- NOTE: idx_users_email_hash 由 init_schema 迁移块创建（旧库需先 ALTER 加列）
 CREATE INDEX IF NOT EXISTS idx_users_wechat_openid ON users(wechat_openid);
 -- NOTE: idx_users_supabase_uid 由 init_schema 迁移块创建（旧库需先 ALTER 加列）
 
