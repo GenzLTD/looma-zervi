@@ -3,6 +3,7 @@
 > **状态：** In Progress（后端验证层/微信路径/前端双模式已实施，存量迁移待实测） · **作者：** Jason · **Review：** szbenyx  
 > **日期：** 2026-09-01  
 > **依据：** THOMAS 生态闭环定位 · `CURRENT_SYSTEM_ARCHITECTURE.md` · `auth_routes.py` 现状 · 决策（2026-09-01 对齐）
+> **跨仓审阅：** 本文档决策的「共享同一 Supabase = 统一身份层」记录及待审阅问题见 `THOMAS/docs/SUPABASE_UNIFIED_IDENTITY.md`（window 侧优先看该记录）
 
 ---
 
