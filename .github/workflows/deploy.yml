@@ -330,7 +330,7 @@ jobs:
           fi
 
           cd "${DEPLOY_PATH}/docker"
-          HASH=$(sha256sum "${DEPLOY_PATH}/backend/requirements.txt" "${DEPLOY_PATH}/docker/Dockerfile.backend" | sha256sum | awk '{print $1}')
+          HASH=$((sha256sum "${DEPLOY_PATH}/backend/requirements.txt" "${DEPLOY_PATH}/docker/Dockerfile.backend"; find "${DEPLOY_PATH}/backend/src" -type f -exec sha256sum {} +) | sha256sum | awk '{print $1}')
           MARKER="/tmp/looma-backend-image.hash"
           NEED_BUILD=1
           if [ -f "${MARKER}" ] && [ "$(cat "${MARKER}")" = "${HASH}" ]; then
