@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Looma · 团队内部 API 门面</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --ink: #1f2329;
+    --muted: #6b7280;
+    --line: #e5e8ec;
+    --brand: #145EFF;
+    --brand-hover: #1047CC;
+    --brand-soft: #EBF0FF;
+    --ok: #18a058;
+    --warn: #d97706;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 88px; }
+
+  header.brand {
+    display: flex; align-items: center; gap: 16px;
+    padding-bottom: 24px; border-bottom: 1px solid var(--line);
+  }
+  .logo {
+    width: 56px; height: 56px; border-radius: 14px; flex: none;
+    background: linear-gradient(135deg, #145EFF, #6C63FF);
+    color: #fff; font-size: 28px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    box-shadow: 0 4px 12px rgba(20, 94, 255, .25);
+  }
+  header.brand .name { font-size: 24px; font-weight: 700; letter-spacing: .5px; }
+  header.brand .name small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+  .badge {
+    margin-left: auto; flex: none;
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
+    background: var(--card);
+  }
+
+  section.mode {
+    margin: 28px 0 18px; padding: 20px 22px;
+    background: var(--card); border: 1px solid var(--line);
+    border-left: 4px solid var(--brand); border-radius: 12px;
+  }
+  section.mode h2 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+  .mode-tag {
+    display: inline-block; font-size: 12px; font-weight: 700;
+    color: #fff; background: var(--brand); border-radius: 6px;
+    padding: 2px 10px; vertical-align: 2px; letter-spacing: .4px;
+  }
+  section.mode p { font-size: 13.5px; color: var(--muted); margin-top: 6px; max-width: 720px; }
+  section.mode p b { color: var(--ink); }
+  section.mode code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #eef0f3; padding: 1px 6px; border-radius: 4px; font-size: 12px;
+  }
+
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 8px 20px;
+    font-size: 12.5px; color: var(--muted); margin: 16px 0;
+  }
+  .meta code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #eef0f3; padding: 1px 6px; border-radius: 4px;
+  }
+
+  section.deps {
+    margin: 22px 0 8px; padding: 18px 22px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  }
+  section.deps h2 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+  ul.deps-list { list-style: none; }
+  li.dep { border-top: 1px solid var(--line); padding: 12px 0; }
+  li.dep:first-child { border-top: none; padding-top: 4px; }
+  li.dep .row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  li.dep .row b { font-size: 14px; }
+  li.dep code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px; background: #eef0f3; padding: 1px 8px; border-radius: 6px;
+  }
+  .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); flex: none;
+  }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(24,160,88,.15); }
+  .dot.bad { background: #d92d20; box-shadow: 0 0 0 3px rgba(217,45,32,.15); }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(217,119,6,.15); }
+  li.dep .hint { font-size: 12px; color: var(--muted); width: 100%; }
+  li.dep details { margin-top: 10px; font-size: 12.5px; }
+  li.dep details summary {
+    cursor: pointer; color: var(--brand); font-size: 12.5px; font-weight: 600;
+    list-style: none; user-select: none;
+  }
+  li.dep details summary::-webkit-details-marker { display: none; }
+  li.dep details summary::before { content: "▸ "; color: var(--muted); }
+  li.dep details[open] summary::before { content: "▾ "; }
+  li.dep details ul { margin: 8px 0 0 18px; color: var(--muted); }
+  li.dep details li { margin: 3px 0; }
+  li.dep details li code { background: none; padding: 0; font-size: 12px; color: var(--ink); }
+
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 700; line-height: 1;
+    padding: 4px 8px; border-radius: 999px; flex: none;
+  }
+  .badge.pr-p0 { background: #fdecea; color: #d92d20; }
+  .badge.pr-p1 { background: #fef3e2; color: #d97706; }
+  .badge.pr-p2 { background: #eef0f3; color: var(--muted); }
+  .badge.open-n { background: #fdecea; color: #d92d20; margin-left: 6px; vertical-align: 1px; }
+  .tag.area {
+    display: inline-block; font-size: 11px; font-weight: 600; color: var(--brand);
+    background: rgba(37,99,235,.08); border-radius: 999px; padding: 3px 9px; flex: none;
+  }
+  section.open-items h2 .hint { float: right; font-weight: 400; }
+
+  .cta-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 32px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 18px; font-size: 14px; font-weight: 600;
+    border-radius: 10px; text-decoration: none; border: 1px solid transparent;
+    transition: transform .05s ease;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-ghost { background: var(--card); color: var(--ink); border-color: var(--line); }
+  .btn-ghost:hover { border-color: var(--brand); color: var(--brand); }
+  .btn code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+  section.routes { margin-top: 8px; }
+  section.routes h2 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+  section.routes h2 span {
+    font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 8px;
+  }
+
+  .search {
+    width: 100%; padding: 10px 14px; margin-bottom: 16px;
+    border: 1px solid var(--line); border-radius: 10px;
+    font-size: 14px; outline: none; background: var(--card);
+    transition: border-color .12s ease, box-shadow .12s ease;
+  }
+  .search:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(20,94,255,.12); }
+
+  nav.tabs {
+    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px;
+  }
+  button.tab {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 16px; font-size: 14px; font-weight: 600;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--card); color: var(--ink); cursor: pointer;
+    transition: border-color .12s ease, color .12s ease, background .12s ease;
+    font-family: inherit;
+  }
+  button.tab:hover { border-color: var(--brand); color: var(--brand); }
+  button.tab.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button.tab .n {
+    font-size: 11px; font-weight: 700; background: #eef0f3; color: var(--muted);
+    border-radius: 999px; padding: 0 8px; line-height: 18px;
+  }
+  button.tab.active .n { background: rgba(255,255,255,.22); color: #fff; }
+
+  section.line { display: none; }
+  section.line.active { display: block; }
+
+  details.group {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; margin-bottom: 10px; overflow: hidden;
+  }
+  details.group summary {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px; cursor: pointer; list-style: none;
+    font-size: 14px; font-weight: 600; user-select: none;
+  }
+  details.group summary::-webkit-details-marker { display: none; }
+  details.group summary::before {
+    content: "▸"; color: var(--muted); font-size: 12px; transition: transform .12s ease;
+  }
+  details.group[open] summary::before { transform: rotate(90deg); }
+  details.group summary code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-weight: 500; font-size: 13px; color: var(--brand);
+  }
+  .count {
+    margin-left: auto; font-size: 12px; font-weight: 600; color: var(--muted);
+    background: #eef0f3; border-radius: 999px; padding: 1px 10px;
+  }
+  ul.rows { list-style: none; border-top: 1px solid var(--line); }
+  li.row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 16px; font-size: 13px;
+  }
+  li.row:hover { background: #f8fafc; }
+  li.row code.path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--ink); font-size: 12.5px; word-break: break-all;
+  }
+  .methods { display: inline-flex; gap: 4px; flex: none; }
+  i.m {
+    font-style: normal; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px; font-weight: 700; letter-spacing: .3px;
+    border-radius: 4px; padding: 1px 6px; color: #fff;
+  }
+  .m-get { background: #145EFF; }
+  .m-post { background: #18a058; }
+  .m-put { background: #d97706; }
+  .m-delete { background: #d92d20; }
+  .m-patch { background: #7c3aed; }
+
+  p.empty {
+    display: none; padding: 28px 16px; text-align: center;
+    font-size: 13px; color: var(--muted);
+    background: var(--card); border: 1px dashed var(--line); border-radius: 12px;
+  }
+
+  footer {
+    margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--muted);
+    display: flex; flex-wrap: wrap; gap: 12px 18px; justify-content: space-between;
+  }
+  footer a { color: var(--muted); text-decoration: none; border-bottom: 1px dashed transparent; }
+  footer a:hover { color: var(--brand); border-bottom-color: var(--brand); }
+  footer code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #eef0f3; padding: 1px 6px; border-radius: 4px; }
+
+  @media (max-width: 520px) {
+    .wrap { padding: 32px 16px 56px; }
+    .logo { width: 46px; height: 46px; font-size: 22px; }
+    header.brand .name { font-size: 20px; }
+    .badge { display: none; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <header class="brand">
+    <div class="logo">L</div>
+    <div class="name">Looma<small>人才智能体后端 · 团队内部 API 门面</small></div>
+    <span class="badge">内部 · noindex</span>
+  </header>
+
+  <section class="mode">
+    <h2>当前部署模式：<span class="mode-tag">API-only</span></h2>
+    <p>
+      <b>Looma 仅作为后端 API 服务运行（:5200），对外只暴露 <code>/v1/*</code> 接口。</b>
+      产品前端独立部署，通过本服务 API 完成登录、职位、简历、匹配等业务：
+      PlanetX <code>:5173</code> · T-space <code>:5174</code> · portal <code>:5175</code>。
+      因此访问本根路径看到的是 API 门面，而不是产品页面。
+    </p>
+    <p>
+      若需 Flask 直接托管 PlanetX 前端（单体部署），设置环境变量
+      <code>PLANETX_DIST_DIR</code> 指向构建产物目录并重启，本页将自动切换为 SPA 模式。
+    </p>
+  </section>
+
+  <div class="meta">
+    <span>env <code>{{ env }}</code></span>
+    <span>LLM <code>{{ llm_provider }}</code></span>
+    <span>路由 <code>{{ route_total }}</code> 条</span>
+    <span>生成于 <code>{{ generated_at }}</code></span>
+  </div>
+
+  <div class="cta-row">
+    <a class="btn btn-ghost" href="/health"><code>/health</code> 服务健康</a>
+    <a class="btn btn-ghost" href="/v1/endpoints"><code>/v1/endpoints</code> JSON 清单（脚本用）</a>
+  </div>
+
+  <section class="deps">
+    <h2>依赖服务</h2>
+    <ul class="deps-list">
+      {% for p in deps.llm %}
+      <li class="dep">
+        <div class="row">
+          <span class="dot {{ p.cls }}"></span>
+          <b>LLM · {{ p.name }}</b>
+          {% if p.base %}<code>{{ p.base }}</code>{% endif %}
+          {% if p.model %}<code>{{ p.model }}</code>{% endif %}
+          <code>{{ p.status }}</code>
+        </div>
+        {% if p.name == 'ollama' %}
+        <div class="hint">本地模型推理（可选；按 <code>LLM_PROVIDER_ORDER</code> 顺序在主 provider 失败时自动降级）。</div>
+        {% else %}
+        <div class="hint">按 <code>LLM_PROVIDER_ORDER</code> 顺序优先调用；未配置 Key 或不可达时自动跳过。</div>
+        {% endif %}
+      </li>
+      {% endfor %}
+      <li class="dep">
+        <div class="row">
+          <span class="dot {{ 'ok' if deps.qcc.status == 'ok' else ('warn' if deps.qcc.status.startswith('http') else 'bad') }}"></span>
+          <b>QCC 企查查 MCP 网关</b>
+          <code>{{ deps.qcc.base }}</code>
+          <code>{{ deps.qcc.status }}</code>
+        </div>
+        <div class="hint">企查查官方 MCP 的 nginx/ServBay 反向代理（:8998，qcc8998）。它是外部依赖服务，不属于本服务的 /v1/* 接口，因此不出现在下方清单中。消费方：<code>/v1/credit/*</code>（Bolent → credit 组）。</div>
+        <details>
+          <summary>9 个 MCP 服务端点（Streamable HTTP）</summary>
+          <ul>
+          {% for name, url in deps.qcc.services.items() %}
+            <li><code>{{ name }}</code> → {{ url }}</li>
+          {% endfor %}
+          </ul>
+        </details>
+      </li>
+    </ul>
+  </section>
+
+  <section class="deps open-items">
+    <h2>待办缺口 <span class="badge open-n">{{ open_items.list|length }} 待办</span><span class="hint" style="float:right">运行时自动探测 + 团队清单（backend/open_items.json，编辑后刷新即生效）</span></h2>
+    <ul class="deps-list">
+      {% for item in open_items.list %}
+      <li class="dep">
+        <div class="row">
+          <span class="badge pr-{{ item.priority|lower }}">{{ item.priority }}</span>
+          <span class="dot {{ 'bad' if item.status == 'open' else ('ok' if item.status == 'done' else 'warn') }}"></span>
+          <b>{{ item.title }}</b>
+          <span class="tag area">{{ item.area }}</span>
+        </div>
+        {% if item.notes %}<div class="hint">{{ item.notes }}{% if item.ref %} · 见 <code>{{ item.ref }}</code>{% endif %}</div>{% elif item.ref %}<div class="hint">见 <code>{{ item.ref }}</code></div>{% endif %}
+        {% if item.owner %}<div class="hint">Owner: <b>{{ item.owner }}</b></div>{% endif %}
+      </li>
+      {% else %}
+      <li class="dep"><div class="row"><span class="dot ok"></span><b>暂无待办缺口</b></div></li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="routes">
+    <h2>接口一览<span>按产品线归类 · 由 Flask 路由表（url_map）实时生成 · 无需手工维护</span></h2>
+    <input id="filter" class="search" type="search" placeholder="过滤：输入路径或方法，如 /v1/auth 或 POST">
+
+    <nav class="tabs" id="tabs">
+    {% for line in product_lines %}
+      <button type="button" class="tab" data-line="{{ line.key }}">{{ line.label }}<span class="n">{{ line.total }}</span></button>
+    {% endfor %}
+    </nav>
+
+    <div id="lines">
+    {% for line in product_lines %}
+      <section class="line" id="line-{{ line.key }}" data-label="{{ line.label }}">
+      {% for g in line.groups %}
+        <details class="group" open>
+          <summary><code>{{ g.label }}</code><span class="count">{{ g.routes | length }}</span></summary>
+          <ul class="rows">
+          {% for r in g.routes %}
+            <li class="row">
+              <span class="methods">
+              {% for m in r.methods %}<i class="m m-{{ m | lower }}">{{ m }}</i>{% endfor %}
+              </span>
+              <code class="path">{{ r.rule }}</code>
+            </li>
+          {% endfor %}
+          </ul>
+        </details>
+      {% endfor %}
+      </section>
+    {% endfor %}
+    </div>
+
+    <p class="empty" id="no-result">没有匹配的接口</p>
+  </section>
+
+  <footer>
+    <div>
+      Looma 后端 <code>v{{ version }}</code> · 页面实时生成 · 仅供团队内部
+    </div>
+    <div>
+      <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="https://gitee.com/" target="_blank" rel="noopener">Gitee</a> ·
+      <a href="/health">健康</a>
+    </div>
+  </footer>
+
+</main>
+<script>
+(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('#tabs .tab'));
+  var lines = Array.prototype.slice.call(document.querySelectorAll('section.line'));
+  var groups = Array.prototype.slice.call(document.querySelectorAll('details.group'));
+  var rows = Array.prototype.slice.call(document.querySelectorAll('li.row'));
+  var input = document.getElementById('filter');
+  var empty = document.getElementById('no-result');
+
+  function activate(key) {
+    tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.line === key); });
+    lines.forEach(function (l) { l.classList.toggle('active', l.id === 'line-' + key); });
+  }
+
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () { activate(t.dataset.line); });
+  });
+  if (tabs.length) activate(tabs[0].dataset.line);
+
+  input.addEventListener('input', function () {
+    var v = input.value.trim().toLowerCase();
+    var anyVisible = false;
+    var firstHit = null;
+    rows.forEach(function (row) {
+      var hit = row.textContent.toLowerCase().indexOf(v) !== -1;
+      row.style.display = hit ? '' : 'none';
+      if (hit && !firstHit) firstHit = row;
+    });
+    if (v) {
+      // Expand groups that contain matches; keep only lines with matches.
+      groups.forEach(function (g) {
+        var hasHit = g.querySelectorAll('li.row[style*="none"]').length < g.querySelectorAll('li.row').length;
+        g.open = hasHit;
+      });
+      lines.forEach(function (l) {
+        var hasHit = l.querySelectorAll('li.row[style*="none"]').length < l.querySelectorAll('li.row').length;
+        l.style.display = hasHit ? '' : 'none';
+        if (hasHit) anyVisible = true;
+      });
+      if (firstHit) {
+        var lineEl = firstHit.closest('section.line');
+        var key = lineEl ? lineEl.id.replace('line-', '') : null;
+        if (key) activate(key);
+      }
+    } else {
+      lines.forEach(function (l) { l.style.display = ''; });
+      groups.forEach(function (g) { g.open = true; });
+      rows.forEach(function (r) { r.style.display = ''; });
+      if (tabs.length) activate(tabs[0].dataset.line);
+    }
+    empty.style.display = (v && !anyVisible) ? '' : 'none';
+  });
+})();
+</script>
+</body>
+</html>

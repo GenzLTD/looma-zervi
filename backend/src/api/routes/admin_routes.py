@@ -14,7 +14,7 @@ import os
 import sys
 import platform
 
-from flask import Blueprint, request, jsonify, current_app, g
+from flask import Blueprint, request, jsonify, current_app, g, render_template
 
 from src.api.auth.decorators import require_auth
 
@@ -157,4 +157,96 @@ def admin_health():
             "pid": os.getpid(),
             "start_time": proc_start if proc_start else None,
         },
+    })
+
+
+# ── LLM 运维面 (ServBay 风格三件套：依赖卡片 + 模型适配清单 + 24h 仪表) ──
+
+def _require_admin_manual():
+    """JWT + admin role check for routes that must NOT run @require_auth
+    (the HTML shell must be openable without a token; data stays protected)."""
+    from src.api.auth.jwt_handler import verify_token
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify(error="unauthorized", message="Missing or invalid Authorization header"), 401
+    try:
+        payload = verify_token(auth_header[7:])
+    except Exception as e:
+        return jsonify(error="unauthorized", message=f"Invalid token: {str(e)}"), 401
+    db = _get_db()
+    user = db.get_user_by_id(payload["sub"]) if db else None
+    if not user:
+        return jsonify(error="unauthorized", message="user not found"), 401
+    if user.get("role") != "admin":
+        return jsonify(error="forbidden", message="admin only"), 403
+    return None
+
+
+def _llm_providers_probe():
+    """Probe LLM providers in LLM_PROVIDER_ORDER (shape matches app._collect_dependencies)."""
+    from src.app import _probe_base
+
+    config = current_app.config
+    order = [
+        p.strip().lower()
+        for p in (config.get("LLM_PROVIDER_ORDER") or os.getenv("LLM_PROVIDER_ORDER") or "deepseek").split(",")
+        if p.strip()
+    ]
+    out = []
+    for p in order:
+        if p == "deepseek":
+            key = (config.get("DEEPSEEK_API_KEY") or "").strip()
+            base = config.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1"
+            model = config.get("DEEPSEEK_MODEL") or "deepseek-chat"
+        elif p == "openai":
+            key = (config.get("OPENAI_API_KEY") or "").strip()
+            base = config.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+            model = config.get("OPENAI_MODEL") or "gpt-3.5-turbo"
+        elif p == "ollama":
+            key = "local"
+            base = config.get("OLLAMA_HOST") or "http://127.0.0.1:11434"
+            model = config.get("OLLAMA_MODEL") or "qwen2.5-coder:1.5b"
+        else:
+            out.append({"name": p, "base": "", "model": "", "status": "unknown", "cls": "bad"})
+            continue
+        if key and key.lower() not in ("skip", "your-deepseek-api-key", "your-openai-api-key"):
+            status = _probe_base(base, key if p != "ollama" else "")
+        else:
+            status = "not_configured"
+        cls = {"ok": "ok", "not_configured": "muted", "unreachable": "bad"}.get(status, "warn")
+        out.append({"name": p, "base": base, "model": model, "status": status, "cls": cls})
+    return out
+
+
+@admin_bp.route("/admin/llm-ops", methods=["GET"])
+def admin_llm_ops():
+    """LLM 运维面：
+    - 默认返回 JSON 数据（require JWT + admin role）
+    - ?view=page 返回页面壳（无数据；页面 JS 带 token 拉取本端点数据并自动刷新）
+    """
+    from datetime import datetime
+
+    if request.args.get("view") in ("1", "page", "html"):
+        return render_template(
+            "llm-ops.html",
+            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        )
+
+    err = _require_admin_manual()
+    if err:
+        return err
+
+    db = _get_db()
+    hours = max(1, min(int(request.args.get("hours", 24) or 24), 168))
+    from src.agents.llm_catalog import LLM_MODEL_CATALOG
+    from src.app import _qcc_gateway_status
+
+    return jsonify({
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "hours": hours,
+        "deps": _llm_providers_probe(),
+        "qcc": _qcc_gateway_status(),
+        "catalog": LLM_MODEL_CATALOG,
+        "stats": db.get_llm_usage_stats(hours=hours),
     })
