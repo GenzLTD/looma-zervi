@@ -15,6 +15,7 @@
  * Ref: tspace_act1_prototype.html / GDD §5.1 / GDD §9.2
  */
 import { useState, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import StarBackground from '../../brand/components/StarBackground'
 import FeedbackSurvey from '../feedback/FeedbackSurvey'
 import type {
@@ -89,6 +90,8 @@ const CSS = {
 // ── Component ──
 
 export default function TspaceNavigatorScreen() {
+  const navigate = useNavigate()
+
   // State
   const [sessionId, setSessionId] = useState<string>('')
   const [step, setStep] = useState(-1)            // -1 = domain selection
@@ -277,6 +280,12 @@ export default function TspaceNavigatorScreen() {
     }
   }, [apiBase, visitedDomains])
 
+  // ── Leave ──
+
+  const goHome = useCallback(() => {
+    navigate('/')
+  }, [navigate])
+
   // ── Derive UI state ──
 
   const isDomainSelection = step === -1
@@ -300,12 +309,28 @@ export default function TspaceNavigatorScreen() {
           <p style={{ fontSize: '0.75rem', color: 'var(--px-color-text-tertiary)', margin: '4px 0 0' }}>
             Navigator 叙事体验 — 六域一问验证
           </p>
+          <button
+            onClick={goHome}
+            style={{
+              marginTop: '10px', padding: '4px 14px', borderRadius: '999px',
+              border: '1px solid var(--px-color-border-solid)',
+              background: 'rgba(255,255,255,0.03)', color: 'var(--px-color-text-tertiary)',
+              fontSize: '0.68rem', cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            ← 返回母舰 · 随时可退出
+          </button>
         </div>
 
         {/* Domain Selector */}
         {isDomainSelection && (
           <div style={CSS.panel}>
             <div style={CSS.sectionTitle}>🎯 选择一个域进入</div>
+            <p style={{ fontSize: '0.75rem', color: 'var(--px-color-text-tertiary)', lineHeight: 1.75, margin: '0 0 12px' }}>
+              这是什么：一次 <strong>约 2~3 分钟</strong> 的小型叙事（六域一问验证）。<br />
+              怎么玩：选一个域 → Navigator 带你走约 <strong>7 拍对话（职业域 11 拍）</strong> → 抵达收敛点 → 留下一句感受。没有对错。<br />
+              想离开时，点上方「← 返回母舰 · 随时可退出」即可。
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               {DOMAINS.map(d => (
                 <button
@@ -397,7 +422,7 @@ export default function TspaceNavigatorScreen() {
               <span style={{ color: 'var(--px-color-text-soft)' }}>
                 {isComplete
                   ? `✅ Act 1 完成 · ${domainInfo?.name || ''}路径`
-                  : `${currentStepLabel} · ${domainInfo?.icon || ''} ${domainInfo?.name || domain}`}
+                  : `${currentStepLabel} · ${domainInfo?.icon || ''} ${domainInfo?.name || domain} · 第 ${Math.min(step + 1, steps.length)} / ${steps.length} 拍`}
               </span>
               {echoTriggered && (
                 <span style={{
