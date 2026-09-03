@@ -9,6 +9,9 @@ from typing import Any
 CONTRACT_PATH = Path(__file__).resolve().parents[2] / "contracts" / "payment.v1.json"
 DEFAULT_REGION = "CN"
 SUPPORTED_REGIONS = frozenset({"CN", "US"})
+# 部署位别名：契约只建模 CN/US 两区，但海外部署位上报 SG（Vultr 新加坡）。
+# 显式传入的部署位码映射到对应美元计费区；其余未识别码仍回 DEFAULT_REGION。
+DEPLOY_ALIASES: dict[str, str] = {"SG": "US"}
 
 
 @lru_cache(maxsize=1)
@@ -21,9 +24,9 @@ def normalize_region(region: str | None) -> str:
     if not region:
         return DEFAULT_REGION
     code = region.strip().upper()
-    if code not in SUPPORTED_REGIONS:
-        return DEFAULT_REGION
-    return code
+    if code in SUPPORTED_REGIONS:
+        return code
+    return DEPLOY_ALIASES.get(code, DEFAULT_REGION)
 
 
 def resolve_region(region: str | None = None, accept_language: str | None = None) -> str:
@@ -34,8 +37,9 @@ def resolve_region(region: str | None = None, accept_language: str | None = None
         lowered = accept_language.lower()
         if lowered.startswith("zh"):
             return "CN"
-        if lowered.startswith("en"):
-            return "US"
+        # en 及其他非中文语言一律按海外美元区兜底（原实现把非 zh/en 语言落回 CN，
+        # 会令海外浏览器（de/fr/ja 等）拿到 CNY 微信方案走 Stripe 集成）
+        return "US"
     return DEFAULT_REGION
 
 
