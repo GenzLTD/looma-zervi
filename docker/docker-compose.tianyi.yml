@@ -1,13 +1,19 @@
-# 天翼云中央机 overlay — 不改腾讯云默认 compose。
-# 用法（在 /opt/looma-zervi/docker）:
-#   docker compose -p looma-zervi -f docker-compose.yml -f docker-compose.tianyi.yml up -d
+# 天翼云中央机 overlay — 仅参考，不改腾讯云默认 compose。
 #
-# 效果：5200 只绑回环；chroma/redis 不映射宿主；backend 可经 host.docker.internal 打到宿主机 :5211。
+# 现网（2026-08-26 P1 验收）启动只认单文件：
+#   docker compose -p looma-zervi -f docker-compose.tianyi.full.yml up -d
+# full.yml 在天翼上由 `compose config` + python 修端口生成。
+# 本机 Docker Compose v5.5.0 上 `!reset` merge 不生效，禁止用
+#   -f docker-compose.yml -f docker-compose.tianyi.yml
+# 当生产启动。改过本文件或基础 compose 后，必须重新生成 full.yml。
+#
+# 意图：宿主 127.0.0.1:5203 → 容器 5200；chroma/redis 不映射宿主；
+# backend 经 host.docker.internal 打到宿主机 :5211。
 
 services:
   backend:
     ports:
-      - "127.0.0.1:5200:5200"
+      - "127.0.0.1:5203:5200"
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

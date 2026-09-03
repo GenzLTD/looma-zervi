@@ -94,3 +94,6 @@ docs/内测志愿者账号与入口.md
 
 # Supabase CLI local cache (project link state)
 supabase/.temp/
+
+# Deploy-time commit marker (written by deploy scripts, read by /health)
+backend/git_commit.txt

@@ -1,0 +1,65 @@
+{
+  "_comment": "团队维护的已知缺口清单。status: open(待办) / done(已完成) / blocked(受阻)。编辑保存后刷新 https://api.servbay.host/ 即生效。运行时自动探测项不在此维护（见 src/open_items.py）。",
+  "items": [
+    {
+      "id": "quiz-real-question-bank",
+      "area": "鸿蒙答题",
+      "title": "答题题库仍是硬编码 MOCK_QUIZ_QUESTIONS，真实题库源未接入",
+      "priority": "P0",
+      "status": "open",
+      "owner": "",
+      "ref": "game_routes.py:760-845",
+      "notes": "POST /v1/game/quiz/start 无条件返回 mock 题库"
+    },
+    {
+      "id": "stripe-checkout-e2e",
+      "area": "海外支付",
+      "title": "G3-M3 Stripe Checkout 支付闭环未 E2E 验证",
+      "priority": "P1",
+      "status": "open",
+      "owner": "",
+      "ref": "MULTI_CLIENT_CX_STRATEGY.md G3",
+      "notes": ""
+    },
+    {
+      "id": "google-oauth-client-id",
+      "area": "海外登录",
+      "title": "Google OAuth 前端 GIS 已接，待配置 Client ID 并 E2E",
+      "priority": "P1",
+      "status": "open",
+      "owner": "",
+      "ref": "MULTI_CLIENT_CX_STRATEGY.md G3-M2",
+      "notes": ""
+    },
+    {
+      "id": "timeline-backfill-whitelist",
+      "area": "数据",
+      "title": "Timeline backfill 白名单是否覆盖 quiz / share / login 待确认",
+      "priority": "P1",
+      "status": "open",
+      "owner": "",
+      "ref": "ENGINEERING_CLOSED_LOOP_P0.md §E1.6",
+      "notes": ""
+    },
+    {
+      "id": "web-push",
+      "area": "海外",
+      "title": "G3-M4 Web Push 海外通知未做",
+      "priority": "P2",
+      "status": "open",
+      "owner": "",
+      "ref": "MULTI_CLIENT_CX_STRATEGY.md G3-M4",
+      "notes": ""
+    },
+    {
+      "id": "qcc-tencent-8998-retire",
+      "area": "依赖",
+      "title": "腾讯 1.14.202.161:8998 QCC 网关退役（本地 ServBay :8998 承接）",
+      "priority": "P2",
+      "status": "open",
+      "owner": "",
+      "ref": "docs/QCC_GATEWAY_LOCAL.md",
+      "notes": "当前环境 QCC_MCP_BASE_URL 未设，直连官方 agent.qcc.com"
+    }
+  ]
+}

@@ -41,6 +41,12 @@ log "目标: ${SSH_TARGET}:${DEPLOY_PATH}"
 
 ssh_cloud "sudo mkdir -p ${DEPLOY_PATH} /var/www/planetx/dist /var/www/saas/dist && sudo chown -R \$(whoami):\$(whoami) ${DEPLOY_PATH} 2>/dev/null || mkdir -p ${DEPLOY_PATH}"
 
+# 云端 rsync --exclude='.git'，无 git 历史 — 写入 git_commit.txt 随代码同步，
+# 供 /health 的 git_commit 字段读取（backend/src/app.py _git_commit 三级回退）。
+GIT_COMMIT_SHORT="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+printf '%s\n' "$GIT_COMMIT_SHORT" > "$ROOT/backend/git_commit.txt"
+log "记录 commit: ${GIT_COMMIT_SHORT} → backend/git_commit.txt"
+
 log "同步代码..."
 rsync -avz -e "$RSYNC_SSH" --delete \
   --exclude='.git' \
@@ -147,6 +153,7 @@ nohup ./start_gunicorn.sh >> "\${DEPLOY_PATH}/logs/gunicorn.log" 2>&1 &
 sleep 4
 curl -sf http://127.0.0.1:5200/health || { tail -40 "\${DEPLOY_PATH}/logs/gunicorn.log"; exit 1; }
 echo "gunicorn :5200 OK"
+curl -sf http://127.0.0.1:5200/health | python3 -c "import sys,json; d=json.load(sys.stdin); print('  git_commit:', d.get('git_commit'))" 2>/dev/null || true
 
 if [ ! -s "\${DEPLOY_PATH}/backend/data/looma.db" ] || ! sqlite3 "\${DEPLOY_PATH}/backend/data/looma.db" "SELECT 1 FROM poems LIMIT 1;" 2>/dev/null; then
   echo "导入诗词 SQLite（browse/stats/random）..."

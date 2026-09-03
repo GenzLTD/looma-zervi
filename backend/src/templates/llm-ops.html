@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Looma · LLM 运维面</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --ink: #1f2329;
+    --muted: #6b7280;
+    --line: #e5e8ec;
+    --brand: #145EFF;
+    --brand-hover: #1047CC;
+    --brand-soft: #EBF0FF;
+    --ok: #18a058;
+    --warn: #d97706;
+    --bad: #d92d20;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 24px 88px; }
+
+  header.brand {
+    display: flex; align-items: center; gap: 16px;
+    padding-bottom: 24px; border-bottom: 1px solid var(--line);
+  }
+  .logo {
+    width: 56px; height: 56px; border-radius: 14px; flex: none;
+    background: linear-gradient(135deg, #145EFF, #6C63FF);
+    color: #fff; font-size: 28px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    box-shadow: 0 4px 12px rgba(20, 94, 255, .25);
+  }
+  header.brand .name { font-size: 24px; font-weight: 700; letter-spacing: .5px; }
+  header.brand .name small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+  .badge {
+    margin-left: auto; flex: none;
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px;
+    background: var(--card);
+  }
+
+  .meta {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px;
+    font-size: 12.5px; color: var(--muted); margin: 16px 0;
+  }
+  .meta code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #eef0f3; padding: 1px 6px; border-radius: 4px;
+  }
+  .meta a { color: var(--brand); text-decoration: none; border-bottom: 1px dashed transparent; }
+  .meta a:hover { border-bottom-color: var(--brand); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px; font-size: 13px; font-weight: 600;
+    border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink); cursor: pointer;
+    font-family: inherit; transition: border-color .12s ease, color .12s ease;
+  }
+  .btn:hover { border-color: var(--brand); color: var(--brand); }
+  .btn:active { transform: translateY(1px); }
+
+  section.block {
+    margin: 24px 0 8px; padding: 18px 22px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  }
+  section.block h2 { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+  section.block h2 .hint { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+
+  .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); flex: none;
+  }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(24,160,88,.15); }
+  .dot.bad { background: var(--bad); box-shadow: 0 0 0 3px rgba(217,45,32,.15); }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(217,119,6,.15); }
+  .dot.muted { background: #c3c9d1; }
+
+  /* ── 依赖卡片（ServBay 风格） ── */
+  .cards-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; background: var(--card);
+  }
+  .card .top { display: flex; align-items: center; gap: 8px; }
+  .card .top b { font-size: 14px; }
+  .card .url {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px; color: var(--muted); margin-top: 6px;
+    word-break: break-all; background: #f6f8fa; border-radius: 6px; padding: 3px 8px;
+  }
+  .card .status {
+    display: inline-block; font-size: 11px; font-weight: 700; margin-top: 8px;
+    border-radius: 999px; padding: 2px 9px; line-height: 1.5;
+  }
+  .card .status.ok { background: #e6f7ee; color: var(--ok); }
+  .card .status.warn { background: #fef3e2; color: var(--warn); }
+  .card .status.bad { background: #fdecea; color: var(--bad); }
+  .card .status.muted { background: #eef0f3; color: var(--muted); }
+  .card .model { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .card .model code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--brand-soft); color: var(--brand); border-radius: 4px; padding: 1px 6px; font-size: 11.5px;
+  }
+
+  /* ── 模型适配清单（概览表） ── */
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  th, td {
+    text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    background: #f8fafc; white-space: nowrap;
+  }
+  td.mono, td code.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  tr:last-child td { border-bottom: none; }
+  .star { color: var(--warn); font-size: 12px; }
+  .tag.cat {
+    display: inline-block; font-size: 11px; font-weight: 600; border-radius: 999px; padding: 2px 9px;
+    background: rgba(37,99,235,.08); color: var(--brand);
+  }
+  .tag.cat.code { background: #e6f7ee; color: var(--ok); }
+  .tag.cat.reason { background: #fdecea; color: var(--bad); }
+  .tag.cat.smart { background: #fef3e2; color: var(--warn); }
+  .tag.cat.vision { background: #f3e8ff; color: #7c3aed; }
+  .note-cell { font-size: 12px; color: var(--muted); max-width: 260px; }
+
+  /* ── 仪表条（资源仪表） ── */
+  .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .meter { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--card); }
+  .meter .label { font-size: 12px; color: var(--muted); }
+  .meter .value { font-size: 22px; font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2px 0 8px; }
+  .meter .value small { font-size: 12px; color: var(--muted); font-weight: 400; }
+  .bar { height: 8px; background: #eef0f3; border-radius: 999px; overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 999px; background: var(--brand); transition: width .4s ease; }
+  .bar i.ok { background: var(--ok); }
+  .bar i.warn { background: var(--warn); }
+  .bar i.bad { background: var(--bad); }
+
+  .ranks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 14px; }
+  .rank h3 { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
+  .rank ul { list-style: none; }
+  .rank li {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 0; border-top: 1px dashed var(--line); font-size: 12.5px;
+  }
+  .rank li:first-child { border-top: none; }
+  .rank li code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px; color: var(--ink); background: #eef0f3; border-radius: 4px; padding: 1px 6px;
+  }
+  .rank li .n { margin-left: auto; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+  .loading, .empty, .error-note {
+    padding: 26px 16px; text-align: center; font-size: 13px; color: var(--muted);
+    border: 1px dashed var(--line); border-radius: 12px;
+  }
+  .error-note { color: var(--bad); border-color: #f3c4bf; }
+
+  footer {
+    margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--muted);
+    display: flex; flex-wrap: wrap; gap: 12px 18px; justify-content: space-between;
+  }
+  footer code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #eef0f3; padding: 1px 6px; border-radius: 4px; }
+
+  @media (max-width: 520px) {
+    .wrap { padding: 32px 16px 56px; }
+    .logo { width: 46px; height: 46px; font-size: 22px; }
+    header.brand .name { font-size: 20px; }
+    .badge { display: none; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <header class="brand">
+    <div class="logo">L</div>
+    <div class="name">Looma<small>LLM 运维面 · 依赖 · 模型适配清单 · 调用审计</small></div>
+    <span class="badge">内部 · admin</span>
+  </header>
+
+  <div class="meta">
+    <span>数据来源 <code>/v1/admin/llm-ops</code></span>
+    <span>窗口 <code>24h</code></span>
+    <span>更新于 <code id="gen">{{ generated_at }}</code></span>
+    <button id="refresh" class="btn">刷新</button>
+    <span style="margin-left:auto"><a href="/">← API 门面首页</a></span>
+  </div>
+
+  <section class="block" id="cards-sec">
+    <h2>依赖服务<span class="hint">卡片式 · 探活实时</span></h2>
+    <div class="cards-grid" id="cards"><p class="loading">加载中…</p></div>
+  </section>
+
+  <section class="block" id="catalog-sec">
+    <h2>模型适配清单<span class="hint">llm_catalog.py · 团队维护 · ★ = 当前默认</span></h2>
+    <div id="catalog"><p class="loading">加载中…</p></div>
+  </section>
+
+  <section class="block" id="metrics-sec">
+    <h2>24h 调用仪表<span class="hint">llm_usage 落库 · 每次调用埋点（token / 延迟 / 成本 / 状态）</span></h2>
+    <div id="metrics"><p class="loading">加载中…</p></div>
+  </section>
+
+  <footer>
+    <div>Looma 后端 · LLM 运维面 · 仅供团队内部</div>
+    <div><a href="/v1/endpoints">接口清单</a> · <a href="/health">健康</a></div>
+  </footer>
+
+</main>
+
+<script>
+(function () {
+  var TOKEN = (new URLSearchParams(location.search).get('token') || localStorage.getItem('looma_token') || '').trim();
+  var INTERVAL_MS = 60000;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function fmtCost(y) {
+    y = Number(y || 0);
+    if (y >= 100) return '¥' + y.toFixed(0);
+    if (y >= 1) return '¥' + y.toFixed(2);
+    if (y >= 0.01) return '¥' + y.toFixed(3);
+    return '¥' + y.toFixed(4);
+  }
+  function fmtNum(n) {
+    n = Number(n || 0);
+    return n >= 10000 ? (n / 10000).toFixed(1) + 'w' : String(n);
+  }
+  function pct(v, max) { return Math.max(0, Math.min(100, (Number(v) / Math.max(max, 0.0001)) * 100)); }
+
+  var STATUS_TEXT = { ok: 'ok', warn: 'http 4xx/5xx', bad: 'unreachable', muted: '未配置 Key', unknown: 'unknown' };
+
+  function renderCards(deps, qcc) {
+    var html = '';
+    // QCC 卡片
+    var qs = qcc && qcc.status ? qcc.status : 'unknown';
+    var qcls = qs === 'ok' ? 'ok' : (qs.indexOf('http') === 0 ? 'warn' : (qs === 'unreachable' ? 'bad' : 'muted'));
+    html += '<div class="card">'
+      + '<div class="top"><span class="dot ' + qcls + '"></span><b>QCC 企查查 MCP</b></div>'
+      + '<div class="url">' + esc(qcc ? qcc.base : '') + '</div>'
+      + '<div class="status ' + qcls + '">' + esc(STATUS_TEXT[qcls] || qs) + '</div>'
+      + '</div>';
+    // LLM provider 卡片
+    (deps || []).forEach(function (p) {
+      var c = p.cls || 'muted';
+      var st = p.status || 'unknown';
+      var stText = st === 'ok' ? 'ok' : st === 'not_configured' ? '未配置 Key' : (st === 'unreachable' ? 'unreachable' : st);
+      html += '<div class="card">'
+        + '<div class="top"><span class="dot ' + c + '"></span><b>LLM · ' + esc(p.name) + '</b></div>'
+        + (p.base ? '<div class="url">' + esc(p.base) + '</div>' : '')
+        + '<div class="model">' + (p.model ? '当前 model: <code>' + esc(p.model) + '</code>' : '') + '</div>'
+        + '<div class="status ' + c + '">' + esc(stText) + '</div>'
+        + '</div>';
+    });
+    document.getElementById('cards').innerHTML = html || '<p class="empty">无依赖配置</p>';
+  }
+
+  function renderCatalog(catalog) {
+    var keys = Object.keys(catalog || {});
+    if (!keys.length) {
+      document.getElementById('catalog').innerHTML = '<p class="empty">模型目录为空（backend/src/agents/llm_catalog.py）</p>';
+      return;
+    }
+    var html = '<table><thead><tr>'
+      + '<th>Provider</th><th>Model</th><th>上下文</th><th>价格 ¥/1M (in→out)</th><th>用途</th><th>说明</th>'
+      + '</tr></thead><tbody>';
+    keys.forEach(function (prov) {
+      (catalog[prov] || []).forEach(function (m) {
+        var cat = m.category || 'chat';
+        var def = m.default ? ' <span class="star">★</span>' : '';
+        html += '<tr>'
+          + '<td class="mono">' + esc(prov) + '</td>'
+          + '<td class="mono">' + esc(m.id) + def + '</td>'
+          + '<td>' + (m.ctx_k ? m.ctx_k + 'K' : '—') + '</td>'
+          + '<td class="mono">' + fmtCost(m.cost_in) + ' → ' + fmtCost(m.cost_out) + '</td>'
+          + '<td><span class="tag cat ' + esc(cat) + '">' + esc(cat) + '</span>'
+          + (m.label ? ' <span style="font-size:12px;color:var(--muted)">' + esc(m.label) + '</span>' : '')
+          + '</td>'
+          + '<td class="note-cell">' + esc(m.note || '') + '</td>'
+          + '</tr>';
+      });
+    });
+    html += '</tbody></table>';
+    document.getElementById('catalog').innerHTML = html;
+  }
+
+  function renderMetrics(st) {
+    if (!st) { document.getElementById('metrics').innerHTML = '<p class="empty">暂无数据</p>'; return; }
+    var errPct = (st.error_rate || 0) * 100;
+    var meters = [
+      { label: '调用次数', value: fmtNum(st.calls) + ' <small>次</small>', p: pct(st.calls, 1000), cls: 'ok' },
+      { label: '平均延迟', value: fmtNum(st.avg_latency_ms) + ' <small>ms</small>', p: pct(st.avg_latency_ms, 2000), cls: '' },
+      { label: '总成本', value: fmtCost(st.total_cost_yuan), p: pct(st.total_cost_yuan, 10), cls: 'warn' },
+      { label: '错误率', value: errPct.toFixed(1) + ' <small>%</small>', p: pct(errPct, 5), cls: errPct > 1 ? 'bad' : 'ok' },
+    ];
+    var html = '<div class="meters">';
+    meters.forEach(function (m) {
+      html += '<div class="meter"><div class="label">' + m.label + '</div>'
+        + '<div class="value">' + m.value + '</div>'
+        + '<div class="bar"><i class="' + m.cls + '" style="width:' + m.p.toFixed(0) + '%"></i></div></div>';
+    });
+    html += '</div>';
+
+    // Top 模型 / Top 用户
+    var topM = (st.top_models || []);
+    var topU = (st.top_users || []);
+    html += '<div class="ranks">';
+    html += '<div class="rank"><h3>Top 模型</h3><ul>';
+    if (!topM.length) html += '<li style="color:var(--muted)">暂无调用</li>';
+    topM.forEach(function (r) {
+      html += '<li><span class="dot ok"></span><code>' + esc(r.provider + '/' + r.model) + '</code>'
+        + '<span class="n">' + fmtNum(r.calls) + ' 次 · ' + fmtCost(r.cost) + '</span></li>';
+    });
+    html += '</ul></div>';
+    html += '<div class="rank"><h3>Top 用户</h3><ul>';
+    if (!topU.length) html += '<li style="color:var(--muted)">暂无用户调用</li>';
+    topU.forEach(function (r) {
+      html += '<li><code>' + esc(r.user_id) + '</code>'
+        + '<span class="n">' + fmtNum(r.calls) + ' 次 · ' + fmtCost(r.cost) + '</span></li>';
+    });
+    html += '</ul></div></div>';
+    document.getElementById('metrics').innerHTML = html;
+  }
+
+  function setGen(t) {
+    if (t) document.getElementById('gen').textContent = t;
+  }
+
+  function load() {
+    var url = '/v1/admin/llm-ops?hours=24';
+    var headers = { 'Accept': 'application/json' };
+    if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
+    fetch(url, { headers: headers, cache: 'no-store' })
+      .then(function (r) {
+        if (r.status === 401 || r.status === 403) {
+          throw { status: r.status, body: 'unauthorized' };
+        }
+        return r.json();
+      })
+      .then(function (data) {
+        renderCards(data.deps, data.qcc);
+        renderCatalog(data.catalog);
+        renderMetrics(data.stats);
+        setGen(data.generated_at);
+      })
+      .catch(function (e) {
+        var msg = (e && e.status === 401) ? '未授权：请在浏览器 localStorage 的 <code>looma_token</code> 中放入 admin 用户的 JWT（或 URL 加 <code>?token=…</code>）后刷新。'
+          : '数据加载失败：' + esc(e && e.message ? e.message : String(e));
+        ['cards', 'catalog', 'metrics'].forEach(function (id) {
+          document.getElementById(id).innerHTML = '<p class="error-note">' + msg + '</p>';
+        });
+      });
+  }
+
+  document.getElementById('refresh').addEventListener('click', load);
+  load();
+  setInterval(load, INTERVAL_MS);
+})();
+</script>
+</body>
+</html>
