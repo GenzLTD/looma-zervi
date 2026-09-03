@@ -11,7 +11,10 @@ RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors
     sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+# 镜像源可配置：海外机（Vultr SG）访问 aliyun 镜像会卡死，
+# 海外部署用 --build-arg PIP_INDEX_URL=https://pypi.org/simple 覆盖
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+RUN pip install --no-cache-dir -r requirements.txt -i ${PIP_INDEX_URL}
 
 EXPOSE 5200
 

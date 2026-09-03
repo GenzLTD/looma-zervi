@@ -434,8 +434,8 @@ jobs:
             fi
           fi
           if [ "${NEED_BUILD}" = "1" ]; then
-            echo "=== Build backend image ==="
-            DOCKER_BUILDKIT=1 ${COMPOSE} build backend
+            echo "=== Build backend image (overseas: pypi.org pip source) ==="
+            DOCKER_BUILDKIT=1 ${COMPOSE} build --build-arg PIP_INDEX_URL=https://pypi.org/simple backend
             echo "${HASH}" > "${MARKER}"
           fi
 
