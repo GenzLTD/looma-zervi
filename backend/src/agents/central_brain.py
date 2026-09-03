@@ -100,6 +100,34 @@ def _format_session_history(session_history: list | None, turns: int) -> str:
     return "[对话历史]\n" + "\n".join(lines) + "\n\n"
 
 
+def _format_match_report_block(context: dict[str, Any] | None) -> str:
+    """Optional match-report summary for Ask (not navigator)."""
+    report = (context or {}).get("match_report")
+    if not isinstance(report, dict) or not report:
+        return ""
+    lines = [
+        "[当前匹配报告上下文]",
+        "以下为用户已保存的匹配报告摘要（非全文简历）。回答涉及匹配/缺口/技能时优先依据本段；",
+        "若问题与报告无关，可忽略。不要编造报告中未出现的岗位或分数。",
+        f"报告标题：{report.get('title') or '（无标题）'}",
+        f"报告ID：{report.get('report_id') or ''}",
+    ]
+    resume_summary = str(report.get("resume_summary") or "").strip()
+    if resume_summary:
+        lines.append(f"简历摘要：{resume_summary}")
+    for i, item in enumerate(report.get("top_items") or [], 1):
+        if not isinstance(item, dict):
+            continue
+        matched = "、".join(str(x) for x in (item.get("matched_skills") or [])[:8])
+        missing = "、".join(str(x) for x in (item.get("missing_skills") or [])[:8])
+        lines.append(
+            f"{i}. {item.get('job_title') or '职位'} · 综合分 {item.get('overall_score') or 0}"
+            f" · 已匹配[{matched or '—'}] · 缺口[{missing or '—'}]"
+            f" · 差距：{item.get('gap_analysis') or '—'}"
+        )
+    return "\n".join(lines) + "\n\n"
+
+
 def _poetry_is_recommendation_query(text: str) -> bool:
     """Check if query is a short 'recommend a poem' type (no poem content)."""
     if not (text and text.strip()) or len(text.strip()) > 80:
@@ -115,11 +143,15 @@ def _call_llm(
     max_tokens: int | None = None,
 ) -> str | None:
     """Call the configured LLM provider via DeepSeek/OpenAI API.
-    Returns response text or None on failure."""
+    Returns response text or None on failure.
+    Every call is audited into llm_usage (provider/model/tokens/cost/latency)."""
     config = current_app.config
     provider_order = [p.strip().lower() for p in config.get("LLM_PROVIDER_ORDER", "deepseek").split(",")]
+    db = getattr(current_app, "_db", None)
 
     for provider in provider_order:
+        model = None
+        t0 = time.monotonic()
         try:
             if provider == "deepseek":
                 api_key = (config.get("DEEPSEEK_API_KEY") or "").strip()
@@ -127,8 +159,9 @@ def _call_llm(
                     continue
                 url = f"{config['DEEPSEEK_BASE_URL']}/chat/completions"
                 headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                model = config["DEEPSEEK_MODEL"]
                 payload: dict[str, Any] = {
-                    "model": config["DEEPSEEK_MODEL"],
+                    "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": temperature,
                 }
@@ -136,7 +169,8 @@ def _call_llm(
                     payload["max_tokens"] = max_tokens
                 resp = requests.post(url, json=payload, headers=headers, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
+                msg = resp.json()["choices"][0]["message"]
+                return msg.get("content") or msg.get("reasoning_content") or ""
 
             elif provider == "openai":
                 openai_key = (config.get("OPENAI_API_KEY") or "").strip()
@@ -144,8 +178,9 @@ def _call_llm(
                     continue
                 url = f"{config.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')}/chat/completions"
                 headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
+                model = config.get("OPENAI_MODEL", "gpt-3.5-turbo")
                 payload = {
-                    "model": config.get("OPENAI_MODEL", "gpt-3.5-turbo"),
+                    "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": temperature,
                 }
@@ -153,7 +188,8 @@ def _call_llm(
                     payload["max_tokens"] = max_tokens
                 resp = requests.post(url, json=payload, headers=headers, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
-                return resp.json()["choices"][0]["message"]["content"]
+                data = resp.json()
+                text = data["choices"][0]["message"]["content"]
 
             elif provider == "ollama":
                 host = config.get("OLLAMA_HOST", "http://127.0.0.1:11434")
@@ -165,14 +201,47 @@ def _call_llm(
                 payload = {"model": model, "prompt": prompt, "stream": False, "options": options}
                 resp = requests.post(url, json=payload, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
-                return resp.json().get("response", "")
+                data = resp.json()
+                text = data.get("response", "")
+
+            _record_llm_usage(db, provider, model, data, t0, status="ok")
+            return text
 
         except Exception as e:
+            _record_llm_usage(db, provider, model, None, t0, status="error", error=str(e))
             logger.warning(f"LLM provider {provider} failed: {e}")
             continue
 
     logger.error("All LLM providers unavailable")
     return None
+
+
+def _record_llm_usage(db, provider, model, data, t0, status="ok", error=""):
+    """Audit one LLM call into llm_usage (ops dashboard). Never raises —
+    audit must not break the main flow."""
+    try:
+        if db is None:
+            return
+        tokens_in = tokens_out = 0
+        if isinstance(data, dict):
+            usage = data.get("usage") or {}
+            tokens_in = int(usage.get("prompt_tokens") or usage.get("prompt_eval_count") or 0)
+            tokens_out = int(usage.get("completion_tokens") or usage.get("eval_count") or 0)
+        from src.agents.llm_catalog import estimate_cost_yuan
+
+        cost = estimate_cost_yuan(provider or "", model or "", tokens_in, tokens_out)
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        user_id = None
+        try:
+            from flask import has_request_context, g
+
+            if has_request_context():
+                user_id = getattr(g, "user_id", None)
+        except Exception:
+            user_id = None
+        db.log_llm_usage(user_id, provider, model, tokens_in, tokens_out, cost, latency_ms, status, error)
+    except Exception:
+        pass
 
 
 def _parse_intent_llm(message: str) -> tuple[str, float, dict[str, Any]] | None:
@@ -272,6 +341,7 @@ def dispatch(
             history_block = _format_session_history(
                 context.get("session_history"), history_turns
             )
+            report_block = _format_match_report_block(context)
             style = (
                 "请分步骤深入推理与分析，给出较完整、有层次的回答；必要时先列要点再展开。"
                 if reasoning
@@ -293,6 +363,7 @@ def dispatch(
                     "用第一人称「我」或「我们」回答，营造陪伴感。\n"
                     f"{style}\n\n"
                     f"{history_block}"
+                    f"{report_block}"
                     f"参考资料：\n{context_text}\n\n"
                     f"用户问题：{query}\n\n"
                     f"回答："
@@ -307,6 +378,7 @@ def dispatch(
                     "如果用户的问题与这些域相关，请邀请他们进一步体验对应功能。\n"
                     f"{style}\n\n"
                     f"{history_block}"
+                    f"{report_block}"
                     f"用户问题：{query}\n\n"
                     f"回答："
                 )
@@ -638,6 +710,7 @@ def dispatch(
         history_block = _format_session_history(
             context.get("session_history"), int(preset["history_turns"])
         )
+        report_block = _format_match_report_block(context)
         style = (
             "请分步骤深入分析后再回答。"
             if preset["reasoning"]
@@ -655,6 +728,7 @@ def dispatch(
             "语气要有陪伴感，让用户感受到这是一个可以长期成长的地方。\n"
             f"{style}\n\n"
             f"{history_block}"
+            f"{report_block}"
             f"用户：{query}\n\n"
             "回答："
         )

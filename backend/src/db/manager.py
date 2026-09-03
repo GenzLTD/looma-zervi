@@ -17,17 +17,36 @@ Tables:
   - trust_attestations (joint — verifiable claim cards)
 """
 from __future__ import annotations
+import hashlib
 import json
+import logging
 import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
+
 
 def _dt_now():
     """Helper for consistent datetime strings."""
     return datetime.now()
+
+
+def email_hash(email: str | None) -> str | None:
+    """Canonical email hash shared with DemoPPI / GFCC (Bridge 2/3).
+
+    Both sides compute sha256 of the lowercased, trimmed email as lowercase hex
+    so PlanetX (Python) and DemoPPI (TypeScript) yield identical digests for the
+    same mailbox. Returns None for empty email (miniprogram-only users).
+    """
+    if not email:
+        return None
+    normalized = email.lower().strip()
+    if not normalized:
+        return None
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 SCHEMA_SQL = """
@@ -37,8 +56,10 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id              TEXT PRIMARY KEY,          -- looma uuid4
     email           TEXT UNIQUE,               -- Web registration (nullable for miniprogram-only)
+    email_hash      TEXT,                      -- sha256(lower(trim(email))) for chain B user_id_hash
     password_hash   TEXT,                      -- bcrypt hash (nullable for miniprogram-only)
     wechat_openid   TEXT UNIQUE,               -- WeChat miniprogram login
+    supabase_uid    TEXT UNIQUE,               -- Supabase Auth user UUID (THOMAS 统一身份, RFC supabase-unified-auth-v1)
     name            TEXT DEFAULT '',
     tier            TEXT DEFAULT 'free',       -- free | supporter | pro
     role            TEXT DEFAULT 'user',       -- user | admin
@@ -48,7 +69,9 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+-- NOTE: idx_users_email_hash 由 init_schema 迁移块创建（旧库需先 ALTER 加列）
 CREATE INDEX IF NOT EXISTS idx_users_wechat_openid ON users(wechat_openid);
+-- NOTE: idx_users_supabase_uid 由 init_schema 迁移块创建（旧库需先 ALTER 加列）
 
 -- ============================================
 -- Core: user_identities (multi-platform identity linking)
@@ -170,6 +193,18 @@ CREATE INDEX IF NOT EXISTS idx_trust_attestations_candidate ON trust_attestation
 CREATE INDEX IF NOT EXISTS idx_trust_attestations_type ON trust_attestations(claim_type, verification_status);
 
 -- ============================================
+-- Signal bridge ingest (Bridge 2/3 inbound idempotency)
+-- ============================================
+CREATE TABLE IF NOT EXISTS signal_ingest (
+    signal_type      TEXT NOT NULL,
+    user_email_hash  TEXT NOT NULL,
+    nonce            TEXT NOT NULL,
+    payload_json     TEXT,
+    created_at       TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (signal_type, user_email_hash, nonce)
+);
+
+-- ============================================
 -- Enterprise: enterprises (szbenyx owns)
 -- ============================================
 CREATE TABLE IF NOT EXISTS enterprises (
@@ -231,6 +266,30 @@ CREATE TABLE IF NOT EXISTS job_posts (
 
 CREATE INDEX IF NOT EXISTS idx_job_posts_user ON job_posts(user_id);
 CREATE INDEX IF NOT EXISTS idx_job_posts_status ON job_posts(user_id, status);
+
+-- ============================================
+-- Job applications (DemoPeter thin-ingest → HR 可见投递)
+-- ============================================
+CREATE TABLE IF NOT EXISTS applications (
+    id                TEXT PRIMARY KEY,
+    seeker_user_id    TEXT NOT NULL,
+    resume_id         TEXT NOT NULL,           -- documents.id (resume)
+    job_id            TEXT NOT NULL,           -- documents.metadata.job_id or job_posts.id
+    enterprise_id     TEXT DEFAULT '',
+    status            TEXT DEFAULT 'submitted', -- submitted | withdrawn
+    metadata          TEXT DEFAULT '{}',       -- JSON, no vector payloads
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    withdrawn_at      TEXT DEFAULT NULL,
+    FOREIGN KEY (seeker_user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_applications_seeker ON applications(seeker_user_id);
+CREATE INDEX IF NOT EXISTS idx_applications_job ON applications(job_id);
+CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
+-- One active application per (seeker, resume, job)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_active_unique
+    ON applications(seeker_user_id, resume_id, job_id) WHERE status = 'submitted';
 
 -- ============================================
 -- Enterprise: sales_inquiries (szbenyx — 企业版联系销售)
@@ -342,6 +401,26 @@ CREATE TABLE IF NOT EXISTS usage_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_logs_user_date ON usage_logs(user_id, created_at);
+
+-- ============================================
+-- LLM usage: llm_usage (joint) — 每次 LLM 调用埋点，供运维面审计
+-- ============================================
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT,                          -- NULL = 系统/后台调用
+    provider     TEXT NOT NULL,
+    model        TEXT NOT NULL,
+    tokens_in    INTEGER DEFAULT 0,
+    tokens_out   INTEGER DEFAULT 0,
+    cost_yuan    REAL DEFAULT 0,                -- 按 llm_catalog 折算
+    latency_ms   INTEGER DEFAULT 0,
+    status       TEXT DEFAULT 'ok',             -- ok / error
+    error        TEXT,
+    created_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_usage_provider_date ON llm_usage(provider, created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_user_date ON llm_usage(user_id, created_at);
 
 -- ============================================
 -- Quota: quota_records (joint)
@@ -976,33 +1055,109 @@ class DatabaseManager:
     def init_schema(self):
         """Initialize all tables. Safe to call on every startup."""
         with self.get_conn() as conn:
+            # Pre-migration: SCHEMA_SQL 里的 idx_users_email_hash 引用 email_hash 列，
+            # 而 CREATE TABLE IF NOT EXISTS 不改已有旧表结构 —— 旧库必须先 ALTER 补列，
+            # 否则 executescript 会在建索引时报 no such column（云端 /health 500 根因）
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN email_hash TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Pre-migration ALTER TABLE users ADD COLUMN email_hash failed: %s", e
+                    )
             conn.executescript(SCHEMA_SQL)
             # Migration: add invite_code to existing fleets tables
             try:
-                conn.execute("ALTER TABLE fleets ADD COLUMN invite_code TEXT UNIQUE")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+                conn.execute("ALTER TABLE fleets ADD COLUMN invite_code TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE fleets ADD COLUMN invite_code failed: %s", e
+                    )
             try:
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_fleets_invite_code ON fleets(invite_code)")
-            except sqlite3.OperationalError:
-                pass
+                conn.execute("DROP INDEX IF EXISTS idx_fleets_invite_code")
+                conn.execute(
+                    "CREATE UNIQUE INDEX idx_fleets_invite_code ON fleets(invite_code)"
+                )
+            except sqlite3.OperationalError as e:
+                logger.warning(
+                    "Migration UNIQUE INDEX idx_fleets_invite_code failed: %s", e
+                )
             try:
                 conn.execute("ALTER TABLE game_profiles ADD COLUMN identity TEXT")
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE game_profiles ADD COLUMN identity failed: %s", e
+                    )
             # Migration: trust protocol columns on existing trust_attestations
             try:
                 conn.execute(
                     "ALTER TABLE trust_attestations ADD COLUMN signature TEXT DEFAULT ''"
                 )
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE trust_attestations ADD COLUMN signature failed: %s", e
+                    )
             try:
                 conn.execute(
                     "ALTER TABLE trust_attestations ADD COLUMN expires_at TEXT DEFAULT NULL"
                 )
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE trust_attestations ADD COLUMN expires_at failed: %s", e
+                    )
+            # Migration: trust_attestations UNIQUE(candidate_id, claim_type) for upsert ON CONFLICT
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_trust_attestations_claim "
+                    "ON trust_attestations(candidate_id, claim_type)"
+                )
+            except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
+                logger.warning(
+                    "Migration UNIQUE INDEX trust_attestations_claim failed: %s", e
+                )
+            # Migration: email_hash for GFCC chain B / DemoPPI match
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN email_hash TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE users ADD COLUMN email_hash failed: %s", e
+                    )
+            try:
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_users_email_hash ON users(email_hash)"
+                )
+            except sqlite3.OperationalError as e:
+                logger.warning(
+                    "Migration INDEX idx_users_email_hash failed: %s", e
+                )
+            for uid, em in conn.execute(
+                "SELECT id, email FROM users WHERE email IS NOT NULL AND email_hash IS NULL"
+            ).fetchall():
+                conn.execute(
+                    "UPDATE users SET email_hash = ?, updated_at = datetime('now') WHERE id = ?",
+                    (email_hash(em), uid),
+                )
+            # Migration: supabase_uid for THOMAS unified auth (RFC supabase-unified-auth-v1)
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN supabase_uid TEXT")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    logger.warning(
+                        "Migration ALTER TABLE users ADD COLUMN supabase_uid failed: %s", e
+                    )
+            try:
+                conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_uid ON users(supabase_uid)"
+                )
+            except sqlite3.OperationalError as e:
+                logger.warning(
+                    "Migration UNIQUE INDEX idx_users_supabase_uid failed: %s", e
+                )
 
     # ============================================
     # User operations (joint)
@@ -1012,9 +1167,9 @@ class DatabaseManager:
         user_id = str(uuid.uuid4())
         with self.get_conn() as conn:
             conn.execute(
-                """INSERT INTO users (id, email, password_hash, wechat_openid, name)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (user_id, email, password_hash, wechat_openid, name)
+                """INSERT INTO users (id, email, email_hash, password_hash, wechat_openid, name)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, email, email_hash(email), password_hash, wechat_openid, name)
             )
         return user_id
 
@@ -1022,6 +1177,33 @@ class DatabaseManager:
         with self.get_conn() as conn:
             row = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         return dict(row) if row else None
+
+    def get_user_by_email_hash(self, email_hash_value: str):
+        """Resolve a user by canonical email hash (chain B / DemoPPI match)."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE email_hash = ?", (email_hash_value,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def record_signal_ingest(
+        self, signal_type: str, user_email_hash: str, nonce: str, payload_json: str
+    ) -> bool:
+        """Record an inbound signal for idempotency. Returns True if new, False if duplicate.
+
+        PRIMARY KEY (signal_type, user_email_hash, nonce) guarantees at-most-once
+        processing per signal instance (Bridge 2/3 envelope).
+        """
+        with self.get_conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO signal_ingest (signal_type, user_email_hash, nonce, payload_json)
+                       VALUES (?, ?, ?, ?)""",
+                    (signal_type, user_email_hash, nonce, payload_json),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False
 
     def get_user_by_openid(self, openid: str):
         with self.get_conn() as conn:
@@ -1032,6 +1214,59 @@ class DatabaseManager:
         with self.get_conn() as conn:
             row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
+
+    def get_user_by_supabase_uid(self, supabase_uid: str):
+        """Resolve a looma user by Supabase Auth user UUID (THOMAS unified identity)."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM users WHERE supabase_uid = ?", (supabase_uid,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def bind_supabase_to_user(self, user_id: str, supabase_uid: str):
+        """Link a Supabase Auth UUID to an existing looma user (legacy account binding)."""
+        with self.get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET supabase_uid = ?, updated_at = datetime('now') WHERE id = ?",
+                (supabase_uid, user_id),
+            )
+
+    def get_or_create_user_by_supabase(self, supabase_uid: str, email: str = "",
+                                       name: str = "", wechat_openid: str = None):
+        """Find-or-create a looma user for a Supabase identity.
+
+        1. supabase_uid 已映射 → 返回现有用户
+        2. email 匹配存量用户（排除 thomas.local 占位邮箱）→ 绑定 supabase_uid（存量迁移）
+        3. 否则创建新用户并绑定
+
+        Returns (user_dict, created_bool).
+        """
+        user = self.get_user_by_supabase_uid(supabase_uid)
+        if user:
+            return user, False
+
+        email = (email or "").strip().lower()
+        if email and not email.endswith(".thomas.local"):
+            legacy = self.get_user_by_email(email)
+            if legacy:
+                self.bind_supabase_to_user(legacy["id"], supabase_uid)
+                if name and not legacy.get("name"):
+                    with self.get_conn() as conn:
+                        conn.execute(
+                            "UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?",
+                            (name, legacy["id"]),
+                        )
+                return self.get_user_by_id(legacy["id"]), False
+
+        user_id = str(uuid.uuid4())
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO users (id, email, email_hash, supabase_uid, wechat_openid, name)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, email or None, email_hash(email or None), supabase_uid,
+                 wechat_openid, name),
+            )
+        return self.get_user_by_id(user_id), True
 
     def bind_wechat_to_user(self, user_id: str, wechat_openid: str):
         """Bind a WeChat openid to an existing user (cross-platform account linking)."""
@@ -1109,8 +1344,8 @@ class DatabaseManager:
         user_id = str(uuid.uuid4())
         with self.get_conn() as conn:
             conn.execute(
-                """INSERT INTO users (id, email, name) VALUES (?, ?, ?)""",
-                (user_id, email or None, name)
+                """INSERT INTO users (id, email, email_hash, name) VALUES (?, ?, ?, ?)""",
+                (user_id, email or None, email_hash(email or None), name)
             )
             conn.execute(
                 """INSERT INTO user_identities (id, user_id, provider, provider_uid,
@@ -1147,6 +1382,70 @@ class DatabaseManager:
                 (user_id,)
             ).fetchone()
         return row["cnt"] if row else 0
+
+    # ============================================
+    # LLM usage audit (joint) — 运维面 /v1/admin/llm-ops
+    # ============================================
+    def log_llm_usage(self, user_id, provider, model, tokens_in=0, tokens_out=0,
+                      cost_yuan=0.0, latency_ms=0, status="ok", error=""):
+        """Record one LLM call. user_id may be None (system/background calls)."""
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO llm_usage
+                   (id, user_id, provider, model, tokens_in, tokens_out,
+                    cost_yuan, latency_ms, status, error)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), user_id, provider, model,
+                 int(tokens_in or 0), int(tokens_out or 0),
+                 float(cost_yuan or 0.0), int(latency_ms or 0),
+                 status, (error or "")[:500]),
+            )
+
+    def get_llm_usage_stats(self, hours: int = 24):
+        """Aggregated LLM usage over the window: totals, latency, cost, top models/users."""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) AS cnt,
+                          AVG(latency_ms) AS avg_ms,
+                          SUM(cost_yuan) AS cost,
+                          SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
+                          SUM(tokens_in) AS tin,
+                          SUM(tokens_out) AS tout
+                   FROM llm_usage
+                   WHERE created_at >= datetime('now', ?)""",
+                (f"-{hours} hours",),
+            ).fetchone()
+            top_models = [
+                dict(r) for r in conn.execute(
+                    """SELECT provider, model, COUNT(*) AS calls, SUM(cost_yuan) AS cost
+                       FROM llm_usage
+                       WHERE created_at >= datetime('now', ?)
+                       GROUP BY provider, model ORDER BY calls DESC LIMIT 6""",
+                    (f"-{hours} hours",),
+                ).fetchall()
+            ]
+            top_users = [
+                dict(r) for r in conn.execute(
+                    """SELECT user_id, COUNT(*) AS calls, SUM(cost_yuan) AS cost
+                       FROM llm_usage
+                       WHERE user_id IS NOT NULL
+                         AND created_at >= datetime('now', ?)
+                       GROUP BY user_id ORDER BY calls DESC LIMIT 6""",
+                    (f"-{hours} hours",),
+                ).fetchall()
+            ]
+        calls = row["cnt"] or 0
+        return {
+            "hours": hours,
+            "calls": calls,
+            "avg_latency_ms": round(row["avg_ms"] or 0),
+            "total_cost_yuan": round(row["cost"] or 0.0, 2),
+            "tokens_in": row["tin"] or 0,
+            "tokens_out": row["tout"] or 0,
+            "error_rate": round((row["errors"] or 0) / max(calls, 1), 4),
+            "top_models": top_models,
+            "top_users": top_users,
+        }
 
     # ============================================
     # Game profile operations (Jason)
@@ -2379,11 +2678,12 @@ class DatabaseManager:
                 ).decode("utf-8")
 
                 conn.execute(
-                    """INSERT INTO users (id, email, password_hash, name, tier, role, is_early_adopter)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO users (id, email, email_hash, password_hash, name, tier, role, is_early_adopter)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         user_id,
                         u["email"],
+                        email_hash(u["email"]),
                         password_hash,
                         u["name"],
                         u["tier"],

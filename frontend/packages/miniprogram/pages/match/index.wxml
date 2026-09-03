@@ -89,6 +89,12 @@
     </view>
 
     <view class="btn-ghost" bindtap="onBack">稍后再说</view>
+
+    <!-- 信任档案入口 — 匹配结果生成 attestation 后可查看 -->
+    <view class="trust-entry" bindtap="goToTrust">
+      <text>🛡️ 查看信任档案</text>
+      <text class="trust-entry-arrow">→</text>
+    </view>
   </view>
 
   <!-- Error -->

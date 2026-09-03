@@ -29,6 +29,18 @@ class Config:
     JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "24"))
     JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
+    # Supabase — THOMAS 生态统一认证 (RFC docs/rfc/supabase-unified-auth-v1.md)
+    SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+    SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+    # service_role secret key (sb_secret_*) — Admin API upsert 微信/华为用户
+    SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+    # HS256 custom token 签发（微信/华为无原生 provider，looma 代签）
+    SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+    # Auth 签发 token 验证走 JWKS (ES256) —— 由 SUPABASE_URL 推导
+    SUPABASE_JWKS_URL = (
+        os.getenv("SUPABASE_URL", "").rstrip("/") + "/auth/v1/.well-known/jwks.json"
+    ) if os.getenv("SUPABASE_URL", "") else ""
+
     # WeChat
     WECHAT_APPID = os.getenv("WECHAT_APPID", "")
     WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
@@ -168,6 +180,13 @@ class Config:
     QCC_LEGAL_CASE_URL = os.getenv("QCC_LEGAL_CASE_URL", "https://agent.qcc.com/mcp/case/stream")
     QCC_DOCUMENT_URL = os.getenv("QCC_DOCUMENT_URL", "https://agent.qcc.com/mcp/document/stream")
 
+    # Signal Bridge — chain A (PlanetX ↔ DemoPPI). Empty URL = skip.
+    SIGNAL_BRIDGE_SECRET = os.getenv("SIGNAL_BRIDGE_SECRET", "")
+    DEMOPPI_SIGNAL_INGEST_URL = os.getenv("DEMOPPI_SIGNAL_INGEST_URL", "")
+    # Chain B fan-out — PlanetX → gfcc_kernel /v1/signal-ingest. Empty = skip.
+    GFCC_SIGNAL_INGEST_URL = os.getenv("GFCC_SIGNAL_INGEST_URL", "")
+    SIGNAL_INGEST_SECRET = os.getenv("SIGNAL_INGEST_SECRET", "")
+
     @property
     def is_production(self):
         return self.FLASK_ENV == "production"
@@ -193,6 +212,13 @@ def _refresh_config():
     Config.JWT_SECRET = os.getenv("JWT_SECRET", "looma-zervi-default-jwt-secret-change-in-production-2026")
     Config.JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "24"))
     Config.JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+    Config.SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+    Config.SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+    Config.SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
+    Config.SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+    Config.SUPABASE_JWKS_URL = (
+        os.getenv("SUPABASE_URL", "").rstrip("/") + "/auth/v1/.well-known/jwks.json"
+    ) if os.getenv("SUPABASE_URL", "") else ""
     Config.WECHAT_APPID = os.getenv("WECHAT_APPID", "")
     Config.WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
     Config.WECHAT_DEV_MODE = os.getenv("WECHAT_DEV_MODE", "false").lower() == "true"
@@ -297,3 +323,7 @@ def _refresh_config():
     Config.QCC_LEGAL_REGULATION_URL = os.getenv("QCC_LEGAL_REGULATION_URL", "https://agent.qcc.com/mcp/regulation/stream")
     Config.QCC_LEGAL_CASE_URL = os.getenv("QCC_LEGAL_CASE_URL", "https://agent.qcc.com/mcp/case/stream")
     Config.QCC_DOCUMENT_URL = os.getenv("QCC_DOCUMENT_URL", "https://agent.qcc.com/mcp/document/stream")
+    Config.SIGNAL_BRIDGE_SECRET = os.getenv("SIGNAL_BRIDGE_SECRET", "")
+    Config.DEMOPPI_SIGNAL_INGEST_URL = os.getenv("DEMOPPI_SIGNAL_INGEST_URL", "")
+    Config.GFCC_SIGNAL_INGEST_URL = os.getenv("GFCC_SIGNAL_INGEST_URL", "")
+    Config.SIGNAL_INGEST_SECRET = os.getenv("SIGNAL_INGEST_SECRET", "")

@@ -68,7 +68,7 @@ import type {
   JobPostMatchesResponse,
   CandidateListResponse,
 } from "../types/enterprise";
-import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ResumeUploadResult, ParsedJob, JobUploadResult, CreditAnalysis, CheckCompanyRequest, CheckCompanyResponse, ResumeListResponse, ResumeAnalysisResponse } from "../types/resume";
+import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ResumeUploadResult, ResumeIngestRequest, ResumeIngestResponse, ParsedJob, JobUploadResult, CreditAnalysis, CheckCompanyRequest, CheckCompanyResponse, ResumeListResponse, ResumeAnalysisResponse } from "../types/resume";
 import type { Report, GenerateReportRequest } from "../types/misc";
 import type {
   CreateMatchReportRequest,
@@ -385,6 +385,10 @@ export function createResumeApi(client: ApiClient) {
 
     /** Upload resume file for AI parsing (PDF/DOCX → structured JSON) */
     upload: (file: File) => client.upload<ResumeUploadResult>(API_ROUTES.RESUME_UPLOAD, file, "file"),
+
+    /** Ingest pre-parsed markdown directly (DemoPeter thin-ingest — no LLM call) */
+    ingest: (payload: ResumeIngestRequest) =>
+      client.post<ResumeIngestResponse>(API_ROUTES.RESUME_INGEST, payload),
 
     // ── HarmonyOS 简历管理 ──
     /** List all resumes uploaded by current user */

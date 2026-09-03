@@ -1,0 +1,75 @@
+<!-- 信任档案 — 小程序端 PlanetX 信任呈现，遵循 PlanetX 暗黑主题 -->
+<scroll-view
+  class="trust-page"
+  scroll-y
+  enhanced
+  show-scrollbar="{{false}}"
+  refresher-enabled="{{true}}"
+  bindrefresherrefresh="onPullDownRefresh"
+>
+  <!-- 头部 -->
+  <view class="trust-header">
+    <text class="trust-title">信任档案</text>
+    <text class="trust-subtitle" wx:if="{{total > 0}}">
+      共 {{total}} 条声明 · 你的行为正在被看见
+    </text>
+    <text class="trust-subtitle trust-subtitle--empty" wx:if="{{total === 0 && !loading}}">
+      还没有信任声明 · 完成闯关任务后自动生成
+    </text>
+  </view>
+
+  <!-- 加载中 -->
+  <view class="trust-loading" wx:if="{{loading}}">
+    <text class="trust-loading-text">加载中...</text>
+  </view>
+
+  <!-- 错误 -->
+  <view class="trust-error" wx:if="{{error && !loading}}">
+    <text class="trust-error-text">{{error}}</text>
+    <view class="trust-retry-btn" bindtap="loadAttestations">
+      <text class="trust-retry-text">重试</text>
+    </view>
+  </view>
+
+  <!-- 声明卡片列表 -->
+  <view class="trust-list" wx:if="{{!loading && !error}}">
+    <view
+      class="trust-card"
+      wx:for="{{attestations}}"
+      wx:key="attestation_id"
+    >
+      <!-- 卡片头部：声明类型 + 验证状态 -->
+      <view class="trust-card-head">
+        <text class="trust-card-claim">{{item.claimLabel}}</text>
+        <view class="trust-card-status" style="background: {{item.statusColor}}1a">
+          <view class="trust-card-status-dot" style="background: {{item.statusColor}}"></view>
+          <text class="trust-card-status-text" style="color: {{item.statusColor}}">
+            {{item.statusLabel}}
+          </text>
+        </view>
+      </view>
+
+      <!-- 声明内容 -->
+      <text class="trust-card-statement">{{item.claimStatement}}</text>
+
+      <!-- 卡片底部：证据类型 + 日期 + 置信度 -->
+      <view class="trust-card-foot">
+        <text class="trust-card-evidence">{{item.evidenceLabel}}</text>
+        <view class="trust-card-meta">
+          <text class="trust-card-confidence">{{item.confidenceScore}}</text>
+          <text class="trust-card-date">{{item.issuedAt}}</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 空态 -->
+    <view class="trust-empty" wx:if="{{attestations.length === 0 && total === 0}}">
+      <text class="trust-empty-icon">🔍</text>
+      <text class="trust-empty-text">暂无信任声明</text>
+      <text class="trust-empty-hint">完成闯关任务后，你的行为将自动生成可验证的信任声明</text>
+    </view>
+  </view>
+
+  <!-- 底部安全区 -->
+  <view class="trust-bottom-safe"></view>
+</scroll-view>

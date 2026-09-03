@@ -1,0 +1,192 @@
+/* 信任档案 — PlanetX 暗黑主题，绑定到 page */
+page {
+  background: #0a0e1a;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.trust-page {
+  height: 100vh;
+  padding: 0 24px;
+}
+
+/* ---- 头部 ---- */
+.trust-header {
+  padding: 48px 0 32px;
+  text-align: center;
+}
+
+.trust-title {
+  display: block;
+  font-size: 36px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 1px;
+}
+
+.trust-subtitle {
+  display: block;
+  margin-top: 12px;
+  font-size: 26px;
+  color: #94a3b8;
+}
+
+.trust-subtitle--empty {
+  margin-top: 20px;
+  font-size: 24px;
+}
+
+/* ---- 加载 / 错误 ---- */
+.trust-loading {
+  display: flex;
+  justify-content: center;
+  padding: 80px 0;
+}
+
+.trust-loading-text {
+  font-size: 28px;
+  color: #64748b;
+}
+
+.trust-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 80px 0;
+}
+
+.trust-error-text {
+  font-size: 28px;
+  color: #f87171;
+  margin-bottom: 24px;
+}
+
+.trust-retry-btn {
+  padding: 16px 48px;
+  border-radius: 12px;
+  background: rgba(74, 222, 128, 0.15);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+}
+
+.trust-retry-text {
+  font-size: 28px;
+  color: #4ade80;
+}
+
+/* ---- 卡片列表 ---- */
+.trust-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.trust-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  padding: 28px 24px;
+}
+
+.trust-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.trust-card-claim {
+  font-size: 30px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.trust-card-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 20px;
+}
+
+.trust-card-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+}
+
+.trust-card-status-text {
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.trust-card-statement {
+  display: block;
+  font-size: 26px;
+  color: #cbd5e1;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.trust-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.trust-card-evidence {
+  font-size: 22px;
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px 16px;
+  border-radius: 8px;
+}
+
+.trust-card-meta {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.trust-card-confidence {
+  font-size: 22px;
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.trust-card-date {
+  font-size: 22px;
+  color: #64748b;
+}
+
+/* ---- 空态 ---- */
+.trust-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 80px 24px;
+  text-align: center;
+}
+
+.trust-empty-icon {
+  font-size: 64px;
+  margin-bottom: 24px;
+}
+
+.trust-empty-text {
+  font-size: 30px;
+  color: #94a3b8;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.trust-empty-hint {
+  font-size: 24px;
+  color: #475569;
+  line-height: 1.6;
+  max-width: 400px;
+}
+
+/* ---- 底部安全区 ---- */
+.trust-bottom-safe {
+  height: 60px;
+}

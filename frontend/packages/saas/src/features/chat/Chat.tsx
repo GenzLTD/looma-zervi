@@ -24,6 +24,7 @@ export default function Chat() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<ChatMode>("chat");
+  const reportId = (searchParams.get("report") || searchParams.get("match") || "").trim() || null;
   const api = useMemo(() => createSaasApiClient(), []);
   const { ensureConsent, consentPrompt } = useConsent(() => api);
   const ensureAskConsent = useCallback(
@@ -33,6 +34,8 @@ export default function Chat() {
   const { messages, isStreaming, error, quotaExhausted, sendStream, clear, resetQuotaError } = useChatNonStreaming({
     mode,
     ensureAskConsent,
+    reportId,
+    useLatestReport: !reportId,
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -79,9 +82,16 @@ export default function Chat() {
     <div className="max-w-4xl mx-auto flex flex-col" style={{ height: "calc(100vh - 120px)" }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4 shrink-0">
-        <h1 className="text-2xl font-bold" style={{ color: "var(--color-text-primary)" }}>
-          智能问答
-        </h1>
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: "var(--color-text-primary)" }}>
+            智能问答
+          </h1>
+          <p className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>
+            {reportId
+              ? "回答将参考当前匹配报告（摘要），不会检索你的简历全文。"
+              : "若你近期保存过匹配报告，回答可能附带最新报告摘要。"}
+          </p>
+        </div>
         <div className="flex items-center gap-3">
           {/* Mode switcher */}
           <div

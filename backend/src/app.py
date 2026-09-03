@@ -3,11 +3,232 @@ Flask application factory.
 Registers all blueprints, middleware, and error handlers.
 """
 import os
+import subprocess
+from functools import lru_cache
 
-from flask import Flask, abort, jsonify, send_from_directory
+from flask import Flask, abort, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 
 from src.config import Config, _refresh_config
+
+_HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
+
+# Product-line tabs for the landing page. The last tuple element lists the
+# /v1/<group> path segment(s) (as collected by _collect_endpoint_groups) that
+# belong to that product line.
+_PRODUCT_LINES = (
+    ("planetx", "PlanetX", ("game", "narrative")),
+    ("tspace", "T-space", ("enterprise",)),
+    ("bolent", "Bolent", (
+        "jobs", "job-posts", "resume", "application", "match-reports",
+        "reports", "credit", "compliance", "trust", "timeline", "social",
+    )),
+    ("harmonyos", "HarmonyOS 元服务", ("payment/huawei", "push/huawei", "card")),
+    ("shared", "通用 · 共享", ("auth", "ask", "quota", "payment", "referral", "analytics", "poetry")),
+    ("system", "系统 · 运维", ("_sys", "admin", "endpoints")),
+)
+
+
+def _collect_endpoint_groups(app):
+    """Enumerate registered routes from Flask's url_map, grouped by /v1/<group>/.
+
+    Purely dynamic — adding/removing a blueprint is reflected here automatically,
+    so the landing page and /v1/endpoints never need manual endpoint lists.
+    Nested namespaces (/v1/payment/huawei/*, /v1/push/huawei/*) get a two-level key.
+    """
+    raw = {}
+    for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
+        methods = sorted((rule.methods or set()) & set(_HTTP_METHODS))
+        if not methods or rule.rule.startswith("/static"):
+            continue
+        parts = [p for p in rule.rule.split("/") if p]
+        if len(parts) >= 2 and parts[0] == "v1":
+            # Two-level key only for vendor sub-namespaces: /v1/payment/huawei/*,
+            # /v1/push/huawei/* — plain /v1/payment/plans stays in the payment group.
+            if len(parts) >= 3 and parts[2] == "huawei":
+                key = f"{parts[1]}/{parts[2]}"
+            else:
+                key = parts[1]
+        else:
+            key = "_sys"
+        raw.setdefault(key, []).append({"methods": methods, "rule": rule.rule})
+
+    ordered = []
+    sys_routes = raw.pop("_sys", [])
+    if sys_routes:
+        ordered.append({"key": "_sys", "label": "系统 · 根 / 健康 / 运维", "routes": sys_routes})
+    for key in sorted(raw):
+        ordered.append({"key": key, "label": f"/v1/{key}/", "routes": raw[key]})
+    return ordered
+
+
+def _collect_product_lines(app):
+    """Map collected endpoint groups onto product-line tabs (order preserved).
+
+    Groups not matched by any product line automatically land in the
+    "通用 · 共享" tab so new blueprints never silently disappear.
+    """
+    groups = _collect_endpoint_groups(app)
+    by_key = {g["key"]: g for g in groups}
+    lines = []
+    for line_key, label, group_keys in _PRODUCT_LINES:
+        line_groups = [by_key[k] for k in group_keys if k in by_key]
+        if line_groups:
+            lines.append({
+                "key": line_key,
+                "label": label,
+                "total": sum(len(g["routes"]) for g in line_groups),
+                "groups": line_groups,
+            })
+    mapped = {k for _, _, group_keys in _PRODUCT_LINES for k in group_keys}
+    unmatched = [g for g in groups if g["key"] not in mapped]
+    if unmatched:
+        shared = next((l for l in lines if l["key"] == "shared"), None)
+        if shared:
+            shared["groups"].extend(unmatched)
+            shared["total"] += sum(len(g["routes"]) for g in unmatched)
+        else:
+            lines.append({
+                "key": "shared", "label": "通用 · 共享",
+                "total": sum(len(g["routes"]) for g in unmatched),
+                "groups": unmatched,
+            })
+    return lines
+
+
+def _qcc_gateway_status():
+    """Resolve the QCC (企查查) MCP gateway the backend consumes.
+
+    The gateway is an external nginx/ServBay reverse proxy (:8998) that fronts
+    agent.qcc.com — it is NOT a Flask route, so it never shows up in the
+    url_map-based endpoint inventory; it's surfaced here as a dependency.
+    """
+    from src.credit.qcc_client import _mcp_base_url, get_qcc_base_urls
+
+    base = _mcp_base_url()
+    try:
+        import requests as _req
+
+        resp = _req.get(f"{base.rstrip('/')}/health", timeout=2)
+        status = "ok" if resp.status_code == 200 else f"http_{resp.status_code}"
+    except Exception:
+        status = "unreachable"
+    return {
+        "base": base,
+        "status": status,
+        "services": get_qcc_base_urls(),
+    }
+
+
+def _probe_base(base: str, auth_token: str = "") -> str:
+    """Lightweight liveness probe against an OpenAI-compatible / Ollama endpoint.
+
+    Tries the known health-ish GET paths; any HTTP response means the host is
+    reachable (a 4xx may just be auth/route variance), only a total connect
+    failure is reported as unreachable.
+    """
+    import requests as _req
+
+    headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+    seen: set[int] = set()
+    for path in ("/models", "/api/tags", "/v1/models"):
+        try:
+            resp = _req.get(f"{base.rstrip('/')}{path}", headers=headers, timeout=2)
+            seen.add(resp.status_code)
+            if resp.status_code == 200:
+                return "ok"
+        except Exception:
+            continue
+    if seen:
+        return "http_" + "/".join(str(s) for s in sorted(seen))
+    return "unreachable"
+
+
+def _collect_dependencies(app):
+    """External services the backend consumes: QCC gateway + LLM providers.
+
+    These are NOT Flask routes, so they never appear in the url_map-based
+    endpoint inventory below; they are surfaced here as dependencies.
+    """
+    import requests as _req  # noqa: F401  (kept for parity with qcc probe)
+
+    deps = {"qcc": _qcc_gateway_status(), "llm": []}
+    order = [
+        p.strip().lower()
+        for p in (
+            app.config.get("LLM_PROVIDER_ORDER")
+            or os.getenv("LLM_PROVIDER_ORDER")
+            or "deepseek"
+        ).split(",")
+        if p.strip()
+    ]
+    for p in order:
+        if p == "deepseek":
+            key = (app.config.get("DEEPSEEK_API_KEY") or "").strip()
+            base = app.config.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1"
+            model = app.config.get("DEEPSEEK_MODEL") or "deepseek-chat"
+        elif p == "openai":
+            key = (app.config.get("OPENAI_API_KEY") or "").strip()
+            base = app.config.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+            model = app.config.get("OPENAI_MODEL") or "gpt-3.5-turbo"
+        elif p == "ollama":
+            key = "local"  # always considered configured (no auth)
+            base = app.config.get("OLLAMA_HOST") or "http://127.0.0.1:11434"
+            model = app.config.get("OLLAMA_MODEL") or "qwen2.5-coder:1.5b"
+        else:
+            deps["llm"].append({"name": p, "base": "", "model": "", "status": "unknown", "cls": "bad"})
+            continue
+        if key and key.lower() not in ("skip", "your-deepseek-api-key", "your-openai-api-key"):
+            status = _probe_base(base, key if p != "ollama" else "")
+        else:
+            status = "not_configured"
+        cls = {
+            "ok": "ok",
+            "not_configured": "muted",
+            "unreachable": "bad",
+        }.get(status, "warn")  # http_* → warn
+        deps["llm"].append({"name": p, "base": base, "model": model, "status": status, "cls": cls})
+    return deps
+
+
+def _collect_open_items(app):
+    """Known gaps / tasks needing attention — dynamic probes + team list."""
+    from src.open_items import load_open_items
+
+    return load_open_items(app)
+
+
+@lru_cache(maxsize=1)
+def _git_commit() -> str:
+    """Resolve the deployed commit hash for /health (三级回退).
+
+    Priority: GIT_COMMIT env → backend/git_commit.txt → git rev-parse.
+    Cloud deploys rsync with --exclude='.git' (no git history), so deploy
+    scripts write backend/git_commit.txt at rsync time; local runs fall back
+    to rev-parse. Cached for the process lifetime.
+    """
+    env = os.getenv("GIT_COMMIT", "").strip()
+    if env:
+        return env
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    marker = os.path.join(backend_dir, "git_commit.txt")
+    try:
+        with open(marker, encoding="utf-8") as f:
+            val = f.read().strip()
+            if val:
+                return val
+    except OSError:
+        pass
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, cwd=backend_dir, timeout=2,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 def create_app(env="development"):
@@ -25,6 +246,7 @@ def create_app(env="development"):
     from src.api.routes.job_post_routes import job_post_bp
     from src.api.routes.ask_routes import ask_bp
     from src.api.routes.jobs_routes import jobs_bp
+    from src.api.routes.application_routes import application_bp
     from src.api.routes.resume_routes import resume_bp
     from src.api.routes.reports_routes import reports_bp
     from src.api.routes.match_report_routes import match_report_bp
@@ -50,6 +272,7 @@ def create_app(env="development"):
     app.register_blueprint(job_post_bp, url_prefix="/v1")
     app.register_blueprint(ask_bp, url_prefix="/v1")
     app.register_blueprint(jobs_bp, url_prefix="/v1/jobs")
+    app.register_blueprint(application_bp, url_prefix="/v1")
     app.register_blueprint(resume_bp, url_prefix="/v1/resume")
     app.register_blueprint(reports_bp, url_prefix="/v1/reports")
     app.register_blueprint(match_report_bp, url_prefix="/v1/match-reports")
@@ -112,6 +335,7 @@ def create_app(env="development"):
             status="ok" if llm_ready else "degraded",
             service="looma-backend",
             version="v1",
+            git_commit=_git_commit(),
             llm_provider=primary_llm,
             llm_provider_order=llm_order,
             llm_configured=llm_ready,
@@ -147,110 +371,45 @@ def create_app(env="development"):
             # SPA fallback: all client-side routes → index.html
             return send_from_directory(_planetx_dist, "index.html")
     else:
-        # --- Root: API info (so visiting localhost:5200 in browser is helpful) ---
+        # --- Root: API-only landing page (team-internal) ---
+        # In this mode the backend exposes only /v1/* APIs; the product UIs
+        # (PlanetX / T-space / portal) run as separate apps and call this API.
         @app.route("/", methods=["GET"])
-        def api_info():
+        def api_landing():
+            from datetime import datetime
+
+            lines = _collect_product_lines(app)
+            route_total = sum(l["total"] for l in lines)
+            return render_template(
+                "root.html",
+                service="looma-backend",
+                version="v1",
+                env=os.getenv("FLASK_ENV", "development"),
+                llm_provider=(
+                    app.config.get("LLM_PROVIDER_ORDER")
+                    or os.getenv("LLM_PROVIDER_ORDER")
+                    or "deepseek"
+                ).split(",")[0].strip(),
+                route_total=route_total,
+                product_lines=lines,
+                deps=_collect_dependencies(app),
+                open_items=_collect_open_items(app),
+                generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
+
+        @app.route("/v1/endpoints", methods=["GET"])
+        def api_endpoints():
+            """Machine-readable endpoint inventory — dynamically generated."""
             return jsonify(
                 service="looma-backend",
                 status="ok",
                 version="v1",
+                generated_from="app.url_map (dynamic, no manual maintenance)",
                 endpoints={
-                    "auth": [
-                        "POST /v1/auth/register",
-                        "POST /v1/auth/login",
-                        "POST /v1/auth/wechat",
-                        "POST /v1/auth/google",
-                        "POST /v1/auth/huawei",
-                        "POST /v1/auth/bind",
-                        "GET  /v1/auth/profile",
-                        "POST /v1/auth/refresh",
-                        "POST /v1/auth/bridge",
-                    ],
-                    "game": [
-                        "GET  /v1/game/profile",
-                        "POST /v1/game/profile-sync",
-                        "POST /v1/game/mission-complete",
-                        "POST /v1/game/match",
-                        "POST /v1/game/fleet/create",
-                        "POST /v1/game/fleet/join",
-                        "GET  /v1/game/fleet/mine",
-                        "POST /v1/game/fleet/leave",
-                        "POST /v1/game/start",
-                        "POST /v1/game/answer",
-                        "GET  /v1/game/result",
-                        "GET  /v1/game/history",
-                    ],
-                    "ask": ["POST /v1/ask", "POST /v1/feedback/rate", "GET  /v1/feedback/last-query"],
-                    "quota": ["GET /v1/quota"],
-                    "jobs": [
-                        "GET  /v1/jobs",
-                        "GET  /v1/jobs/list",
-                        "GET  /v1/jobs/search",
-                        "GET  /v1/jobs/recommend",
-                        "GET  /v1/jobs/<job_id>",
-                        "POST /v1/jobs/upload",
-                        "POST /v1/jobs/parse",
-                        "POST /v1/jobs/match",
-                    ],
-                    "resume": [
-                        "GET  /v1/resume/list",
-                        "GET  /v1/resume/analysis",
-                        "POST /v1/resume/parse",
-                        "POST /v1/resume/upload",
-                        "POST /v1/resume/improve",
-                        "DELETE /v1/resume/<resume_id>",
-                    ],
-                    "reports": ["POST /v1/reports/generate", "GET /v1/reports/list"],
-                    "payment": [
-                        "GET  /v1/payment/plans",
-                        "GET  /v1/payment/status",
-                        "POST /v1/payment/upgrade",
-                    ],
-                    "credit": [
-                        "POST /v1/credit/analyze",
-                        "POST /v1/credit/check-company",
-                    ],
-                    "referral": ["POST /v1/referral/create", "POST /v1/referral/use", "GET /v1/referral/my-codes"],
-                    "narrative": [
-                        "POST /v1/narrative/start",
-                        "POST /v1/narrative/event",
-                        "POST /v1/narrative/end",
-                        "POST /v1/narrative/feedback",
-                        "GET  /v1/narrative/stats",
-                    ],
-                    "enterprise": [
-                        "POST /v1/enterprise/create",
-                        "POST /v1/enterprise/join",
-                        "GET  /v1/enterprise/profile",
-                        "GET  /v1/enterprise/candidates",
-                        "GET  /v1/enterprise/candidate/<id>",
-                        "POST /v1/enterprise/candidates/add",
-                        "POST /v1/enterprise/candidates/import-share",
-                        "POST /v1/enterprise/contact-sales",
-                    ],
-                    "job_posts": [
-                        "POST /v1/job-posts",
-                        "GET  /v1/job-posts",
-                        "PUT  /v1/job-posts/<id>",
-                        "DELETE /v1/job-posts/<id>",
-                        "GET  /v1/job-posts/<id>/matches",
-                    ],
-                    "harmonyos": {
-                        "payment": [
-                            "POST /v1/payment/huawei/notify",
-                            "POST /v1/payment/huawei/verify",
-                        ],
-                        "push": [
-                            "POST /v1/push/huawei/register",
-                            "POST /v1/push/huawei/unregister",
-                            "POST /v1/push/huawei/send",
-                            "POST /v1/push/huawei/batch",
-                        ],
-                        "cards": [
-                            "GET  /v1/card/<card_id>",
-                            "POST /v1/card/batch",
-                        ],
-                    },
+                    g["key"]: [
+                        f"{' '.join(r['methods'])} {r['rule']}" for r in g["routes"]
+                    ]
+                    for g in _collect_endpoint_groups(app)
                 },
             )
 
@@ -260,7 +419,7 @@ def create_app(env="development"):
         from flask import request as _req
         path = _req.path
         if path.startswith("/v1/"):
-            msg = f"Endpoint {path} not found. See GET / for the full list."
+            msg = f"Endpoint {path} not found. See GET /v1/endpoints for the full list."
         else:
             msg = f"Endpoint {path} not found."
         return jsonify(error="not_found", message=msg), 404

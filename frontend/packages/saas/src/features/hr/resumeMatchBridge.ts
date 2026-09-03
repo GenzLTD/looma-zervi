@@ -6,6 +6,7 @@ import type { ParsedResume } from "@looma/shared-core";
 import { normalizeParsedResume } from "./normalizeParsedResume";
 
 export const RESUME_MATCH_TEXT_KEY = "saas-resume-match-text";
+export const RESUME_MATCH_ID_KEY = "saas-resume-match-id";
 
 export function buildResumeMatchText(resume: ParsedResume): string {
   const r = normalizeParsedResume(resume) ?? resume;
@@ -56,9 +57,12 @@ export function buildResumeMatchText(resume: ParsedResume): string {
   return parts.join("\n").trim();
 }
 
-export function saveResumeMatchText(text: string): void {
+export function saveResumeMatchText(text: string, resumeId?: string | null): void {
   try {
     localStorage.setItem(RESUME_MATCH_TEXT_KEY, text);
+    if (resumeId) {
+      localStorage.setItem(RESUME_MATCH_ID_KEY, resumeId);
+    }
   } catch {
     /* ignore quota / private mode */
   }
@@ -72,9 +76,18 @@ export function loadResumeMatchText(): string | null {
   }
 }
 
+export function loadResumeMatchId(): string | null {
+  try {
+    return localStorage.getItem(RESUME_MATCH_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export function clearResumeMatchText(): void {
   try {
     localStorage.removeItem(RESUME_MATCH_TEXT_KEY);
+    localStorage.removeItem(RESUME_MATCH_ID_KEY);
   } catch {
     /* ignore */
   }

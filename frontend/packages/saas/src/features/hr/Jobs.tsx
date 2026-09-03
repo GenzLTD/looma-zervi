@@ -30,7 +30,7 @@ import { createSaasApiClient } from "../../api/saasApiClient";
 import { useConsent } from "../../compliance/useConsent";
 import { IS_OVERSEAS } from "../../config/region";
 import QuotaExhaustedModal from "../../brand/components/QuotaExhaustedModal";
-import { loadResumeMatchText } from "./resumeMatchBridge";
+import { loadResumeMatchId, loadResumeMatchText } from "./resumeMatchBridge";
 import { useSaasAuthStore } from "../auth/authStore";
 
 function isQuotaExceeded(err: unknown): boolean {
@@ -335,6 +335,7 @@ export default function Jobs() {
       const report = await matchReportsApi.create({
         resume_text: resumeText,
         matches: matchesWithCredit,
+        resume_id: loadResumeMatchId() || undefined,
       });
       setMsgOk(true);
       setMsg(t("jobs.reportSaved"));

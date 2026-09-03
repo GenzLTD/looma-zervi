@@ -16,10 +16,10 @@
       "switchAria": "切换语言"
     },
     "footer": {
-      "rights": "版权所有。"
+      "rights": "版权所有。",
+      "icp": "粤ICP备2026092569号-1"
     },
-    "support": "客服支持",
-    "api": "API"
+    "support": "客服支持"
   },
   "meta": {
     "home": {

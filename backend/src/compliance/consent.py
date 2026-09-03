@@ -31,6 +31,7 @@ ALL_SCOPES = frozenset({
     "resume_parse",
     "job_match",
     "report_generate",
+    "application_submit",
     # Covered by credit_query
     "credit_analyze",
     # Other product capabilities
@@ -47,6 +48,7 @@ CONSENT_PACKAGES: dict[str, frozenset[str]] = {
         "resume_parse",
         "job_match",
         "report_generate",
+        "application_submit",
     }),
     "credit_query": frozenset({
         "credit_analyze",
@@ -71,6 +73,7 @@ SCOPE_LABELS_ZH = {
     "resume_parse": "简历结构化提取",
     "job_match": "职位智能匹配",
     "report_generate": "生成并保存匹配报告",
+    "application_submit": "投递简历到职位",
     "credit_analyze": "征信文本分析",
     "profile_share": "分享人格分析结果",
     "ask_rag": "AI 知识库问答",

@@ -11,12 +11,23 @@
 #   - Bolent 企业站   → szbolent-portal / WordPress，阿里云独立部署
 #   - 海外 Vultr      → deploy-overseas.yml（overseas-* tag 触发）
 #
-# 目标机默认: 1.14.202.161 (ubuntu, /opt/looma-zervi)
+# 目标机:
+#   deploy           - 腾讯云 1.14.202.161 (ubuntu, /home/ubuntu/looma-zervi)
+#   deploy-tianyi    - 天翼云 14.29.216.219 (root, /opt/looma-zervi,
+#                      docker-compose.tianyi.full.yml, 宿主映射 :5203)
+#
+# 部署约定: rsync 后写 backend/git_commit.txt=<GITHUB_SHA>，
+#           每端 health 的 git_commit 字段 == 目标 SHA（三端追溯闭合）。
 #
 # GitHub Secrets（必填）:
 #   SSH_HOST            - 1.14.202.161
 #   SSH_USER            - ubuntu
 #   SSH_PRIVATE_KEY     - looma_key.pem 全文
+#   TIANYI_SSH_HOST          - 14.29.216.219
+#   TIANYI_SSH_USER          - root
+#   TIANYI_SSH_PRIVATE_KEY   - 天翼 root SSH 私钥全文
+#   TIANYI_DEPLOY_PATH       - /opt/looma-zervi
+#   TIANYI_COMPOSE_FILE      - docker-compose.tianyi.full.yml
 #   ENV_JWT_SECRET      - JWT 签名密钥 (≥32 字符)
 #   ENV_DEEPSEEK_API_KEY
 #   ENV_DEEPSEEK_BASE_URL  (默认 https://api.deepseek.com/v1)
@@ -61,8 +72,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
@@ -332,7 +341,7 @@ jobs:
           fi
 
           cd "${DEPLOY_PATH}/docker"
-          HASH=$(sha256sum "${DEPLOY_PATH}/backend/requirements.txt" "${DEPLOY_PATH}/docker/Dockerfile.backend" | sha256sum | awk '{print $1}')
+          HASH=$((sha256sum "${DEPLOY_PATH}/backend/requirements.txt" "${DEPLOY_PATH}/docker/Dockerfile.backend"; find "${DEPLOY_PATH}/backend/src" -type f -exec sha256sum {} +) | sha256sum | awk '{print $1}')
           MARKER="/tmp/looma-backend-image.hash"
           NEED_BUILD=1
           if [ -f "${MARKER}" ] && [ "$(cat "${MARKER}")" = "${HASH}" ]; then
@@ -361,6 +370,16 @@ jobs:
           done
           curl -sf http://127.0.0.1:5200/health || { ${COMPOSE} logs --tail 40 backend; exit 1; }
           DOCKER
+
+      - name: Write git_commit marker (main SHA)
+        run: |
+          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'MARKER'
+          set -euo pipefail
+          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
+          GIT_SHA="${{ github.sha }}"
+          echo "${GIT_SHA}" > "${DEPLOY_PATH}/backend/git_commit.txt"
+          echo "=== git_commit.txt: $(cat "${DEPLOY_PATH}/backend/git_commit.txt") ==="
+          MARKER
 
       - name: Import poetry into SQLite
         run: |
@@ -433,3 +452,77 @@ jobs:
       - name: Clean up old images
         run: |
           $SSH_CMD ${{ env.DEPLOY_TARGET }} "docker image prune -f"
+
+  deploy-tianyi:
+    name: "Deploy to Tianyi (14.29.216.219)"
+    runs-on: ubuntu-latest
+    needs: [backend-test]
+    if: success()
+    env:
+      T_HOST: ${{ secrets.TIANYI_SSH_HOST }}
+      T_USER: ${{ secrets.TIANYI_SSH_USER }}
+      T_PATH: ${{ secrets.TIANYI_DEPLOY_PATH }}
+      T_COMPOSE_FILE: ${{ secrets.TIANYI_COMPOSE_FILE }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH (tianyi)
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.TIANYI_SSH_PRIVATE_KEY }}
+
+      - name: Add host key (tianyi)
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ env.T_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Setup SSH env
+        run: |
+          echo 'SSH_CMD=ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o StrictHostKeyChecking=accept-new' >> $GITHUB_ENV
+          echo "DEPLOY_TARGET=${{ env.T_USER }}@${{ env.T_HOST }}" >> $GITHUB_ENV
+
+      - name: Sync backend code (tianyi)
+        run: |
+          rsync -avz -e "$SSH_CMD" --delete \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='**/__pycache__' \
+            --exclude='**/*.pyc' \
+            --exclude='backend/venv' \
+            --exclude='backend/data' \
+            --exclude='backend/.env' \
+            --exclude='backend/poems_all.json.gz' \
+            --exclude='backend/open_items.json' \
+            --exclude='backend/git_commit.txt' \
+            --exclude='backend/src/rag/chroma_client.py.bak-*' \
+            backend/ \
+            ${{ env.DEPLOY_TARGET }}:${{ env.T_PATH }}/backend/
+
+      - name: Restart looma-backend + write git_commit (tianyi)
+        run: |
+          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'RESTART'
+          set -euo pipefail
+          T_PATH="${{ env.T_PATH }}"
+          COMPOSE="docker compose -f ${T_PATH}/docker/${{ env.T_COMPOSE_FILE }} -p looma-zervi"
+          echo "=== Write git_commit marker (${{ github.sha }}) ==="
+          echo "${{ github.sha }}" > "${T_PATH}/backend/git_commit.txt"
+          cat "${T_PATH}/backend/git_commit.txt"
+          echo "=== Recreate looma-backend (code via bind mount) ==="
+          ${COMPOSE} up -d --no-build --force-recreate backend
+          echo "=== Wait for backend health (:5203 host mapping) ==="
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:5203/health >/dev/null 2>&1; then
+              echo "Backend healthy after ${i}s"
+              break
+            fi
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:5203/health || { ${COMPOSE} logs --tail 40 backend; exit 1; }
+          RESTART
+
+      - name: Public health check (tianyi)
+        run: |
+          echo "=== Public http://${{ env.T_HOST }}/health ==="
+          curl -sf --connect-timeout 15 "http://${{ env.T_HOST }}/health"
+          echo ""

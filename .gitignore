@@ -77,6 +77,9 @@ web/
 # Playwright
 frontend/playwright-report/
 frontend/test-results/
+test-results/
+.cursor/
+.playwright-cli/
 
 # Local agent memory (do not commit)
 frontend/.workbuddy/
@@ -87,3 +90,10 @@ frontend/.workbuddy/
 
 # Internal test credentials (copy from 内测志愿者账号与入口.example.md)
 docs/内测志愿者账号与入口.md
+.pnpm-store/
+
+# Supabase CLI local cache (project link state)
+supabase/.temp/
+
+# Deploy-time commit marker (written by deploy scripts, read by /health)
+backend/git_commit.txt

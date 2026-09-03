@@ -7,6 +7,7 @@ Endpoints:
   GET  /v1/resume/analysis  - Get AI analysis for a specific resume
   POST /v1/resume/parse     - Parse plain resume text to structured data
   POST /v1/resume/upload    - Upload resume file (PDF/DOCX), auto-parsed via MarkItDown + LLM
+  POST /v1/resume/ingest    - Ingest pre-parsed markdown directly (DemoPeter thin-ingest)
   POST /v1/resume/improve   - Generate improvement suggestions for a parsed resume
   DELETE /v1/resume/<resume_id> - Delete a resume
 """
@@ -150,9 +151,14 @@ def parse_resume():
 def upload_resume():
     """Upload resume file (PDF/DOCX/Word) for AI parsing.
 
-    Pipeline: MarkItDown binary→Markdown → LLM structured extraction → persist → return.
+    Pipeline:
+      1. MarkItDown binary→Markdown
+      2. Persist text + metadata to DB (ALWAYS — even if LLM later fails)
+      3. LLM structured extraction (best-effort; updates DB metadata on success)
 
     Accepts multipart/form-data with field name ``file``.
+
+    Returns ``resume_id`` always when Step 2 succeeds, with ``status: "complete" | "partial"``.
     """
     user_id = g.get("user_id", "guest-anon")
     tier = g.get("user_tier", "guest")
@@ -223,83 +229,190 @@ def upload_resume():
         refund_consumption(user_id, RESOURCE_RESUME_PARSE, quota_result.get("source", "daily"))
         return jsonify(error="convert_failed", message="文档内容为空，无法提取文字"), 422
 
-    # Step 2: LLM structured extraction
+    # Step 2: Persist text FIRST (always, even if LLM later fails)
+    resume_id = None
+    owner = str(user_id or "anon")
+    try:
+        from src.db.manager import DatabaseManager
+        from werkzeug.utils import secure_filename
+
+        db_path = current_app.config.get("DATABASE_PATH", "data/looma.db")
+        db = DatabaseManager(db_path)
+        safe_name = secure_filename(filename) or "resume.bin"
+        provisional_path = f"resume/{owner}/{uuid.uuid4().hex}_{safe_name}"
+        meta_json = json.dumps(
+            {"markdown": markdown, "user_id": owner, "filename": filename},
+            ensure_ascii=False,
+        )
+        with db.get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO documents (title, file_path, doc_type, file_size, metadata, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, 'uploaded', ?)""",
+                (filename, provisional_path, "resume", len(content), meta_json, _now_iso()),
+            )
+            row_id = cur.lastrowid
+            if not row_id:
+                raise RuntimeError("documents insert returned no lastrowid")
+            final_path = f"resume/{owner}/{row_id}_{safe_name}"
+            conn.execute(
+                "UPDATE documents SET file_path = ? WHERE id = ?",
+                (final_path, row_id),
+            )
+            resume_id = str(row_id)
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to persist resume text: {e}")
+        resume_id = None
+
+    # Step 3: LLM structured extraction (best-effort — resume_id already exists)
+    extracted = None
+    extract_error = None
+    extract_hint = None
     try:
         from src.agents.document_agents import DocumentAnalysisError, run_document_analysis
 
         extracted = run_document_analysis("resume", markdown)
     except DocumentAnalysisError as e:
         logger.error(f"Resume extraction {e.code}: {e.message}")
-        return jsonify(
-            extracted=None,
-            markdown=markdown,
-            filename=filename,
-            error=e.message,
-            hint=e.code,
-        ), 200
+        extract_error = e.message
+        extract_hint = e.code
     except Exception as e:
         logger.error(f"LLM extraction failed: {e}")
-        # Return markdown only if extraction fails
-        return jsonify(
-            extracted=None,
-            markdown=markdown,
-            filename=filename,
-            error=f"结构化提取失败: {e}",
-        ), 200
+        extract_error = f"结构化提取失败: {e}"
 
-    if not extracted:
-        logger.warning(f"LLM returned empty result for resume upload, filename={filename}, markdown_len={len(markdown)}")
-        return jsonify(
-            extracted=None,
-            markdown=markdown,
-            filename=filename,
-            error="简历结构化解析失败: AI 未能返回有效的解析结果，请检查简历文件是否清晰可读，或尝试粘贴简历文本。",
-            hint="parse_failed",
-        ), 200
+    if extracted and resume_id:
+        # Update DB metadata with extracted data
+        try:
+            db_path = current_app.config.get("DATABASE_PATH", "data/looma.db")
+            db = DatabaseManager(db_path)
+            meta_json = json.dumps(
+                {"extracted": extracted, "markdown": markdown, "user_id": owner, "filename": filename},
+                ensure_ascii=False,
+            )
+            with db.get_conn() as conn:
+                conn.execute(
+                    "UPDATE documents SET metadata = ?, status = 'processed' WHERE id = ?",
+                    (meta_json, int(resume_id)),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Failed to update resume metadata with extracted: {e}")
 
-    # ── Trust Bridge: record upload resume trust ──
-    _record_resume_trust(user_id, extracted)
-    ext = ""
-    if filename and "." in filename:
-        ext = filename.rsplit(".", 1)[-1].lower()[:10]
-    _record_resume_timeline(
-        user_id,
-        extracted,
-        channel="upload",
-        file_ext=ext,
-        raw_chars=len(markdown or ""),
-    )
+        # ── Trust Bridge: record upload resume trust ──
+        _record_resume_trust(user_id, extracted)
+        ext = ""
+        if filename and "." in filename:
+            ext = filename.rsplit(".", 1)[-1].lower()[:10]
+        _record_resume_timeline(
+            user_id, extracted, channel="upload", file_ext=ext, raw_chars=len(markdown or ""),
+        )
+    elif not extracted:
+        logger.warning(
+            f"LLM extraction produced no result for resume upload, "
+            f"filename={filename}, markdown_len={len(markdown)}, "
+            f"resume_id={resume_id} (persisted as text-only)"
+        )
 
-    # Step 3: Persist to DB
-    resume_id = None
+    # Build response — always include resume_id when persisted
+    response_body = {
+        "extracted": extracted,
+        "markdown": markdown,
+        "filename": filename,
+        "resume_id": resume_id,
+        "status": "complete" if (extracted and resume_id) else "partial",
+    }
+    if extract_error:
+        response_body["error"] = extract_error
+    if extract_hint:
+        response_body["hint"] = extract_hint
+
+    return jsonify(response_body)
+
+
+@resume_bp.route("/ingest", methods=["POST"])
+@optional_auth
+@require_consent("jobseeker_core")
+def ingest_resume():
+    """Ingest pre-parsed resume markdown directly into DB (no LLM call).
+
+    Designed for DemoPeter terminal → Looma thin-ingest path.
+    DemoPeter handles MarkItDown + LLM extraction locally;
+    Looma only stores the result.
+
+    JSON body::
+
+        {
+            "markdown":  "...",       // required, pre-parsed markdown text
+            "filename":  "...",       // optional, defaults to "resume_ingest.txt"
+            "extracted": { ... }      // optional, structured extraction result
+        }
+
+    Returns ``{ resume_id, status }`` where status is ``"processed"`` (has extracted)
+    or ``"stored"`` (markdown only). DB ``documents.status`` uses ``processed`` / ``uploaded``.
+    """
+    data = request.get_json() or {}
+    markdown = (data.get("markdown") or "").strip()
+    filename = (data.get("filename") or "").strip() or "resume_ingest.txt"
+    extracted = data.get("extracted")
+
+    if not markdown:
+        return jsonify(error="bad_request", message="markdown is required"), 400
+
+    user_id = g.get("user_id", "guest-anon")
+
     try:
         from src.db.manager import DatabaseManager
+        from werkzeug.utils import secure_filename
+
         db_path = current_app.config.get("DATABASE_PATH", "data/looma.db")
         db = DatabaseManager(db_path)
-        doc_id = str(uuid.uuid4())
+        owner = str(user_id or "anon")
+        safe_name = secure_filename(filename) or "resume.bin"
+        provisional_path = f"resume/{owner}/{uuid.uuid4().hex}_{safe_name}"
+
+        meta = {"markdown": markdown, "user_id": owner, "filename": filename}
+        if extracted:
+            meta["extracted"] = extracted
+
+        # API status ≠ documents.status: stored=markdown only, processed=+extracted
+        api_status = "processed" if extracted else "stored"
+        doc_status = "processed" if extracted else "uploaded"
+        meta_json = json.dumps(meta, ensure_ascii=False)
+
         with db.get_conn() as conn:
-            conn.execute(
+            cur = conn.execute(
                 """INSERT INTO documents (title, file_path, doc_type, file_size, metadata, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, 'processed', ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     filename,
-                    filename,
+                    provisional_path,
                     "resume",
-                    len(content),
-                    json.dumps({"extracted": extracted, "markdown": markdown, "user_id": user_id}, ensure_ascii=False),
+                    len(markdown.encode("utf-8")),
+                    meta_json,
+                    doc_status,
                     _now_iso(),
                 ),
             )
-        resume_id = doc_id
-    except Exception as e:
-        logger.warning(f"Failed to persist resume: {e}")
+            row_id = cur.lastrowid
+            if not row_id:
+                raise RuntimeError("documents insert returned no lastrowid")
+            final_path = f"resume/{owner}/{row_id}_{safe_name}"
+            conn.execute(
+                "UPDATE documents SET file_path = ? WHERE id = ?",
+                (final_path, row_id),
+            )
+            resume_id = str(row_id)
 
-    return jsonify(
-        extracted=extracted,
-        markdown=markdown,
-        filename=filename,
-        resume_id=resume_id,
-    )
+        # ── Trust Bridge: record ingest resume trust ──
+        if extracted and user_id != "guest-anon":
+            _record_resume_trust(user_id, extracted)
+            _record_resume_timeline(user_id, extracted, channel="ingest", raw_chars=len(markdown))
+
+        return jsonify(resume_id=resume_id, status=api_status)
+
+    except Exception as e:
+        logger.error(f"Failed to ingest resume: {e}")
+        return jsonify(error="server_error", message=f"入库失败: {e}"), 500
 
 
 @resume_bp.route("/improve", methods=["POST"])
@@ -386,6 +499,7 @@ def list_resumes():
     db_path = current_app.config.get("DATABASE_PATH", "data/looma.db")
     from src.db.manager import DatabaseManager
     db = DatabaseManager(db_path)
+    user_id = str(g.get("user_id") or "")
 
     try:
         with db.get_conn() as conn:
@@ -393,7 +507,9 @@ def list_resumes():
                 """SELECT id, title, file_path, file_size, metadata, created_at
                    FROM documents
                    WHERE doc_type = 'resume'
-                   ORDER BY created_at DESC LIMIT 50"""
+                     AND json_extract(metadata, '$.user_id') = ?
+                   ORDER BY created_at DESC LIMIT 50""",
+                (user_id,),
             ).fetchall()
     except Exception as e:
         logger.error(f"Failed to list resumes: {e}")
@@ -406,7 +522,7 @@ def list_resumes():
         resumes.append({
             "id": str(r["id"]),
             "title": r["title"] or "未命名简历",
-            "filename": r["file_path"],
+            "filename": r["title"] or r["file_path"],
             "file_size": r["file_size"],
             "uploaded_at": r["created_at"],
             "extracted": extracted,
@@ -429,14 +545,16 @@ def analysis_resume():
     db_path = current_app.config.get("DATABASE_PATH", "data/looma.db")
     from src.db.manager import DatabaseManager
     db = DatabaseManager(db_path)
+    user_id = str(g.get("user_id") or "")
 
     try:
         with db.get_conn() as conn:
             row = conn.execute(
                 """SELECT id, title, file_path, metadata, created_at
                    FROM documents
-                   WHERE id = ? AND doc_type = 'resume'""",
-                (resume_id,)
+                   WHERE id = ? AND doc_type = 'resume'
+                     AND json_extract(metadata, '$.user_id') = ?""",
+                (resume_id, user_id),
             ).fetchone()
     except Exception as e:
         logger.error(f"Failed to load resume for analysis: {e}")
@@ -486,6 +604,7 @@ def analysis_resume():
         resume_id=str(row["id"]),
         title=row["title"],
         extracted=extracted,
+        markdown=markdown_text,
         analysis=analysis,
     )
 
@@ -493,16 +612,19 @@ def analysis_resume():
 @resume_bp.route("/<resume_id>", methods=["DELETE"])
 @require_auth
 def delete_resume(resume_id: str):
-    """Delete a resume by ID."""
+    """Delete a resume by ID (owner-scoped)."""
     db_path = current_app.config.get("DATABASE_PATH", "data/looma.db")
     from src.db.manager import DatabaseManager
     db = DatabaseManager(db_path)
+    user_id = str(g.get("user_id") or "")
 
     try:
         with db.get_conn() as conn:
             cur = conn.execute(
-                "DELETE FROM documents WHERE id = ? AND doc_type = 'resume'",
-                (resume_id,)
+                """DELETE FROM documents
+                   WHERE id = ? AND doc_type = 'resume'
+                     AND json_extract(metadata, '$.user_id') = ?""",
+                (resume_id, user_id),
             )
             if cur.rowcount == 0:
                 return jsonify(error="not_found", message="简历不存在"), 404

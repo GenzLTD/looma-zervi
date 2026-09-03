@@ -29,6 +29,10 @@ interface UseChatNonStreamingOptions {
   mode?: "chat" | "deepseek" | "fast";
   /** Pre-check / retry when backend returns consent_required */
   ensureAskConsent?: () => Promise<boolean>;
+  /** Saved match report id for summary-level Ask context */
+  reportId?: string | null;
+  /** Default true: backend may attach latest report when reportId omitted */
+  useLatestReport?: boolean;
 }
 
 let _uid = 0;
@@ -113,6 +117,8 @@ export function useChatNonStreaming(options: UseChatNonStreamingOptions = {}) {
                     content: m.content,
                   }))
                 : undefined,
+            report_id: options.reportId || undefined,
+            use_latest_report: options.useLatestReport ?? true,
           });
 
           setMessages((prev) =>
@@ -166,7 +172,15 @@ export function useChatNonStreaming(options: UseChatNonStreamingOptions = {}) {
 
       await attemptRequest();
     },
-    [messages, options.mode, options.ensureAskConsent, chatApi, fetchQuota]
+    [
+      messages,
+      options.mode,
+      options.ensureAskConsent,
+      options.reportId,
+      options.useLatestReport,
+      chatApi,
+      fetchQuota,
+    ]
   );
 
   const clear = useCallback(() => {

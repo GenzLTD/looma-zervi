@@ -26,6 +26,10 @@ export interface AskRequest {
   session_history?: ChatMessage[];
   current_stage?: string;
   active_domain?: string;
+  /** Optional saved match report for summary-level Ask context */
+  report_id?: string;
+  /** When true and report_id omitted, backend may attach the latest report */
+  use_latest_report?: boolean;
 }
 
 export interface AskResponse {

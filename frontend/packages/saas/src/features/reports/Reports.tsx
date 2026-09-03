@@ -339,7 +339,14 @@ export default function Reports() {
                       {activeMatch.summary}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-center">
+                    <Link
+                      to={`/query?report=${encodeURIComponent(activeMatch.id)}`}
+                      className="text-xs no-underline"
+                      style={{ color: "var(--color-primary)" }}
+                    >
+                      基于报告提问
+                    </Link>
                     <button
                       type="button"
                       onClick={() => void handleExport(activeMatch.id)}

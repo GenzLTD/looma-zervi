@@ -405,3 +405,18 @@ h1 {
 .pricing-status.ok {
   color: var(--success);
 }
+
+.footer-beian {
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+}
+
+.footer-beian a {
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.footer-beian a:hover {
+  color: var(--accent);
+}

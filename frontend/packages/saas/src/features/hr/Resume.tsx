@@ -19,6 +19,7 @@ export default function Resume() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [resume, setResume] = useState<ParsedResume | null>(null);
+  const [resumeId, setResumeId] = useState<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -33,7 +34,7 @@ export default function Resume() {
     if (!resume) return;
     const text = buildResumeMatchText(resume);
     if (!text) return;
-    saveResumeMatchText(text);
+    saveResumeMatchText(text, resumeId);
     navigate("/jobs");
   };
 
@@ -46,8 +47,12 @@ export default function Resume() {
     setParsing(true);
     setMsg(null);
     setResume(null);
+    setResumeId(null);
     try {
       const result = await resumeApi.upload(file) as any;
+      if (result.resume_id) {
+        setResumeId(String(result.resume_id));
+      }
       if (result.extracted) {
         const normalized = normalizeParsedResume(result.extracted);
         setResume(normalized ?? result.extracted);

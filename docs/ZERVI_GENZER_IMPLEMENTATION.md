@@ -115,7 +115,7 @@ M3（8w） visibility + 公开页 + ORCID（可选）
 | 阶段 | 范围 | 仓库 | 状态 |
 |------|------|------|------|
 | **1a v0** | 舰队内算分 + 双端匹配页 | looma-zervi | ✅ |
-| **1b 共识门控** | consensus 表 + acknowledge + mission 403 | looma-zervi | 🚧 进行中 |
+| **1b 共识门控** | consensus 表 + acknowledge + mission 403 | looma-zervi | ✅ 已校准（mission 403 降级 v0 不阻塞，见 M-4） |
 | **1c 裂变 UI** | 三分流 + spread_hint + share CTA | looma-zervi | 📋 |
 | **2 软件终端** | DemoPPI `consensus_match` 信号 | DemoPPI + genzer-contracts | 📋 不阻塞 1b |
 | **3 穿戴硬件** | Ctrl4U 参照 | 硬件 | 📋 3–6 月 |
@@ -127,7 +127,7 @@ M3（8w） visibility + 公开页 + ORCID（可选）
 | M-1 | match 响应扩展 | `consensus_*` + `spread_hint` 字段 | P0 · 部分 ✅ |
 | M-2 | `match_consensus` 表 | DB migration | P0 |
 | M-3 | `POST /v1/game/match/acknowledge` | 真实现（非 501） | P0 |
-| M-4 | mission-complete 门控 | match 无 verified → 403 | P0 |
+| M-4 | mission-complete 门控 | ~~match 无 verified → 403~~ **已校准降级**：v0 不阻塞，阶段二增强。`game_routes.py:448` 硬编码 `can_complete_mission: True`，注释「舰队内算出配对 + 用户确认即可完成任务（阶段二共识为增强，不阻塞）」 | 已校准 |
 | M-5 | Web MatchScreen 三分流 | verified / weak / failed | P0 |
 | M-6 | 小程序 match 页同构 | 同上 | P0 |
 | M-7 | share 任务联动 | 未达标主 CTA | P1 |
@@ -255,3 +255,4 @@ M3（8w） visibility + 公开页 + ORCID（可选）
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | 1.0 | 2026-07-13 | 初版：三战略线 + 叙事勘误 + zervi-genzer 落地分工 + Layer 5 映射 |
+| 1.1 | 2026-08-08 | 校准 M-4：mission-complete 门控降级为 v0 不阻塞（game_routes.py:448），阶段二增强 |

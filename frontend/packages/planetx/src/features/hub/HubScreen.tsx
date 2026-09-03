@@ -56,6 +56,17 @@ export default function HubScreen() {
         <p style={{ fontSize: '12px', color: 'var(--px-color-text-muted)', letterSpacing: '0.2em', marginTop: '4px' }}>
           {identity ? IDENTITY_LABELS[identity] : ''}
         </p>
+        <p
+          style={{
+            fontSize: '12px',
+            color: 'var(--px-color-text-muted)',
+            lineHeight: 1.65,
+            margin: '10px auto 0',
+            maxWidth: 320,
+          }}
+        >
+          这里不是投简历的地方。先看清你在做什么、和谁共事过；画像会随着记录变准，机会是后面的事。
+        </p>
       </div>
 
       {/* XP Bar */}

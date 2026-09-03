@@ -169,6 +169,8 @@ export type {
   ResumeEducation,
   ResumeProject,
   ResumeUploadResult,
+  ResumeIngestRequest,
+  ResumeIngestResponse,
   Job,
   JobMatchItem,
   JobMatchResult,
@@ -343,6 +345,16 @@ export {
 } from "./constants/quota";
 
 export { API_ROUTES } from "./constants/routes";
+
+export {
+  CLAIM_LABEL,
+  STATUS_LABEL,
+  STATUS_COLOR,
+  EVIDENCE_LABEL,
+  EVIDENCE_FALLBACK,
+  CLAIM_FALLBACK,
+  STATUS_FALLBACK_KEY,
+} from "./constants/trustLabels";
 
 // Utils
 export {

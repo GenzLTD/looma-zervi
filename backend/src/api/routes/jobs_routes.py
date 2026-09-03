@@ -507,6 +507,86 @@ def search_jobs():
     return jsonify(jobs=filtered, total=len(filtered))
 
 
+@jobs_bp.route("/seed-demo", methods=["POST"])
+@require_auth
+def seed_demo_jobs():
+    """Persist demo jobs owned by the current user (for HR apply visibility).
+
+    Idempotent: skips job_ids that already exist in documents.
+    Body optional: ``{ "jobs": [ {id,title,company,...} ] }`` — defaults to MOCK_JOBS.
+    """
+    user_id = str(g.user_id)
+    data = request.get_json(silent=True) or {}
+    raw_jobs = data.get("jobs") if isinstance(data.get("jobs"), list) else MOCK_JOBS
+
+    from src.db.manager import DatabaseManager
+
+    db_path = current_app.config.get("DATABASE_PATH", "data/looma.db")
+    db = DatabaseManager(db_path)
+    created = []
+    skipped = []
+
+    with db.get_conn() as conn:
+        existing_ids = set()
+        for r in conn.execute(
+            "SELECT metadata FROM documents WHERE doc_type = 'job'"
+        ).fetchall():
+            try:
+                meta = json.loads(r["metadata"] or "{}")
+            except json.JSONDecodeError:
+                continue
+            jid = meta.get("job_id") or (meta.get("parsed") or {}).get("id")
+            if jid:
+                existing_ids.add(str(jid))
+
+        for j in raw_jobs:
+            job_id = str(j.get("id") or uuid.uuid4())
+            if job_id in existing_ids:
+                skipped.append(job_id)
+                continue
+            title = j.get("title") or "未命名职位"
+            parsed = {
+                "id": job_id,
+                "title": title,
+                "company": j.get("company") or "",
+                "location": j.get("location") or "",
+                "salary_range": j.get("salary_range") or "",
+                "description": j.get("description") or "",
+                "source": "seed-demo",
+            }
+            file_path = f"job/{user_id}/{job_id}.md"
+            conn.execute(
+                """INSERT INTO documents
+                   (title, file_path, doc_type, file_size, metadata, status, created_at)
+                   VALUES (?, ?, 'job', ?, ?, 'processed', ?)""",
+                (
+                    title,
+                    file_path,
+                    len((j.get("description") or "").encode("utf-8")),
+                    json.dumps(
+                        {
+                            "job_id": job_id,
+                            "parsed": parsed,
+                            "markdown": j.get("description") or title,
+                            "user_id": user_id,
+                            "source": "seed-demo",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    _now_iso(),
+                ),
+            )
+            created.append(job_id)
+            existing_ids.add(job_id)
+
+    return jsonify(
+        created=created,
+        skipped=skipped,
+        total_created=len(created),
+        owner_user_id=user_id,
+    )
+
+
 # 注意：/recommend 必须注册在 /<job_id> 之前，否则 "recommend" 会
 # 被 Flask 当作 job_id 捕获，导致 404。
 @jobs_bp.route("/recommend", methods=["GET"])

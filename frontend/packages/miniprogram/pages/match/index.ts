@@ -198,4 +198,8 @@ Page({
   onBack() {
     wx.navigateBack()
   },
+
+  goToTrust() {
+    wx.navigateTo({ url: "/pages/trust/index" })
+  },
 })

@@ -222,7 +222,23 @@ export interface ResumeUploadResult {
   markdown: string;
   filename: string;
   resume_id: string | null;
+  /** "complete" when extraction succeeded, "partial" when only markdown was stored */
+  status?: "complete" | "partial";
   error?: string;
+  hint?: string;
+}
+
+/** Request body for POST /v1/resume/ingest (DemoPeter thin-ingest) */
+export interface ResumeIngestRequest {
+  markdown: string;
+  filename?: string;
+  extracted?: ParsedResume | null;
+}
+
+/** Response from POST /v1/resume/ingest */
+export interface ResumeIngestResponse {
+  resume_id: string;
+  status: "processed" | "stored";
 }
 
 // ── HarmonyOS 简历管理 ──
@@ -254,5 +270,7 @@ export interface ResumeAnalysisResponse {
   resume_id: string;
   title: string;
   extracted: ParsedResume;
+  /** Stored markdown snippet (powers analysis when extracted is empty) */
+  markdown?: string;
   analysis: ResumeAnalysisResult | null;
 }

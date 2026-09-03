@@ -75,8 +75,10 @@ export async function seedSeekerWithShareCode(
   };
 }
 
-export function uniqueHrEmail(suffix = String(Date.now())): string {
-  return `e2e-hr-${suffix}@test.local`;
+export function uniqueHrEmail(suffix?: string): string {
+  const random = Math.random().toString(36).slice(2, 8);
+  const fullSuffix = suffix ? `${suffix}-${random}` : `${Date.now()}-${random}`;
+  return `e2e-hr-${fullSuffix}@test.local`;
 }
 
 export async function registerAndGetToken(

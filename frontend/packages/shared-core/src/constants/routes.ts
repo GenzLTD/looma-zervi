@@ -70,10 +70,18 @@ export const API_ROUTES = {
   JOBS_SEARCH: "/v1/jobs/search",      // GET — 关键字搜索
   JOBS_RECOMMEND: "/v1/jobs/recommend",// GET — AI 推荐
   JOBS_DETAIL: "/v1/jobs",             // GET /:id — 拼接方式: `${JOBS_DETAIL}/${jobId}`
+  JOBS_SEED_DEMO: "/v1/jobs/seed-demo", // POST — 持久化演示职位（HR owner）
+  JOBS_APPLICATIONS: "/v1/jobs",       // GET `${JOBS_APPLICATIONS}/${jobId}/applications`
+
+  // Applications (seeker apply → HR visible)
+  APPLICATION: "/v1/application",      // POST create / GET list mine
+  // DELETE/GET one: `${APPLICATION}/${applicationId}`
+  // GET report: `${APPLICATION}/${applicationId}/report` — CONTRACT_APPLICATION_REPORT.md
 
   // Resume
   RESUME_PARSE: "/v1/resume/parse",
   RESUME_UPLOAD: "/v1/resume/upload",
+  RESUME_INGEST: "/v1/resume/ingest",
   RESUME_IMPROVE: "/v1/resume/improve",
   // Resume — HarmonyOS 简历管理
   RESUME_LIST: "/v1/resume/list",        // GET — 用户简历列表

@@ -113,6 +113,16 @@
         <view class="stat-label">总能量</view>
       </view>
     </view>
+
+    <!-- 信任档案入口 — 行为凭证可验证声明 -->
+    <view class="trust-entry-card" bindtap="goToTrust">
+      <view class="trust-entry-icon">🛡️</view>
+      <view class="trust-entry-info">
+        <view class="trust-entry-title">信任档案</view>
+        <view class="trust-entry-desc">行为凭证 · 可验证声明</view>
+      </view>
+      <view class="trust-entry-arrow">→</view>
+    </view>
   </view>
 
   <!-- Join Fleet Modal -->

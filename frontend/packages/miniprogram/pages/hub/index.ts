@@ -179,6 +179,10 @@ Page({
     }
   },
 
+  goToTrust() {
+    wx.navigateTo({ url: '/pages/trust/index' })
+  },
+
   // ── Fleet operations ──
 
   onTeamMissionTap() {
