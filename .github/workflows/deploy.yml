@@ -301,6 +301,16 @@ jobs:
           echo "=== Nginx reloaded ==="
           NGINX
 
+      - name: Write git_commit marker (main SHA, before container start)
+        run: |
+          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'MARKER'
+          set -euo pipefail
+          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
+          GIT_SHA="${{ github.sha }}"
+          echo "${GIT_SHA}" > "${DEPLOY_PATH}/backend/git_commit.txt"
+          echo "=== git_commit.txt: $(cat "${DEPLOY_PATH}/backend/git_commit.txt") ==="
+          MARKER
+
       - name: Build & restart Docker backend
         run: |
           $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'DOCKER'
@@ -370,16 +380,6 @@ jobs:
           done
           curl -sf http://127.0.0.1:5200/health || { ${COMPOSE} logs --tail 40 backend; exit 1; }
           DOCKER
-
-      - name: Write git_commit marker (main SHA)
-        run: |
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'MARKER'
-          set -euo pipefail
-          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          GIT_SHA="${{ github.sha }}"
-          echo "${GIT_SHA}" > "${DEPLOY_PATH}/backend/git_commit.txt"
-          echo "=== git_commit.txt: $(cat "${DEPLOY_PATH}/backend/git_commit.txt") ==="
-          MARKER
 
       - name: Import poetry into SQLite
         run: |
