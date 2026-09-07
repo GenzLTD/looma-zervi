@@ -38,6 +38,25 @@ def test_payment_plans_invalid_region_falls_back_to_cn(client):
     assert resp.get_json()["region"] == "CN"
 
 
+def test_payment_plans_deploy_alias_sg_maps_to_us(client):
+    """Vultr 海外部署位上报 SG（DEPLOY_REGION=SG）时按美元区计费，不得落 CNY/微信。"""
+    resp = client.get("/v1/payment/plans?region=SG")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["region"] == "US"
+    assert data["currency"] == "USD"
+    assert data["payment_provider"] == "stripe"
+
+
+def test_payment_plans_non_chinese_language_falls_back_us(client):
+    """非 zh/en 的 Accept-Language（如 de/fr/ja 浏览器）按海外美元区兜底，不落 CNY。"""
+    resp = client.get("/v1/payment/plans", headers={"Accept-Language": "de-DE,de;q=0.9"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["region"] == "US"
+    assert data["currency"] == "USD"
+
+
 @pytest.mark.parametrize("tier,expected_price", [("supporter", 9.9), ("pro", 29.9)])
 def test_payment_upgrade_includes_regional_plan(client, tier, expected_price):
     resp = client.post("/v1/auth/register", json={
