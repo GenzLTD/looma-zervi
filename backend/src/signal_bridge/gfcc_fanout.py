@@ -114,14 +114,14 @@ def _sign(body: bytes, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
-def post_gfcc_signal(envelope: dict, url: str, secret: str, max_retries: int = 3) -> dict:
-    """HMAC-sign and POST. Returns ``{ok, status?, skipped?, reason?}``. Never raises."""
+def _post_body(body: bytes, url: str, secret: str, max_retries: int = 3) -> dict:
+    """HMAC-sign and POST an already-serialized body (byte-identical replay keeps
+    X-Signature unchanged → remote nonce idempotency holds). Never raises."""
     if not secret:
         return {"ok": False, "skipped": True, "reason": "missing_gfcc_secret"}
     if not url:
         return {"ok": False, "skipped": True, "reason": "missing_gfcc_url"}
 
-    body = json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     signature = _sign(body, secret)
     headers = {
         "Content-Type": "application/json",
@@ -155,9 +155,15 @@ def post_gfcc_signal(envelope: dict, url: str, secret: str, max_retries: int = 3
     logger.warning(
         "gfcc-fanout exhausted retries (lastStatus=%s) nonce=%s",
         last_status,
-        envelope.get("nonce"),
+        None,
     )
     return {"ok": False, "status": last_status}
+
+
+def post_gfcc_signal(envelope: dict, url: str, secret: str, max_retries: int = 3) -> dict:
+    """HMAC-sign and POST an envelope dict. Returns ``{ok, status?, duplicate?}``."""
+    body = json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return _post_body(body, url, secret, max_retries=max_retries)
 
 
 def send_gfcc_personality_beacon(
@@ -177,3 +183,88 @@ def send_gfcc_personality_beacon(
         logger.info("gfcc-fanout skip personality_beacon: %s", mapped["skip"])
         return {"ok": False, "skipped": True, "reason": mapped["skip"]}
     return post_gfcc_signal(mapped["envelope"], url, secret)
+
+
+# ============================================================
+# R2: 出站事务性发件箱 + 可重放 DLQ(PlanetX 发送侧)
+# 契约语义: 信封 v1 不变 / nonce 幂等由对端保证 / 值班按 nonce 重发。
+# 关键设计: outbox/DLQ 存的是「已序列化 body 原文」→ 重放逐字节一致 → 签名不变。
+# ============================================================
+def _envelope_to_body(envelope: dict) -> str:
+    return json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+
+
+def deliver_outbox_pending(db, url: str, secret: str, max_items: int = 50, max_attempts: int = 3) -> dict:
+    """扫 pending outbox 逐条投递。
+    - ok(含 duplicate)→ mark_outbox_delivered
+    - 4xx 永久失败 → 迁 DLQ(permanent_4xx)
+    - 网络/5xx → attempts+1;超 max_attempts 迁 DLQ(network_error)
+    返回 {delivered, dlq, pending_left}。Never raises。"""
+    stats = {"delivered": 0, "dlq": 0, "pending_left": 0}
+    for row in db.list_outbox_pending(limit=max_items):
+        nonce = row["nonce"]
+        res = _post_body(row["body"].encode("utf-8"), url, secret, max_retries=2)
+        if res.get("ok"):
+            db.mark_outbox_delivered(nonce)
+            stats["delivered"] += 1
+        elif res.get("status") and 400 <= res["status"] < 500:
+            db.move_outbox_to_dlq(nonce, "permanent_4xx", f"HTTP {res['status']}")
+            stats["dlq"] += 1
+        else:
+            err = res.get("reason") or f"status={res.get('status')}"
+            db.bump_outbox_attempt(nonce, err)
+            if row["attempts"] + 1 >= max_attempts:
+                db.move_outbox_to_dlq(nonce, "network_error", err)
+                stats["dlq"] += 1
+    stats["pending_left"] = len(db.list_outbox_pending())
+    return stats
+
+
+def replay_dlq_entry(db, nonce: str, url: str, secret: str) -> dict:
+    """值班按 nonce 从 DLQ 重发(原 body 逐字节 → 签名不变)。
+    成功(含对端 duplicate)→ mark_dlq_replayed,审计留痕。Never raises。"""
+    entry = db.get_dlq_by_nonce(nonce)
+    if not entry:
+        return {"ok": False, "reason": "not_in_dlq", "nonce": nonce}
+    res = _post_body(entry["body"].encode("utf-8"), url, secret, max_retries=3)
+    if res.get("ok"):
+        db.mark_dlq_replayed(nonce)
+        return {"ok": True, "nonce": nonce, "duplicate": bool(res.get("duplicate"))}
+    return {
+        "ok": False,
+        "nonce": nonce,
+        "status": res.get("status"),
+        "reason": res.get("reason") or f"status={res.get('status')}",
+    }
+
+
+def send_gfcc_personality_beacon_outboxed(
+    db,
+    email_hash,
+    personality_type,
+    traits,
+    score,
+    nonce,
+    timestamp=None,
+    url="",
+    secret="",
+):
+    """守契约出站: 先入 outbox(持久化)→ 立即尝试投递。
+    - 入箱成功即返回, 失败留在 pending/DLQ 由重放兜底 → 发送方不丢信号。
+    - skip(映射失败/hash 非法)→ 不落库(信封无效, 落库无意义)。
+    返回 {ok, skipped?, outbox_nonce?, delivered?, dlq?, pending?}。Never raises。"""
+    mapped = to_gfcc_personality_beacon_envelope(
+        email_hash, personality_type, traits, score, nonce, timestamp,
+    )
+    if "skip" in mapped:
+        logger.info("gfcc-fanout skip personality_beacon: %s", mapped["skip"])
+        return {"ok": False, "skipped": True, "reason": mapped["skip"]}
+    body = _envelope_to_body(mapped["envelope"])
+    db.enqueue_signal_outbox("personality_beacon", nonce, body)
+    deliver_outbox_pending(db, url, secret)
+    row = db.get_outbox_by_nonce(nonce)
+    if row and row["status"] == "delivered":
+        return {"ok": True, "outbox_nonce": nonce, "delivered": True}
+    if db.get_dlq_by_nonce(nonce):
+        return {"ok": False, "outbox_nonce": nonce, "dlq": True}
+    return {"ok": False, "outbox_nonce": nonce, "pending": True}

@@ -27,7 +27,7 @@ from flask import Blueprint, request, jsonify, current_app, g
 from src.api.auth.decorators import require_auth, optional_auth
 from src.agents.trust_agent import generate_attestations
 from src.timeline.events import record_mission_completed
-from src.signal_bridge.gfcc_fanout import send_gfcc_personality_beacon
+from src.signal_bridge.gfcc_fanout import send_gfcc_personality_beacon_outboxed
 import logging
 
 logger = logging.getLogger("looma.game_routes")
@@ -1181,7 +1181,8 @@ def _send_personality_beacon(db, user_id, personality_type, personality_detail):
         except Exception as e:
             logger.warning("personality_beacon: egress failed for user %s: %s", user_id, e)
 
-    gfcc = send_gfcc_personality_beacon(
+    gfcc = send_gfcc_personality_beacon_outboxed(
+        db=db,
         email_hash=email_hash,
         personality_type=personality_type,
         traits=traits,
@@ -1195,5 +1196,10 @@ def _send_personality_beacon(db, user_id, personality_type, personality_detail):
         logger.info("gfcc personality_beacon skip: %s", gfcc.get("reason"))
     elif gfcc.get("ok"):
         logger.info("gfcc personality_beacon sent for user %s", user_id)
+    elif gfcc.get("dlq"):
+        logger.warning(
+            "gfcc personality_beacon in DLQ for user %s (nonce=%s, 值班按 nonce 重放)",
+            user_id, gfcc.get("outbox_nonce"),
+        )
     else:
-        logger.warning("gfcc personality_beacon failed for user %s: %s", user_id, gfcc)
+        logger.warning("gfcc personality_beacon pending for user %s: %s", user_id, gfcc)

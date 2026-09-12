@@ -205,6 +205,42 @@ CREATE TABLE IF NOT EXISTS signal_ingest (
 );
 
 -- ============================================
+-- Signal bridge outbox (R2: 出站事务性发件箱 — PlanetX 发送侧)
+-- 同一 nonce 只能存在一行;body 为已序列化信封原文(重放时逐字节复用,
+-- 保证 X-Signature 不变 → 对端 nonce 幂等 → 不重复处理)。
+-- ============================================
+CREATE TABLE IF NOT EXISTS signal_outbox (
+    id              TEXT PRIMARY KEY,
+    nonce           TEXT NOT NULL UNIQUE,
+    signal_type     TEXT NOT NULL,                      -- personality_beacon | consensus_match | ...
+    body            TEXT NOT NULL,                      -- json.dumps(envelope, separators=(",", ":")) 原文
+    status          TEXT NOT NULL DEFAULT 'pending',    -- pending | delivered
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    created_at      TEXT DEFAULT (datetime('now')),
+    delivered_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_outbox_status ON signal_outbox(status, created_at);
+
+-- ============================================
+-- Signal bridge DLQ (R2: 可重放死信队列 — 值班按 nonce 重发)
+-- ============================================
+CREATE TABLE IF NOT EXISTS signal_dlq (
+    id              TEXT PRIMARY KEY,
+    nonce           TEXT NOT NULL UNIQUE,
+    signal_type     TEXT NOT NULL,
+    body            TEXT NOT NULL,
+    reason          TEXT NOT NULL,                      -- permanent_4xx | network_error
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    moved_at        TEXT DEFAULT (datetime('now')),
+    replayed_at     TEXT                                -- 值班重发成功时间
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_dlq_moved ON signal_dlq(moved_at);
+
+-- ============================================
 -- Enterprise: enterprises (szbenyx owns)
 -- ============================================
 CREATE TABLE IF NOT EXISTS enterprises (
@@ -1205,6 +1241,105 @@ class DatabaseManager:
             except sqlite3.IntegrityError:
                 return False
 
+    # ============================================
+    # Signal bridge outbox + DLQ (R2: 事务性发件箱 + 可重放死信)
+    # ============================================
+    def enqueue_signal_outbox(self, signal_type: str, nonce: str, body: str) -> bool:
+        """入箱(pending)。nonce 唯一,重复入箱返回 False(幂等)。"""
+        with self.get_conn() as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO signal_outbox (id, nonce, signal_type, body)
+                       VALUES (?, ?, ?, ?)""",
+                    (str(uuid.uuid4()), nonce, signal_type, body),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def get_outbox_by_nonce(self, nonce: str) -> dict | None:
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM signal_outbox WHERE nonce = ?", (nonce,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_outbox_pending(self, limit: int = 100) -> list[dict]:
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM signal_outbox
+                   WHERE status = 'pending' ORDER BY created_at LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_outbox_delivered(self, nonce: str) -> None:
+        with self.get_conn() as conn:
+            conn.execute(
+                """UPDATE signal_outbox
+                   SET status = 'delivered', delivered_at = datetime('now')
+                   WHERE nonce = ?""",
+                (nonce,),
+            )
+
+    def bump_outbox_attempt(self, nonce: str, error: str) -> None:
+        """网络失败:attempts+1 并记录 last_error,仍留 pending 等下次投递。"""
+        with self.get_conn() as conn:
+            conn.execute(
+                """UPDATE signal_outbox
+                   SET attempts = attempts + 1, last_error = ?
+                   WHERE nonce = ?""",
+                (error[:500], nonce),
+            )
+
+    def move_outbox_to_dlq(self, nonce: str, reason: str, error: str = "") -> bool:
+        """把一条 pending 从 outbox 迁入 DLQ(原 body 逐字节保留)。
+        outbox 状态置 'dlq'(终态之一,不再被 list_outbox_pending 扫描)。返回是否迁成。"""
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM signal_outbox WHERE nonce = ?", (nonce,)
+            ).fetchone()
+            if not row:
+                return False
+            try:
+                conn.execute(
+                    """INSERT INTO signal_dlq (id, nonce, signal_type, body, reason, attempts, last_error)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        str(uuid.uuid4()), row["nonce"], row["signal_type"], row["body"],
+                        reason, row["attempts"], (error or "")[:500],
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                # DLQ 已有同 nonce(重放中),保留
+                pass
+            conn.execute(
+                "UPDATE signal_outbox SET status = 'dlq' WHERE nonce = ?", (nonce,)
+            )
+            return True
+
+    def list_dlq(self, limit: int = 100) -> list[dict]:
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM signal_dlq ORDER BY moved_at LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_dlq_by_nonce(self, nonce: str) -> dict | None:
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM signal_dlq WHERE nonce = ?", (nonce,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def mark_dlq_replayed(self, nonce: str) -> None:
+        """重放成功:DLQ 标 replayed_at(不删行,留审计痕迹)。"""
+        with self.get_conn() as conn:
+            conn.execute(
+                "UPDATE signal_dlq SET replayed_at = datetime('now') WHERE nonce = ?",
+                (nonce,),
+            )
+
     def get_user_by_openid(self, openid: str):
         with self.get_conn() as conn:
             row = conn.execute("SELECT * FROM users WHERE wechat_openid = ?", (openid,)).fetchone()
@@ -1411,6 +1546,7 @@ class DatabaseManager:
                           SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
                           SUM(tokens_in) AS tin,
                           SUM(tokens_out) AS tout
+
                    FROM llm_usage
                    WHERE created_at >= datetime('now', ?)""",
                 (f"-{hours} hours",),
