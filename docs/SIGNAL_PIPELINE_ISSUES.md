@@ -11,9 +11,9 @@
 | T0 | `users.email_hash` 对齐 + `get_user_by_email_hash` | ✅ 2026-08-14 |
 | T1 | `POST /v1/game/signal-ingest`（HMAC + SQLite 幂等） | ✅ 2026-08-14 |
 | T3 | `personality_beacon` egress（profile-sync 触发） | ✅ 2026-08-14 |
-| T5 | 本地 mock 自测（链 A/B 双信封 200） | ✅ 2026-08-27 |
+| T5 | 本地 mock 自测（链 A/B 双信封 200）；2026-09-13 复核三态 stored / duplicate / unauthorized | ✅ 2026-08-27 |
 | T6 | 真联调（四态 + matched 写库） | ✅ 2026-08-14 |
-| R2 | 出站事务性发件箱 + 可重放 DLQ（`signal_outbox`/`signal_dlq`/`replay_dlq.py`/仿真闭环） | ✅ 2026-08-27 |
+| R2 | 出站事务性发件箱 + 可重放 DLQ（`signal_outbox`/`signal_dlq`/`replay_dlq.py`/仿真闭环）；**仅 PlanetX 侧**，DemoPPI 出站仍为 best-effort 重试 | ✅ 2026-08-27 |
 
 ## 指针
 
