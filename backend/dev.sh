@@ -155,6 +155,18 @@ mkdir -p data
 log_info "data/ 目录已就绪"
 
 # ============================================
+# Step 5.5: 清掉云端遗留的 git_commit 标记
+# ============================================
+# app.py._git_commit() 三级回退：GIT_COMMIT env → backend/git_commit.txt → git rev-parse。
+# git_commit.txt 是云端 rsync 部署时写入的产物（.gitignore 已忽略），本地若残留会顶掉真实
+# HEAD（出现过标记 5fee72e / 真实 HEAD 8968f2a 的漂移），让 check-consistency.sh 这类三端
+# 锚点核对拿到假值。本地运行一律清掉，回退到 git rev-parse。
+if [ -f "git_commit.txt" ]; then
+    log_warn "清掉云端遗留的 git_commit.txt（内容 $(cat git_commit.txt 2>/dev/null)）→ /health 改走 git rev-parse"
+    rm -f git_commit.txt || true
+fi
+
+# ============================================
 # Step 6: 环境变量与启动
 # ============================================
 # 设置开发模式（绕过微信登录验证）
@@ -193,6 +205,7 @@ log_info "  FLASK_ENV           = ${FLASK_ENV:-development}"
 log_info "  DATABASE_PATH       = $DATABASE_PATH"
 log_info "  POETRY_CHROMA_PATH  = $POETRY_CHROMA_PATH"
 log_info "  PG                  = $PG_HOST:$PG_PORT/$PG_DATABASE"
+log_info "  git_commit          = ${GIT_COMMIT:-$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 log_info "  访问地址: http://localhost:${FLASK_PORT:-5200}"
 log_info "============================================"
 echo ""

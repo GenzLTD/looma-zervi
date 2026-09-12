@@ -7,6 +7,7 @@
   - 网络失败 → 保留 pending,超限进 DLQ(network_error)
   - 重放:成功标 replayed / 失败仍留 DLQ / 不存在的 nonce 返回 not_in_dlq
   - send_gfcc_personality_beacon_outboxed:skip 不落库 / 正常入箱+投递
+  - 重试耗尽日志带出 nonce(丢失信号可定位)
 """
 from __future__ import annotations
 
@@ -85,7 +86,9 @@ class OutboxTest(unittest.TestCase):
         self.assertEqual(row["status"], "delivered")
         self.assertIsNotNone(row["delivered_at"])
         # 原 body 逐字节传递(签名不变的基石)
-        mock_post.assert_called_once_with(self.body.encode("utf-8"), URL, SECRET, max_retries=2)
+        mock_post.assert_called_once_with(
+            self.body.encode("utf-8"), URL, SECRET, max_retries=2, nonce="n1"
+        )
 
     # ---- 4xx 永久失败 → DLQ ----
     @patch("src.signal_bridge.gfcc_fanout._post_body")
@@ -130,7 +133,9 @@ class OutboxTest(unittest.TestCase):
         entry = self.db.get_dlq_by_nonce("n1")
         self.assertIsNotNone(entry["replayed_at"])
         # 重放也用原 body(逐字节 → 对端幂等)
-        mock_post.assert_called_once_with(self.body.encode("utf-8"), URL, SECRET, max_retries=3)
+        mock_post.assert_called_once_with(
+            self.body.encode("utf-8"), URL, SECRET, max_retries=3, nonce="n1"
+        )
 
     @patch("src.signal_bridge.gfcc_fanout._post_body")
     def test_replay_failure_keeps_in_dlq(self, mock_post):
@@ -181,6 +186,16 @@ class OutboxTest(unittest.TestCase):
         )
         self.assertTrue(res["skipped"])
         self.assertIsNone(self.db.get_outbox_by_nonce("nonce-skip-1"))
+
+    # ---- 重试耗尽日志必须带出 nonce ----
+    @patch("urllib.request.urlopen")
+    def test_exhausted_retries_logs_nonce(self, mock_urlopen):
+        # 丢失信号的定位线索只有 nonce；日志写 None 会让「按 nonce 重发」无从下手。
+        mock_urlopen.side_effect = OSError("connection refused")
+        self.db.enqueue_signal_outbox("personality_beacon", "n-lost", self.body)
+        with self.assertLogs("looma.gfcc_fanout", level="WARNING") as cm:
+            deliver_outbox_pending(self.db, URL, SECRET)
+        self.assertIn("nonce=n-lost", "\n".join(cm.output))
 
 
 if __name__ == "__main__":

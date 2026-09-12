@@ -114,9 +114,19 @@ def _sign(body: bytes, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
-def _post_body(body: bytes, url: str, secret: str, max_retries: int = 3) -> dict:
+def _post_body(
+    body: bytes,
+    url: str,
+    secret: str,
+    max_retries: int = 3,
+    nonce: str | None = None,
+) -> dict:
     """HMAC-sign and POST an already-serialized body (byte-identical replay keeps
-    X-Signature unchanged → remote nonce idempotency holds). Never raises."""
+    X-Signature unchanged → remote nonce idempotency holds). Never raises.
+
+    ``nonce`` 仅用于日志定位：信号丢失时它是值班唯一能拿到的线索（按 nonce 重发
+    是 R2 的运维前提）。发件箱与重放路径都能拿到，调用方须传。
+    """
     if not secret:
         return {"ok": False, "skipped": True, "reason": "missing_gfcc_secret"}
     if not url:
@@ -147,7 +157,9 @@ def _post_body(body: bytes, url: str, secret: str, max_retries: int = 3) -> dict
         except urllib.error.HTTPError as exc:
             last_status = exc.code
             if 400 <= exc.code < 500:
-                logger.warning("gfcc-fanout permanent failure HTTP %s", exc.code)
+                logger.warning(
+                    "gfcc-fanout permanent failure HTTP %s nonce=%s", exc.code, nonce
+                )
                 return {"ok": False, "status": exc.code}
         except Exception:
             last_status = 0
@@ -155,7 +167,7 @@ def _post_body(body: bytes, url: str, secret: str, max_retries: int = 3) -> dict
     logger.warning(
         "gfcc-fanout exhausted retries (lastStatus=%s) nonce=%s",
         last_status,
-        None,
+        nonce,
     )
     return {"ok": False, "status": last_status}
 
@@ -163,7 +175,9 @@ def _post_body(body: bytes, url: str, secret: str, max_retries: int = 3) -> dict
 def post_gfcc_signal(envelope: dict, url: str, secret: str, max_retries: int = 3) -> dict:
     """HMAC-sign and POST an envelope dict. Returns ``{ok, status?, duplicate?}``."""
     body = json.dumps(envelope, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    return _post_body(body, url, secret, max_retries=max_retries)
+    return _post_body(
+        body, url, secret, max_retries=max_retries, nonce=envelope.get("nonce")
+    )
 
 
 def send_gfcc_personality_beacon(
@@ -203,7 +217,9 @@ def deliver_outbox_pending(db, url: str, secret: str, max_items: int = 50, max_a
     stats = {"delivered": 0, "dlq": 0, "pending_left": 0}
     for row in db.list_outbox_pending(limit=max_items):
         nonce = row["nonce"]
-        res = _post_body(row["body"].encode("utf-8"), url, secret, max_retries=2)
+        res = _post_body(
+            row["body"].encode("utf-8"), url, secret, max_retries=2, nonce=nonce
+        )
         if res.get("ok"):
             db.mark_outbox_delivered(nonce)
             stats["delivered"] += 1
@@ -226,7 +242,9 @@ def replay_dlq_entry(db, nonce: str, url: str, secret: str) -> dict:
     entry = db.get_dlq_by_nonce(nonce)
     if not entry:
         return {"ok": False, "reason": "not_in_dlq", "nonce": nonce}
-    res = _post_body(entry["body"].encode("utf-8"), url, secret, max_retries=3)
+    res = _post_body(
+        entry["body"].encode("utf-8"), url, secret, max_retries=3, nonce=nonce
+    )
     if res.get("ok"):
         db.mark_dlq_replayed(nonce)
         return {"ok": True, "nonce": nonce, "duplicate": bool(res.get("duplicate"))}
