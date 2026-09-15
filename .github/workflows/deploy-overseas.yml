@@ -397,7 +397,7 @@ jobs:
           $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'DOCKER'
           set -euo pipefail
           DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          COMPOSE="docker compose -f ${DEPLOY_PATH}/docker/docker-compose.yml -p looma-zervi"
+          COMPOSE="docker compose --env-file ${DEPLOY_PATH}/backend/.env -f ${DEPLOY_PATH}/docker/docker-compose.yml -p looma-zervi"
           COMPOSE_FILE="${DEPLOY_PATH}/docker/docker-compose.yml"
 
           for proj in looma-zervi docker; do

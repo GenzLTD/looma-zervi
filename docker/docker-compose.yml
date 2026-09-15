@@ -21,9 +21,9 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-}
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
-      - STRIPE_CURRENCY=${STRIPE_CURRENCY:-USD}
+      # Stripe keys live in backend/.env (env_file). Do NOT list them under
+      # environment: — compose interpolation of empty host vars would override
+      # env_file with blank and silently disable overseas checkout.
       - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID:-}
       - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET:-}
       - PAYPAL_MODE=${PAYPAL_MODE:-sandbox}
