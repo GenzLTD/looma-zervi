@@ -11,6 +11,21 @@
 
 set -euo pipefail
 
+# ============================================================
+# 本分支已归档，禁止用于部署。
+#
+# release/overseas 停在 2026-09-03 (2dbd67a)，与 main 已 diverged
+# (main 超前 7 / 落后 5，约 28 个文件不同)。继续执行会把现网
+# /opt/looma-zervi 切回旧代码，并废弃微信支付区域闸门 (region != CN → 403)。
+#
+# 现网实际运行的是 main 谱系。请改用 main 分支的脚本：
+#   curl -fsSL https://gitee.com/szbenyx/looma-zervi/raw/main/scripts/deploy-overseas.sh | bash
+# ============================================================
+echo "[FATAL] release/overseas 已归档，禁止用于部署。" >&2
+echo "[FATAL] 继续执行会把现网 /opt/looma-zervi 切回 2026-09-03 的 2dbd67a，并废弃微信支付区域闸门。" >&2
+echo "[FATAL] 请改用 main： https://gitee.com/szbenyx/looma-zervi/raw/main/scripts/deploy-overseas.sh" >&2
+exit 1
+
 DOMAIN="genz.ltd"
 API_SUBDOMAIN="api.genz.ltd"
 TSPACE_SUBDOMAIN="tspace.genz.ltd"
