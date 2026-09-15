@@ -16,10 +16,10 @@
       "area": "海外支付",
       "title": "G3-M3 Stripe Checkout 支付闭环未 E2E 验证",
       "priority": "P1",
-      "status": "open",
-      "owner": "",
+      "status": "done",
+      "owner": "win",
       "ref": "MULTI_CLIENT_CX_STRATEGY.md G3",
-      "notes": ""
+      "notes": "2026-09-15 tspace test: checkout cs_test_ → webhook /v1/payment/webhook/stripe → user tier=supporter, status=active. Webhook URL: https://tspace.genz.ltd/v1/payment/webhook/stripe"
     },
     {
       "id": "google-oauth-client-id",
