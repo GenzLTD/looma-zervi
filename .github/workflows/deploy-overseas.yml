@@ -217,8 +217,8 @@ jobs:
               "STRIPE_SECRET_KEY=${{ secrets.ENV_STRIPE_SECRET_KEY }}" \
               "STRIPE_WEBHOOK_SECRET=${{ secrets.ENV_STRIPE_WEBHOOK_SECRET }}" \
               'STRIPE_CURRENCY=USD' \
-              "STRIPE_SUCCESS_URL=https://\${DOMAIN}/pricing?status=success" \
-              "STRIPE_CANCEL_URL=https://\${DOMAIN}/pricing?status=cancel" \
+              "STRIPE_SUCCESS_URL=https://\${TSPACE_HOST}/pricing?status=success" \
+              "STRIPE_CANCEL_URL=https://\${TSPACE_HOST}/pricing?status=cancel" \
               'WECHAT_DEV_MODE=true' \
               > "\${ENV_FILE}"
           else
@@ -266,8 +266,8 @@ jobs:
           set_kv GOOGLE_CLIENT_SECRET "${{ secrets.ENV_GOOGLE_CLIENT_SECRET }}"
           set_kv STRIPE_SECRET_KEY "${{ secrets.ENV_STRIPE_SECRET_KEY }}"
           set_kv STRIPE_WEBHOOK_SECRET "${{ secrets.ENV_STRIPE_WEBHOOK_SECRET }}"
-          set_kv STRIPE_SUCCESS_URL "https://\${DOMAIN}/pricing?status=success"
-          set_kv STRIPE_CANCEL_URL "https://\${DOMAIN}/pricing?status=cancel"
+          set_kv STRIPE_SUCCESS_URL "https://\${TSPACE_HOST}/pricing?status=success"
+          set_kv STRIPE_CANCEL_URL "https://\${TSPACE_HOST}/pricing?status=cancel"
 
           if ! command -v docker >/dev/null 2>&1; then
             echo "Docker not installed. Run scripts/deploy-overseas.sh once on the VPS first." >&2
