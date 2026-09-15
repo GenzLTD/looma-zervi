@@ -12,7 +12,7 @@ DEFAULT_REGION = "CN"
 SUPPORTED_REGIONS = frozenset({"CN", "US"})
 # 部署位别名：契约只建模 CN/US 两区，但海外部署位上报 SG（Vultr 新加坡）。
 # 显式传入的部署位码映射到对应美元计费区；其余未识别码仍回 DEFAULT_REGION。
-DEPLOY_ALIASES: dict[str, str] = {"SG": "US"}
+DEPLOY_ALIASES: dict[str, str] = {"SG": "US", "US": "US"}
 
 
 @lru_cache(maxsize=1)
@@ -33,11 +33,23 @@ def normalize_region(region: str | None) -> str:
 def _deploy_region_default() -> str | None:
     """Billing region implied by the deploy site, or None on CN/on-prem.
 
-    Overseas deploys bill in USD no matter what language the caller speaks;
-    anything that wants to pay in CNY must ask for ``region=CN`` explicitly.
+    Overseas deploys bill in USD no matter what language the caller speaks.
+    Explicit ``region=CN`` is rejected at the HTTP layer on those deploys
+    (see payment_routes._reject_explicit_cn_on_overseas); this helper only
+    answers "what does the site settle to when the caller omits region".
     """
     code = os.getenv("DEPLOY_REGION", "").strip().upper()
     return DEPLOY_ALIASES.get(code)
+
+
+def is_overseas_billing_deploy() -> bool:
+    """True on the USD/Stripe site (DEPLOY_REGION=SG or US).
+
+    Unset and CN (and any other unmapped code) are the China/on-prem site and
+    must keep accepting CN checkout. Do not treat "resolved region == CN" as
+    overseas — that would confuse explicit CN with a CN settlement fallback.
+    """
+    return _deploy_region_default() == "US"
 
 
 def resolve_region(region: str | None = None, accept_language: str | None = None) -> str:

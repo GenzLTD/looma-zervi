@@ -26,7 +26,7 @@ import pytest
 
 from src.api.routes import payment_routes
 from src.api.routes.payment_routes import _region_from_request
-from src.payment.plans import resolve_region
+from src.payment.plans import is_overseas_billing_deploy, resolve_region
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PRICING_TSX = (
@@ -71,8 +71,13 @@ class TestOverseasDeployBillsUsd:
         deploy_region("SG")
         assert resolve_region(None, "en-US,en;q=0.9") == "US"
 
-    def test_explicit_cn_still_wins_over_deploy_site(self, deploy_region):
-        """A client that really wants WeChat/CNY can still ask for it."""
+    def test_explicit_cn_is_still_visible_to_the_resolver(self, deploy_region):
+        """Resolver still reports CN so the HTTP gate can tell explicit from fallback.
+
+        Overseas HTTP handlers then 403 that explicit CN (see
+        TestOverseasHttpRejectsExplicitCn). Do not fold CN back to US here —
+        that would hide the caller's intent and make the gate untestable.
+        """
         deploy_region("SG")
         assert resolve_region("CN", "en-US,en;q=0.9") == "CN"
 
@@ -165,3 +170,138 @@ class TestCheckoutHonoursRegionSentInBody:
             f"{view}() must read the region via _region_from_request(); reading "
             "request.args directly drops the region sent in the POST body"
         )
+
+
+def _register(client, email):
+    resp = client.post(
+        "/v1/auth/register",
+        json={"email": email, "password": "secret123", "name": "RegionGate"},
+    )
+    assert resp.status_code == 201, resp.get_data(as_text=True)
+    return {"Authorization": f"Bearer {resp.get_json()['access_token']}"}
+
+
+class TestOverseasSiteDetection:
+    def test_sg_and_us_are_overseas(self, deploy_region):
+        deploy_region("SG")
+        assert is_overseas_billing_deploy() is True
+        deploy_region("US")
+        assert is_overseas_billing_deploy() is True
+
+    def test_cn_and_unset_are_not_overseas(self, deploy_region):
+        deploy_region("CN")
+        assert is_overseas_billing_deploy() is False
+        deploy_region(None)
+        assert is_overseas_billing_deploy() is False
+
+
+class TestOverseasHttpRejectsExplicitCn:
+    """HTTP gate: overseas + explicit CN → 403. Must setenv SG (not rely on CI)."""
+
+    def test_plans_cn_query_is_403_on_us_deploy_too(self, client, deploy_region):
+        deploy_region("US")
+        resp = client.get("/v1/payment/plans?region=CN")
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "region_not_supported"
+
+    def test_plans_cn_query_is_403_on_sg(self, client, deploy_region):
+        deploy_region("SG")
+        resp = client.get("/v1/payment/plans?region=CN")
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "region_not_supported"
+
+    def test_providers_cn_query_is_403_on_sg(self, client, deploy_region):
+        deploy_region("SG")
+        resp = client.get("/v1/payment/providers?region=CN")
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "region_not_supported"
+
+    def test_plans_omitted_zh_header_still_us_on_sg(self, client, deploy_region):
+        """v3.1.15 must not be eaten: language is not an explicit CN input."""
+        deploy_region("SG")
+        resp = client.get(
+            "/v1/payment/plans",
+            headers={"Accept-Language": "zh-CN,zh;q=0.9"},
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["region"] == "US"
+        assert body["currency"] == "USD"
+
+    def test_checkout_body_cn_is_403_on_sg(self, client, deploy_region):
+        deploy_region("SG")
+        auth = _register(client, "sg_explicit_cn_co@test.com")
+        resp = client.post(
+            "/v1/payment/checkout",
+            json={"provider": "stripe", "tier": "supporter", "region": "CN"},
+            headers=auth,
+        )
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "region_not_supported"
+
+    def test_stripe_alias_query_cn_is_403_on_sg(self, client, deploy_region):
+        deploy_region("SG")
+        auth = _register(client, "sg_explicit_cn_alias@test.com")
+        resp = client.post(
+            "/v1/payment/stripe/checkout?region=CN",
+            json={"tier": "supporter"},
+            headers=auth,
+        )
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "region_not_supported"
+
+    def test_wechat_explicit_cn_is_403_on_sg(self, client, deploy_region):
+        deploy_region("SG")
+        auth = _register(client, "sg_explicit_cn_wx@test.com")
+        resp = client.post(
+            "/v1/payment/wechat/order?region=CN",
+            json={"tier": "supporter", "trade_type": "NATIVE"},
+            headers=auth,
+        )
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "region_not_supported"
+
+    @pytest.mark.parametrize(
+        "view",
+        [
+            "list_plans",
+            "list_providers",
+            "create_checkout",
+            "create_stripe_checkout",
+            "create_wechat_order",
+        ],
+    )
+    def test_views_call_overseas_cn_gate(self, view):
+        fn = getattr(payment_routes, view, None)
+        assert fn is not None, f"{view}() missing"
+        assert "_reject_explicit_cn_on_overseas()" in inspect.getsource(fn)
+
+
+class TestCnDeployStillAcceptsExplicitCn:
+    """Reverse: the gate must not fire on CN / unset. Plans 200 is the clean proof."""
+
+    def test_plans_cn_query_is_200_on_cn_deploy(self, client, deploy_region):
+        deploy_region("CN")
+        resp = client.get("/v1/payment/plans?region=CN")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["region"] == "CN"
+        assert body["currency"] == "CNY"
+
+    def test_plans_cn_query_is_200_when_deploy_unset(self, client, deploy_region):
+        deploy_region(None)
+        resp = client.get("/v1/payment/plans?region=CN")
+        assert resp.status_code == 200
+        assert resp.get_json()["region"] == "CN"
+
+    def test_checkout_body_cn_is_not_region_403_on_cn_deploy(self, client, deploy_region):
+        """CN site may stub-400, but must not overseas-403."""
+        deploy_region("CN")
+        auth = _register(client, "cn_explicit_cn_co@test.com")
+        resp = client.post(
+            "/v1/payment/checkout",
+            json={"provider": "stripe", "tier": "supporter", "region": "CN"},
+            headers=auth,
+        )
+        assert resp.status_code != 403
+        assert resp.get_json().get("error") != "region_not_supported"

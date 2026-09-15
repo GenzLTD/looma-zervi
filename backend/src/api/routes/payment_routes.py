@@ -28,7 +28,13 @@ from src.analytics.events import (
     EVENT_TRIAL_STARTED,
     EVENT_TRIAL_FAILED,
 )
-from src.payment.plans import get_plan_for_tier, list_plans_for_region, resolve_region
+from src.payment.plans import (
+    get_plan_for_tier,
+    is_overseas_billing_deploy,
+    list_plans_for_region,
+    normalize_region,
+    resolve_region,
+)
 from src.payment.wechat_pay import (
     create_native_order,
     generate_out_trade_no,
@@ -92,9 +98,33 @@ def _region_from_request():
     return None
 
 
+_OVERSEAS_CN_MESSAGE = (
+    "CN billing is not sold on this overseas site. "
+    "Use the China origin for CNY/WeChat, or omit region for USD/Stripe."
+)
+
+
+def _reject_explicit_cn_on_overseas():
+    """403 when the overseas deploy is asked to sell a CN plan.
+
+    Trigger is *explicit* CN input (query or JSON body), not "settlement
+    fell to CN". DEPLOY_REGION=SG with no region + zh-CN still bills US
+    (v3.1.15) and must not hit this gate. CN deploys (and unset) skip it.
+    """
+    requested = _region_from_request()
+    if not requested or not is_overseas_billing_deploy():
+        return None
+    if normalize_region(requested) != "CN":
+        return None
+    return jsonify(error="region_not_supported", message=_OVERSEAS_CN_MESSAGE), 403
+
+
 @payment_bp.route("/payment/plans", methods=["GET"])
 def list_plans():
     """List pricing plans for a billing region (?region=CN|US)."""
+    blocked = _reject_explicit_cn_on_overseas()
+    if blocked:
+        return blocked
     region = resolve_region(
         request.args.get("region"),
         request.headers.get("Accept-Language"),
@@ -243,6 +273,10 @@ def create_wechat_order():
         { "out_trade_no": "...", "prepay_id": "...", "qr_code_url": "...",
           "jsapi_params": { "appId": "...", "timeStamp": "...", ... } }
     """
+    blocked = _reject_explicit_cn_on_overseas()
+    if blocked:
+        return blocked
+
     if _is_stub_mode():
         return jsonify(
             error="stub_mode",
@@ -499,6 +533,9 @@ def list_providers():
     Returns a list of providers that have valid credentials, allowing
     the frontend to show only available payment options.
     """
+    blocked = _reject_explicit_cn_on_overseas()
+    if blocked:
+        return blocked
     region = resolve_region(
         request.args.get("region"),
         request.headers.get("Accept-Language"),
@@ -540,6 +577,10 @@ def create_checkout():
             "tier": "supporter"
         }
     """
+    blocked = _reject_explicit_cn_on_overseas()
+    if blocked:
+        return blocked
+
     if _is_stub_mode():
         return jsonify(
             error="stub_mode",
@@ -732,6 +773,10 @@ def create_stripe_checkout():
         { "session_id": "cs_test_xxx", "session_url": "https://checkout.stripe.com/...",
           "out_trade_no": "LOOMA..." }
     """
+    blocked = _reject_explicit_cn_on_overseas()
+    if blocked:
+        return blocked
+
     if _is_stub_mode():
         return jsonify(
             error="stub_mode",
