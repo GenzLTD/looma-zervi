@@ -220,6 +220,7 @@ jobs:
               "STRIPE_SUCCESS_URL=https://\${TSPACE_HOST}/pricing?status=success" \
               "STRIPE_CANCEL_URL=https://\${TSPACE_HOST}/pricing?status=cancel" \
               'WECHAT_DEV_MODE=false' \
+              'PAYMENT_STUB_MODE=false' \
               > "\${ENV_FILE}"
           else
             echo "=== .env exists, normalize overseas keys ==="
@@ -244,6 +245,7 @@ jobs:
 
           set_kv FLASK_PORT 5200
           set_kv WECHAT_DEV_MODE false
+          set_kv PAYMENT_STUB_MODE false
           set_kv DATABASE_PATH /app/data/looma.db
           set_kv POETRY_CHROMA_PATH /app/poetry_data
           set_kv CHROMA_MODE remote
