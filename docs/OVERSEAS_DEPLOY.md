@@ -41,8 +41,8 @@ Static files live in `frontend/packages/genz-web/`. Deploy copies them to `/var/
 | Google OAuth | Redirect URI | `https://api.genz.ltd/v1/auth/google/callback` |
 | Stripe | Business website | `https://genz.ltd` |
 | Stripe | Webhook endpoint | `https://api.genz.ltd/v1/payment/stripe/webhook` |
-| Stripe | Success URL | `https://genz.ltd/pricing?status=success` |
-| Stripe | Cancel URL | `https://genz.ltd/pricing?status=cancel` |
+| Stripe | Success URL | `https://tspace.genz.ltd/pricing?status=success` |
+| Stripe | Cancel URL | `https://tspace.genz.ltd/pricing?status=cancel` |
 
 ## CORS
 

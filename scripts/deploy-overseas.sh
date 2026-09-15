@@ -105,8 +105,8 @@ if ! grep -q "STRIPE_SUCCESS_URL" backend/.env; then
     {
         echo ""
         echo "# Payment redirect URLs (auto-set by deploy script)"
-        echo "STRIPE_SUCCESS_URL=https://${DOMAIN}/pricing?status=success"
-        echo "STRIPE_CANCEL_URL=https://${DOMAIN}/pricing?status=cancel"
+        echo "STRIPE_SUCCESS_URL=https://${TSPACE_SUBDOMAIN}/pricing?status=success"
+        echo "STRIPE_CANCEL_URL=https://${TSPACE_SUBDOMAIN}/pricing?status=cancel"
     } >> backend/.env
 fi
 

@@ -231,6 +231,19 @@ def create_wechat_order():
             message="Payment stub mode is enabled. Use POST /v1/payment/upgrade for instant tier change, or set PAYMENT_STUB_MODE=false to enable real payments.",
         ), 400
 
+    # 区域闸门：微信支付只服务 CN 计费区。海外站（tspace.genz.ltd / region=US）
+    # 一律拒绝下单——即便海外环境被误填微信凭证，也不得在海外链路收微信款。
+    # 海外第一笔变现只走 US/Stripe；微信仍归企业 .com.cn 域。
+    region = resolve_region(
+        request.args.get("region"),
+        request.headers.get("Accept-Language"),
+    )
+    if region != "CN":
+        return jsonify(
+            error="region_not_supported",
+            message="WeChat Pay is only available for region=CN. Use Stripe checkout for overseas billing.",
+        ), 403
+
     data = request.get_json(silent=True) or {}
     new_tier = data.get("tier")
     trade_type = data.get("trade_type", "NATIVE").upper()
@@ -264,10 +277,6 @@ def create_wechat_order():
             message="JSAPI payment requires a WeChat openid. Please ensure the user has logged in via WeChat miniprogram.",
         ), 400
 
-    region = resolve_region(
-        request.args.get("region"),
-        request.headers.get("Accept-Language"),
-    )
     plan = get_plan_for_tier(new_tier, region)
 
     # 从配置读取 WeChat Pay 凭证
