@@ -179,7 +179,7 @@ jobs:
           DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
           DOMAIN="${{ env.OVERSEAS_DOMAIN }}"
           API_HOST="${{ env.OVERSEAS_API_HOST }}"
-          TSPACE_HOST="tspace.${DOMAIN}"
+          TSPACE_HOST="tspace.\${DOMAIN}"
 
           echo "=== Bootstrap overseas server (DEPLOY_PATH=\${DEPLOY_PATH}) ==="
           mkdir -p "\${DEPLOY_PATH}" /var/www/genz-web /var/www/saas/dist "\${DEPLOY_PATH}/data" "\${DEPLOY_PATH}/logs" "\${DEPLOY_PATH}/data/chroma_models"
