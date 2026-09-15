@@ -35,8 +35,12 @@ CHECKOUT_TYPES = (
 
 
 @pytest.fixture
-def deploy_region(monkeypatch):
-    """Set DEPLOY_REGION, including unsetting it, with automatic cleanup."""
+def deploy_region(_billing_region_baseline, monkeypatch):
+    """Set DEPLOY_REGION, including unsetting it, with automatic cleanup.
+
+    Depends on conftest's autouse baseline so ours is applied second and the
+    value set here wins, instead of relying on fixture instantiation order.
+    """
 
     def _set(code: str | None) -> None:
         if code is None:

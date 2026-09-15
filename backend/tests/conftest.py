@@ -7,6 +7,24 @@ import pytest
 from src.app import create_app
 
 
+@pytest.fixture(autouse=True)
+def _billing_region_baseline(monkeypatch):
+    """Pin the billing region to CN for every test.
+
+    Most payment tests assume CN: the WeChat flows, and the region gate's
+    passthrough expectations. They used to get that for free because nothing
+    read DEPLOY_REGION. Once billing resolution started honouring it, CI set it
+    to SG (deploy-overseas.yml) and 14 of those tests broke — the same suite is
+    green locally where DEPLOY_REGION is unset.
+
+    So the environment no longer decides. This fixture does, and tests that
+    care about overseas semantics override it explicitly — see
+    tests/test_billing_region.py, whose deploy_region fixture depends on this
+    one to guarantee ordering.
+    """
+    monkeypatch.setenv("DEPLOY_REGION", "CN")
+
+
 @pytest.fixture
 def app():
     fd, path = tempfile.mkstemp(suffix=".db")
