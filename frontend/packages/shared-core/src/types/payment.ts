@@ -117,6 +117,12 @@ export interface CheckoutRequest {
   mode?: "payment" | "subscription";
   success_url?: string;
   cancel_url?: string;
+  /**
+   * 账单区。省略时后端按 Accept-Language 推断 — 不可靠：
+   * zh 浏览器会落到 CN 套餐，其 ¥9.9 会被按 USD 扣（约页面展示价 $1.99 的 5 倍）。
+   * 海外站（SG）务必显式传 US。
+   */
+  region?: PaymentRegion;
 }
 
 /** POST /v1/payment/checkout 响应 */

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -29,10 +30,26 @@ def normalize_region(region: str | None) -> str:
     return DEPLOY_ALIASES.get(code, DEFAULT_REGION)
 
 
+def _deploy_region_default() -> str | None:
+    """Billing region implied by the deploy site, or None on CN/on-prem.
+
+    Overseas deploys bill in USD no matter what language the caller speaks;
+    anything that wants to pay in CNY must ask for ``region=CN`` explicitly.
+    """
+    code = os.getenv("DEPLOY_REGION", "").strip().upper()
+    return DEPLOY_ALIASES.get(code)
+
+
 def resolve_region(region: str | None = None, accept_language: str | None = None) -> str:
-    """Pick billing region from explicit query param or Accept-Language hint."""
+    """Pick billing region: explicit param > deploy site > Accept-Language."""
     if region:
         return normalize_region(region)
+    # The deploy site decides billing currency BEFORE Accept-Language gets a say.
+    # Otherwise a zh-CN browser on the SG site falls to the CN plan and gets its
+    # ¥9.9 charged as $9.9 — ~5x the price the page advertises ($1.99).
+    deploy_default = _deploy_region_default()
+    if deploy_default:
+        return deploy_default
     if accept_language:
         lowered = accept_language.lower()
         if lowered.startswith("zh"):

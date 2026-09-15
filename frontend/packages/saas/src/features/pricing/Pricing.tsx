@@ -185,6 +185,9 @@ export default function Pricing() {
           provider: "stripe",
           tier,
           mode: "payment",
+          // 账单区必须显式声明：省略时后端用 Accept-Language 推断，
+          // zh 浏览器会落到 CN 套餐并把 ¥9.9 按 USD 扣掉。
+          region: BILLING_REGION,
           success_url: `${window.location.origin}/pricing?status=success`,
           cancel_url: `${window.location.origin}/pricing?status=cancel`,
         });
