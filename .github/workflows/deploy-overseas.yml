@@ -439,6 +439,11 @@ jobs:
             echo "${HASH}" > "${MARKER}"
           fi
 
+          # _git_commit 为进程级缓存：marker 必须在容器启动前写好
+          echo "=== Write git_commit marker before container start (${{ github.sha }}) ==="
+          echo "${{ github.sha }}" > "${DEPLOY_PATH}/backend/git_commit.txt"
+          cat "${DEPLOY_PATH}/backend/git_commit.txt"
+
           ${COMPOSE} up -d --remove-orphans --force-recreate --no-build backend redis chromadb
 
           for i in $(seq 1 30); do
