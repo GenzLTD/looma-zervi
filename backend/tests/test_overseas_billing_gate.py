@@ -134,6 +134,44 @@ class TestStripeCheckoutStub:
             )
             assert resp.status_code == 401
 
+    def test_stripe_alias_checkout_maps_provider_fields_when_stub_off(self):
+        """Deprecated /v1/payment/stripe/checkout hid AttributeError behind stub.
+
+        CheckoutResult has provider_checkout_id / checkout_url, not session_id /
+        session_url. Mock the provider so this fails without hitting Stripe.
+        """
+        from unittest.mock import patch
+
+        from src.payment.providers.base import CheckoutResult
+
+        fake = CheckoutResult(
+            provider="stripe",
+            checkout_url="https://checkout.stripe.com/c/pay/cs_test_mock",
+            out_trade_no="LOOMAFAKE",
+            provider_checkout_id="cs_test_mock",
+        )
+        os.environ["STRIPE_SECRET_KEY"] = "sk_test_mock_not_real"
+        try:
+            with _client("false") as c:
+                token = _register(c, "stripe_alias_ok@test.com")
+                with patch(
+                    "src.api.routes.payment_routes.stripe_create_checkout",
+                    return_value=fake,
+                ):
+                    resp = c.post(
+                        "/v1/payment/stripe/checkout",
+                        json={"tier": "supporter", "mode": "payment"},
+                        headers=_auth(token),
+                    )
+        finally:
+            os.environ.pop("STRIPE_SECRET_KEY", None)
+
+        body = resp.get_json()
+        assert resp.status_code == 201, body
+        assert body["session_id"] == "cs_test_mock"
+        assert body["session_url"] == "https://checkout.stripe.com/c/pay/cs_test_mock"
+        assert body["tier"] == "supporter"
+
 
 class TestOverseasWorkflowContract:
     def test_workflow_stripe_env_keeps_tspace_host_intent(self):

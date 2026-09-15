@@ -789,7 +789,7 @@ def create_stripe_checkout():
         out_trade_no=out_trade_no,
         metadata_json={
             "provider": "stripe",
-            "stripe_session_id": result.session_id,
+            "stripe_session_id": result.provider_checkout_id,
             "mode": mode,
             "region": region,
         },
@@ -797,8 +797,8 @@ def create_stripe_checkout():
 
     return jsonify(
         order_id=order["id"],
-        session_id=result.session_id,
-        session_url=result.session_url,
+        session_id=result.provider_checkout_id,
+        session_url=result.checkout_url,
         out_trade_no=out_trade_no,
         amount=plan["price_monthly"],
         currency="USD",
