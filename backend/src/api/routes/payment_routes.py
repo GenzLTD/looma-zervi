@@ -74,6 +74,24 @@ def _is_stub_mode():
     return current_app.config.get("PAYMENT_STUB_MODE", True)
 
 
+def _region_from_request():
+    """Read the requested billing region: ?region= wins, then the JSON body.
+
+    Checkout endpoints used to read *only* the query string, but the TypeScript
+    SDK sends ``CheckoutRequest`` as a POST body — so an explicit choice made by
+    the client was silently discarded and the price depended entirely on
+    server-side config. Confirmed live on the SG deploy: a request carrying
+    ``{"region": "CN"}`` still got billed on the US plan.
+    """
+    region = request.args.get("region")
+    if region:
+        return region
+    body = request.get_json(silent=True)
+    if isinstance(body, dict):
+        return body.get("region")
+    return None
+
+
 @payment_bp.route("/payment/plans", methods=["GET"])
 def list_plans():
     """List pricing plans for a billing region (?region=CN|US)."""
@@ -563,7 +581,7 @@ def create_checkout():
         ), 503
 
     region = resolve_region(
-        request.args.get("region"),
+        _region_from_request(),
         request.headers.get("Accept-Language"),
     )
     plan = get_plan_for_tier(new_tier, region)
@@ -745,7 +763,7 @@ def create_stripe_checkout():
         ), 503
 
     region = resolve_region(
-        request.args.get("region"),
+        _region_from_request(),
         request.headers.get("Accept-Language"),
     )
     plan = get_plan_for_tier(new_tier, region)

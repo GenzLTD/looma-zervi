@@ -19,10 +19,13 @@ function) plus static locks on the two call sites. They do **not** hit Stripe.
 """
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
 
+from src.api.routes import payment_routes
+from src.api.routes.payment_routes import _region_from_request
 from src.payment.plans import resolve_region
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -125,3 +128,40 @@ class TestCheckoutRequestCarriesRegion:
             "overseas site gets billed the CN plan price in USD."
         )
         assert "BILLING_REGION" in block, "region should come from BILLING_REGION, not a hardcoded string"
+
+
+class TestCheckoutHonoursRegionSentInBody:
+    """The SDK posts CheckoutRequest as JSON — that region must be honoured.
+
+    Discovered on the live SG deploy: both checkout endpoints read only
+    ``?region=``, so a client asking for CN in the body got priced on whatever
+    the server defaulted to. Any frontend change alone is decorative while the
+    endpoint ignores the body.
+    """
+
+    def test_helper_reads_region_from_json_body(self, app):
+        with app.test_request_context(
+            "/v1/payment/checkout", method="POST", json={"region": "CN"}
+        ):
+            assert _region_from_request() == "CN"
+
+    def test_query_param_keeps_priority_over_body(self, app):
+        with app.test_request_context(
+            "/v1/payment/checkout?region=US", method="POST", json={"region": "CN"}
+        ):
+            assert _region_from_request() == "US"
+
+    def test_no_region_anywhere_is_none(self, app):
+        """None lets resolve_region fall through to its own precedence rules."""
+        with app.test_request_context("/v1/payment/checkout", method="POST", json={}):
+            assert _region_from_request() is None
+
+    @pytest.mark.parametrize("view", ["create_checkout", "create_stripe_checkout"])
+    def test_checkout_views_take_region_via_helper(self, view):
+        """Wiring lock — a view reading request.args directly would regress silently."""
+        fn = getattr(payment_routes, view, None)
+        assert fn is not None, f"{view}() no longer exists in payment_routes"
+        assert "_region_from_request()" in inspect.getsource(fn), (
+            f"{view}() must read the region via _region_from_request(); reading "
+            "request.args directly drops the region sent in the POST body"
+        )
