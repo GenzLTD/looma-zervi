@@ -1,4 +1,4 @@
-# Overseas Deployment Guide (release/overseas)
+# Overseas Deployment Guide (main)
 
 > Domain: `genz.ltd`
 > Infrastructure: Vultr VPS (Singapore) + Cloudflare CDN + self-signed origin SSL (Full mode)
@@ -57,13 +57,13 @@ CORS_ORIGINS=https://genz.ltd,https://www.genz.ltd,https://tspace.genz.ltd,https
 ## One-click Deploy
 
 ```bash
-curl -fsSL https://gitee.com/szbenyx/looma-zervi/raw/release/overseas/scripts/deploy-overseas.sh | bash
+curl -fsSL https://gitee.com/szbenyx/looma-zervi/raw/main/scripts/deploy-overseas.sh | bash
 ```
 
 Or manually:
 
 ```bash
-git clone -b release/overseas https://gitee.com/szbenyx/looma-zervi.git /opt/looma-zervi
+git clone -b main https://gitee.com/szbenyx/looma-zervi.git /opt/looma-zervi
 cd /opt/looma-zervi
 cp backend/.env.example backend/.env
 # Edit backend/.env with real secrets
@@ -73,7 +73,7 @@ bash scripts/deploy-overseas.sh
 ## Redeploy marketing site only
 
 ```bash
-cd /opt/looma-zervi && git pull origin release/overseas
+cd /opt/looma-zervi && git pull origin main
 bash scripts/deploy-genz-web.sh
 ```
 

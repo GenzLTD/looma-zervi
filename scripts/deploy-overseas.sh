@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Overseas VPS deployment script for looma-zervi (release/overseas)
+# Overseas VPS deployment script for looma-zervi (main)
 # Target: Ubuntu 22.04 LTS, Vultr Singapore
 # Domain: genz.ltd (Cloudflare DNS + proxy, SSL mode: Full)
 #
@@ -15,7 +15,10 @@ DOMAIN="genz.ltd"
 API_SUBDOMAIN="api.genz.ltd"
 TSPACE_SUBDOMAIN="tspace.genz.ltd"
 REPO_URL="https://gitee.com/szbenyx/looma-zervi.git"
-BRANCH="release/overseas"
+# 现网实际运行分支。2026-09-15 核证: Vultr https://api.genz.ltd/health 返回 main 谱系 (70018c2)。
+# 切勿改回 release/overseas: 该分支停在 2026-09-03 (2dbd67a)，与 main 已 diverged (超前 7 / 落后 5，
+# 约 28 个文件不同)，checkout 过去会当场回滚现网代码并废弃微信支付区域闸门。
+BRANCH="main"
 APP_DIR="/opt/looma-zervi"
 SSL_DIR="/etc/nginx/ssl"
 
