@@ -111,3 +111,30 @@ def get_plan_for_tier(tier: str, region: str | None = None) -> dict[str, Any]:
         if plan["tier"] == tier:
             return plan
     raise KeyError(f"Unknown tier {tier!r} for region {code!r}")
+
+
+def billing_region_for_provider(provider: str) -> str | None:
+    """Which billing region settles through ``provider`` — answered by the contract.
+
+    ``contracts/payment.v1.json`` already declares this ownership:
+
+        regions.US.payment_providers = [stripe, paypal, airwallex]   → USD
+        regions.CN.payment_providers = [wechat, huawei_iap]          → CNY
+
+    Callers must derive both ``amount`` and ``currency`` from the plan of the
+    region returned here. Reading those two from different sources is what
+    produced "9.9 USD": a CN plan amount paired with a USD label, while the
+    channel quietly charged $1.99. Returns None for providers the contract
+    does not model.
+    """
+    code = (provider or "").strip().lower()
+    if not code:
+        return None
+    contract = _load_contract()
+    for region_code, meta in contract["regions"].items():
+        providers = meta.get("payment_providers")
+        if not providers:
+            providers = [meta["payment_provider"]]
+        if code in {str(name).strip().lower() for name in providers}:
+            return region_code
+    return None

@@ -118,9 +118,15 @@ export interface CheckoutRequest {
   success_url?: string;
   cancel_url?: string;
   /**
-   * 账单区。省略时后端按 Accept-Language 推断 — 不可靠：
-   * zh 浏览器会落到 CN 套餐，其 ¥9.9 会被按 USD 扣（约页面展示价 $1.99 的 5 倍）。
-   * 海外站（SG）务必显式传 US。
+   * 账单区。仅用于报价展示（``/v1/payment/plans``）与海外 CN 闸的判定参数。
+   *
+   * 它**不再决定下单金额**。金额与币种由所选支付通道决定：卡通道（stripe /
+   * paypal / airwallex）恒按 USD 套餐计价，钱包通道恒按 CNY 套餐计价 —— 后端
+   * ``billing_region_for_provider()`` 从 contracts/payment.v1.json 反查这条归属，
+   * amount 与 currency 都取自同一份 plan。
+   *
+   * 历史 bug：三者曾被分别读取（plan 金额 + config 币种 + 常量表给通道），
+   * 于是一笔 $1.99 的卡支付被记成「9.9 USD」。
    */
   region?: PaymentRegion;
 }

@@ -162,13 +162,29 @@ class TestCheckoutHonoursRegionSentInBody:
             assert _region_from_request() is None
 
     @pytest.mark.parametrize("view", ["create_checkout", "create_stripe_checkout"])
-    def test_checkout_views_take_region_via_helper(self, view):
-        """Wiring lock — a view reading request.args directly would regress silently."""
+    def test_checkout_views_price_from_the_channel_plan(self, view):
+        """Wiring lock — amount and currency must be read from one plan row.
+
+        The caller's region is still read (the overseas CN gate needs it), but it
+        no longer *selects the price*: the payment channel does. Pairing a CN
+        plan amount with a USD label is exactly what produced "9.9 USD" while
+        the card was charged $1.99.
+        """
         fn = getattr(payment_routes, view, None)
         assert fn is not None, f"{view}() no longer exists in payment_routes"
-        assert "_region_from_request()" in inspect.getsource(fn), (
-            f"{view}() must read the region via _region_from_request(); reading "
-            "request.args directly drops the region sent in the POST body"
+        source = inspect.getsource(fn)
+        assert "billing_region_for_provider" in source, (
+            f"{view}() must pick the billing region from the payment channel"
+        )
+        assert 'currency = plan["currency"]' in source, (
+            f"{view}() must read currency from the plan row, not from STRIPE_CURRENCY"
+        )
+        assert "STRIPE_CURRENCY" not in source, (
+            f"{view}() still reads STRIPE_CURRENCY — then amount and currency "
+            "come from different sources and can disagree"
+        )
+        assert "get_plan_for_tier(new_tier, region)" not in source, (
+            f"{view}() still prices off the caller's region instead of the channel's"
         )
 
 

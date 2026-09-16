@@ -29,6 +29,7 @@ from src.analytics.events import (
     EVENT_TRIAL_FAILED,
 )
 from src.payment.plans import (
+    billing_region_for_provider,
     get_plan_for_tier,
     is_overseas_billing_deploy,
     list_plans_for_region,
@@ -62,17 +63,13 @@ payment_bp = Blueprint("payment", __name__)
 UPGRADABLE_TIERS = frozenset({"supporter", "pro"})
 TIER_ORDER = {"free": 0, "supporter": 1, "pro": 2, "enterprise": 3}
 
-# 人民币金额 → 分（WeChat Pay 以分为单位）
-TIER_PRICE_FEN = {
-    "supporter": 990,   # ¥9.90
-    "pro": 2990,         # ¥29.90
-}
-
-# USD 金额 → cents（Stripe 以 cents 为单位）
-TIER_PRICE_USD_CENTS = {
-    "supporter": 199,    # $1.99
-    "pro": 599,          # $5.99
-}
+# 价格只有一处真相源：contracts/payment.v1.json。
+#
+# 这里曾并存两张硬编码价目表（TIER_PRICE_FEN / TIER_PRICE_USD_CENTS），与
+# get_plan_for_tier() 返回的 plan 形成了两套价格。checkout 于是能把 CN 套餐的
+# 9.9 配上 config 里的 USD 标签写进订单 —— 即「9.9 USD」，而卡实际只扣 $1.99。
+# 现在 amount 与 currency 一律取自同一行 plan（见 billing_region_for_provider），
+# 需要改价请改契约，不要在代码里第二处报价。
 
 
 def _is_stub_mode():
@@ -318,9 +315,6 @@ def create_wechat_order():
             message=f"Cannot downgrade from {current_tier} to {new_tier}",
         ), 400
 
-    if new_tier not in TIER_PRICE_FEN:
-        return jsonify(error="bad_request", message=f"No price configured for tier: {new_tier}"), 400
-
     # JSAPI 必须有关联的 openid（已从 DB 自动填充，若仍为空则报错）
     # 此检查须在凭证检查之前，否则用户会收到不准确的 503 错误
     if trade_type == "JSAPI" and not openid:
@@ -329,7 +323,13 @@ def create_wechat_order():
             message="JSAPI payment requires a WeChat openid. Please ensure the user has logged in via WeChat miniprogram.",
         ), 400
 
-    plan = get_plan_for_tier(new_tier, region)
+    try:
+        plan = get_plan_for_tier(new_tier, region)
+    except KeyError:
+        return jsonify(
+            error="bad_request",
+            message=f"No {region} price configured for tier: {new_tier}",
+        ), 400
 
     # 从配置读取 WeChat Pay 凭证
     mchid = current_app.config.get("WECHAT_MCHID", "")
@@ -345,7 +345,8 @@ def create_wechat_order():
             message="WeChat Pay credentials not configured. Set WECHAT_MCHID, WECHAT_APPID, WECHAT_API_V3_KEY, WECHAT_SERIAL_NO, WECHAT_PRIVATE_KEY_PATH, WECHAT_NOTIFY_URL env vars.",
         ), 503
 
-    amount_fen = TIER_PRICE_FEN[new_tier]
+    # Single source: the plan row owns the money, including the cent conversion.
+    amount_fen = int(round(plan["price_monthly"] * 100))
     out_trade_no = generate_out_trade_no()
     description = f"Looma {plan['name']}"
 
@@ -384,7 +385,7 @@ def create_wechat_order():
         plan_id=plan["plan_id"],
         tier=new_tier,
         amount=plan["price_monthly"],
-        currency="CNY",
+        currency=plan["currency"],
         out_trade_no=out_trade_no,
         prepay_id=result.prepay_id,
         qr_code_url=result.qr_code_url,
@@ -400,7 +401,7 @@ def create_wechat_order():
         "prepay_id": result.prepay_id,
         "qr_code_url": result.qr_code_url,
         "amount": plan["price_monthly"],
-        "currency": "CNY",
+        "currency": plan["currency"],
         "tier": new_tier,
     }
     if jsapi_params:
@@ -602,9 +603,6 @@ def create_checkout():
             message=f"Cannot downgrade from {current_tier} to {new_tier}",
         ), 400
 
-    if new_tier not in TIER_PRICE_USD_CENTS:
-        return jsonify(error="bad_request", message=f"No USD price configured for tier: {new_tier}"), 400
-
     # Resolve provider
     try:
         provider = get_provider(provider_name)
@@ -615,18 +613,43 @@ def create_checkout():
                     f"Available: {', '.join(list_configured_providers(current_app.config))}",
         ), 400
 
+    # The channel owns the money: card channels settle on the USD plan, WeChat on
+    # the CNY plan. Amount and currency are then read from that single plan, so
+    # they cannot drift apart — see billing_region_for_provider().
+    billing_region = billing_region_for_provider(provider_name)
+    if billing_region is None:
+        return jsonify(
+            error="unknown_provider",
+            message=f"Payment provider {provider_name!r} is not declared by the payment contract.",
+        ), 400
+
+    # An overseas deploy must never settle CNY/WeChat: that collects RMB under
+    # the wrong billing entity. Same guard rail as _reject_explicit_cn_on_overseas(),
+    # but keyed on where the money lands rather than on the request parameter.
+    if billing_region == "CN" and is_overseas_billing_deploy():
+        return jsonify(
+            error="provider_not_supported",
+            message=_OVERSEAS_CN_MESSAGE,
+        ), 403
+
     if not provider.is_configured(current_app.config):
         return jsonify(
             error="payment_not_configured",
             message=f"{provider_name.title()} not configured. Set the required environment variables.",
         ), 503
 
-    region = resolve_region(
-        _region_from_request(),
-        request.headers.get("Accept-Language"),
-    )
-    plan = get_plan_for_tier(new_tier, region)
-    amount_usd = TIER_PRICE_USD_CENTS[new_tier] / 100
+    try:
+        plan = get_plan_for_tier(new_tier, billing_region)
+    except KeyError:
+        return jsonify(
+            error="bad_request",
+            message=f"No {billing_region} price configured for tier: {new_tier}",
+        ), 400
+
+    # Single source of truth for the whole request: both figures come from this
+    # one plan row, including what we hand to the provider below.
+    amount = plan["price_monthly"]
+    currency = plan["currency"]
     out_trade_no = stripe_generate_order_no()
 
     # Get user email for checkout pre-fill
@@ -639,14 +662,12 @@ def create_checkout():
     success_url = data.get("success_url", f"{origin}/payment/success?session_id={{CHECKOUT_SESSION_ID}}")
     cancel_url = data.get("cancel_url", f"{origin}/payment/cancel")
 
-    currency = current_app.config.get("STRIPE_CURRENCY", "USD")
-
     try:
         result: CheckoutResult = provider.create_checkout(
             config=current_app.config,
             out_trade_no=out_trade_no,
             tier=new_tier,
-            amount=amount_usd,
+            amount=amount,
             currency=currency,
             plan_name=f"Looma {plan['name']}",
             customer_email=customer_email,
@@ -662,7 +683,7 @@ def create_checkout():
     order_metadata = {
         "provider": provider_name,
         "mode": mode,
-        "region": region,
+        "region": billing_region,
     }
     if result.raw:
         order_metadata.update({f"{provider_name}_{k}": str(v) for k, v in result.raw.items()})
@@ -671,7 +692,7 @@ def create_checkout():
         user_id=g.user_id,
         plan_id=plan["plan_id"],
         tier=new_tier,
-        amount=plan["price_monthly"],
+        amount=amount,
         currency=currency,
         out_trade_no=out_trade_no,
         metadata_json=order_metadata,
@@ -682,7 +703,7 @@ def create_checkout():
         out_trade_no=out_trade_no,
         provider=provider_name,
         checkout_url=result.checkout_url,
-        amount=plan["price_monthly"],
+        amount=amount,
         currency=currency,
         tier=new_tier,
     ), 201
@@ -797,8 +818,22 @@ def create_stripe_checkout():
             message=f"Cannot downgrade from {current_tier} to {new_tier}",
         ), 400
 
-    if new_tier not in TIER_PRICE_USD_CENTS:
-        return jsonify(error="bad_request", message=f"No USD price configured for tier: {new_tier}"), 400
+    # Legacy alias: the provider is pinned to Stripe, so the money always lands
+    # on the USD plan no matter which region the caller asked for — the same
+    # single-source rule as /payment/checkout. Pairing plan["price_monthly"]
+    # with a hardcoded "USD" is exactly what produced "9.9 USD".
+    billing_region = billing_region_for_provider("stripe") or "US"
+    try:
+        plan = get_plan_for_tier(new_tier, billing_region)
+    except KeyError:
+        return jsonify(
+            error="bad_request",
+            message=f"No {billing_region} price configured for tier: {new_tier}",
+        ), 400
+
+    amount = plan["price_monthly"]
+    currency = plan["currency"]
+    amount_cents = int(round(amount * 100))
 
     stripe_key = current_app.config.get("STRIPE_SECRET_KEY", "")
     if not stripe_key:
@@ -807,12 +842,6 @@ def create_stripe_checkout():
             message="Stripe not configured. Set STRIPE_SECRET_KEY env var.",
         ), 503
 
-    region = resolve_region(
-        _region_from_request(),
-        request.headers.get("Accept-Language"),
-    )
-    plan = get_plan_for_tier(new_tier, region)
-    amount_cents = TIER_PRICE_USD_CENTS[new_tier]
     out_trade_no = stripe_generate_order_no()
 
     # Get user email for Stripe Checkout pre-fill
@@ -831,7 +860,7 @@ def create_stripe_checkout():
             out_trade_no=out_trade_no,
             tier=new_tier,
             amount_cents=amount_cents,
-            currency=current_app.config.get("STRIPE_CURRENCY", "USD"),
+            currency=currency,
             plan_name=f"Looma {plan['name']}",
             success_url=success_url,
             cancel_url=cancel_url,
@@ -847,14 +876,14 @@ def create_stripe_checkout():
         user_id=g.user_id,
         plan_id=plan["plan_id"],
         tier=new_tier,
-        amount=plan["price_monthly"],
-        currency="USD",
+        amount=amount,
+        currency=currency,
         out_trade_no=out_trade_no,
         metadata_json={
             "provider": "stripe",
             "stripe_session_id": result.provider_checkout_id,
             "mode": mode,
-            "region": region,
+            "region": billing_region,
         },
     )
 
@@ -863,8 +892,8 @@ def create_stripe_checkout():
         session_id=result.provider_checkout_id,
         session_url=result.checkout_url,
         out_trade_no=out_trade_no,
-        amount=plan["price_monthly"],
-        currency="USD",
+        amount=amount,
+        currency=currency,
         tier=new_tier,
     ), 201
 
