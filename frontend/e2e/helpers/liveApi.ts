@@ -1,8 +1,12 @@
 /**
  * Live backend helpers for Playwright E2E (real Flask API, no mocks).
  */
+import { assertLocalApi } from "./apiBase";
 
 export const API_BASE = process.env.E2E_API_BASE ?? "http://127.0.0.1:5200";
+
+// 拦住「本地模式却打到远程库」的误用（历史上生产库因此被灌入大量测试账号）
+assertLocalApi(API_BASE, "E2E_API_BASE");
 export const SAAS_BASE = process.env.E2E_SAAS_BASE ?? "http://localhost:5174";
 export const PLANETX_BASE = process.env.E2E_PLANETX_BASE ?? "http://localhost:5173";
 

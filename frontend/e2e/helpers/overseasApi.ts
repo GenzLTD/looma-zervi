@@ -4,8 +4,16 @@
  * Tests the B2C subscription flow:
  *   genz-web → register → login → dashboard → pricing → subscription
  */
+import { assertLocalApi } from "./apiBase";
+
+// 默认必须与 playwright.overseas.live.config.ts 的 webServer 保持一致（本地 5200）。
+// 曾经默认指向 https://api.genz.ltd，使「本地模式」的 E2E 把账号直接注册进生产库，
+// 生产因此累积了 157 个 @test.local 账号。远程/生产必须显式 opt-in。
 export const OVERSEAS_API_BASE =
-  process.env.E2E_OVERSEAS_API ?? "https://api.genz.ltd";
+  process.env.E2E_OVERSEAS_API ?? "http://127.0.0.1:5200";
+
+assertLocalApi(OVERSEAS_API_BASE, "E2E_OVERSEAS_API");
+
 export const OVERSEAS_WEB_BASE =
   process.env.E2E_OVERSEAS_WEB ?? "http://localhost:5180";
 export const OVERSEAS_SAAS_BASE =

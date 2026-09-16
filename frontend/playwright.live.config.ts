@@ -24,6 +24,9 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 15_000 },
 
+  // 回收测试账号（本地库会被 e2e-backend.sh 重建，此处主要服务于远程/生产模式）
+  globalTeardown: path.join(__dirname, "e2e/global-teardown.ts"),
+
   use: {
     baseURL: "http://localhost:5174",
     trace: "on-first-retry",

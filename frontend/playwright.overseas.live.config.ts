@@ -11,6 +11,11 @@ const repoRoot = path.resolve(__dirname, "..");
  *   pnpm e2e:overseas
  *
  *   # 生产环境线上测试（跳过 webServer，直接打线上 URL）
+ *   # E2E_ALLOW_REMOTE_API=1 是必需的显式 opt-in：守卫会拦住指向非本地 API 的运行，
+ *   # 避免「本地模式」误写真实库（历史上生产库因此累积了 157 个 @test.local 账号）。
+ *   # E2E_ADMIN_TOKEN 用于 globalTeardown 回收本轮注册的账号。
+ *   E2E_ALLOW_REMOTE_API=1 \
+ *   E2E_ADMIN_TOKEN=<admin access_token> \
  *   E2E_OVERSEAS_WEB=https://genz.ltd \
  *   E2E_OVERSEAS_SAAS=https://app.genz.ltd \
  *   E2E_OVERSEAS_API=https://api.genz.ltd \
@@ -37,6 +42,9 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "html",
   timeout: 90_000,
   expect: { timeout: 15_000 },
+
+  // 回收测试账号（本地库会被 e2e-backend.sh 重建，此处主要服务于远程/生产模式）
+  globalTeardown: path.join(__dirname, "e2e/global-teardown.ts"),
 
   use: {
     trace: "on-first-retry",
