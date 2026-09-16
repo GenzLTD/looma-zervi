@@ -34,6 +34,90 @@ def _get_db():
     return current_app._db
 
 
+# ── 清理测试账号（外键安全删除）──
+
+@admin_bp.route("/admin/test-accounts/purge", methods=["POST"])
+@require_auth
+def admin_purge_test_accounts():
+    """删除测试域名下的账号及其全部依赖行（admin only）。
+
+    安全约束（任一不满足即拒绝，故不可能误删真人账号）：
+      * 后缀必须在 manager.TEST_EMAIL_SUFFIXES 白名单内；
+      * 永不触碰 BETA_USERS 里 seed 的账号（删了会被重新 seed，属白删）。
+
+    Body（都可选）::
+
+        {"suffixes": ["@test.local"], "dry_run": true}
+
+    返回 ``{"purged": n, "failed": n, "deleted": {table: rows}}``。
+    """
+    err = _require_admin()
+    if err:
+        return err
+
+    from src.db.manager import BETA_USERS, TEST_EMAIL_SUFFIXES
+
+    body = request.get_json(silent=True) or {}
+    raw = body.get("suffixes") or list(TEST_EMAIL_SUFFIXES)
+    if not isinstance(raw, list) or not raw:
+        return jsonify(error="bad_request", message="suffixes 需为非空数组"), 400
+
+    suffixes = []
+    for item in raw:
+        s = str(item).strip().lower()
+        if not s.startswith("@"):
+            s = "@" + s
+        suffixes.append(s)
+
+    disallowed = [s for s in suffixes if s not in TEST_EMAIL_SUFFIXES]
+    if disallowed:
+        return jsonify(
+            error="bad_request",
+            message="仅允许清理测试域名后缀",
+            disallowed=disallowed,
+            allowed=list(TEST_EMAIL_SUFFIXES),
+        ), 400
+
+    seeded = {u["email"].strip().lower() for u in BETA_USERS}
+    db = _get_db()
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, email FROM users WHERE email IS NOT NULL"
+        ).fetchall()
+
+    targets = [
+        r["id"]
+        for r in rows
+        if r["email"].strip().lower() not in seeded
+        and any(r["email"].strip().lower().endswith(s) for s in suffixes)
+    ]
+
+    if body.get("dry_run"):
+        return jsonify(dry_run=True, matched=len(targets), suffixes=suffixes)
+
+    deleted, failures = {}, []
+    for uid in targets:
+        try:
+            result = db.delete_user(uid)
+        except Exception as exc:  # noqa: BLE001 — 单个失败不应中断整批
+            logger.warning("purge test account %s failed: %s", uid, exc)
+            failures.append({"user_id": uid, "error": str(exc)})
+            continue
+        for table, n in result["deleted"].items():
+            deleted[table] = deleted.get(table, 0) + n
+
+    purged = len(targets) - len(failures)
+    logger.info(
+        "admin %s purged %d test accounts (failed=%d)", g.user_id, purged, len(failures)
+    )
+    return jsonify(
+        purged=purged,
+        failed=len(failures),
+        errors=failures[:10],
+        deleted=deleted,
+    )
+
+
 # ── Full admin stats ──
 
 @admin_bp.route("/admin/stats", methods=["GET"])

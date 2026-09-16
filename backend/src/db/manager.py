@@ -1044,6 +1044,26 @@ BETA_USERS = [
     {"name": "测试用户-管理员",   "email": "beta_admin@looma.test",      "tier": "pro",        "is_early_adopter": 1, "role": "admin"},
 ]
 
+# 测试账号邮箱后缀白名单：只有这些后缀的账号允许被批量清理。
+# 真人邮箱域名（qq.com / 163.com / gmail.com / sjtu.edu.cn 等）均不在此列，
+# 因此清理动作在结构上不可能误删真人账号。
+TEST_EMAIL_SUFFIXES = (
+    "@test.local",
+    "@test.com",
+    "@example.com",
+    "@looma-test.internal",
+    "@genz-test.ltd",
+)
+
+# 无外键引用 users、但列中持有用户标识的表：(表名, 列名, 是否审计轨迹)
+# 这些表不会被沿外键的删除遍历覆盖，必须显式补扫，否则删除账号后会留下孤儿行
+# 污染分析口径（query_logs / product_events 直接参与用量统计）。
+NON_FK_USER_TABLES = (
+    ("query_logs", "user_id", False),
+    ("product_events", "user_id", False),
+    ("audit_logs", "actor", True),   # 审计轨迹默认保留，include_audit=True 时才清
+)
+
 
 class DatabaseManager:
     """Thread-safe SQLite manager with WAL mode.
@@ -2829,6 +2849,117 @@ class DatabaseManager:
                 )
                 created.append(user_id)
         return created
+
+    def delete_user(self, user_id: str, include_audit: bool = False) -> dict:
+        """删除用户及其全部依赖行，返回 ``{"user_id":..., "deleted": {table: n}}``。
+
+        为什么不能直接 ``DELETE FROM users``：
+          库内 34 张表以裸外键引用 users(id)，没有任何 ``ON DELETE CASCADE``，
+          而连接固定开启 ``PRAGMA foreign_keys=ON``（见 _connect），
+          因此父行删除会被外键约束直接拒绝，必须先把子行清干净。
+
+        实现要点：
+          1. 以 PRAGMA foreign_key_list 建立依赖图，按**外键反向拓扑序**（子先父后）删除；
+          2. 迭代至不动点，以覆盖孙表（如 match_report_items 经由 match_reports 关联）；
+          3. 对 NON_FK_USER_TABLES 显式补扫——这些表不参与外键遍历，
+             漏掉会在 query_logs / product_events 留下孤儿行，永久污染用量口径。
+
+        ``include_audit=False``（默认）保留 audit_logs 中的审计轨迹。
+        """
+        with self.get_conn() as conn:
+            tabs = [
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                    " AND name NOT LIKE 'sqlite_%'"
+                )
+            ]
+
+            pk, fks, children, fk_cols = {}, [], {}, {}
+            for t in tabs:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(%s)" % t)]
+                pk[t] = "id" if "id" in cols else "rowid"
+                fk_cols[t] = set()
+                for fk in conn.execute("PRAGMA foreign_key_list(%s)" % t):
+                    parent, child_col = fk[2], fk[3]
+                    fks.append((t, child_col, parent))
+                    fk_cols[t].add(child_col)
+                    if parent != t:
+                        children.setdefault(parent, set()).add(t)
+
+            # 外键反向拓扑序：子表排在父表之前
+            order, state = [], {}
+
+            def visit(t):
+                if state.get(t) in (1, 2):
+                    return          # 1=环中，交由不动点迭代兜底
+                state[t] = 1
+                for ch in children.get(t, ()):
+                    visit(ch)
+                state[t] = 2
+                order.append(t)
+
+            for t in tabs:
+                visit(t)
+
+            # 收集待删主键（iterate to fixpoint）
+            removed = {t: set() for t in tabs}
+            removed["users"] = {user_id}
+            for _ in range(30):
+                changed = False
+                for child, child_col, parent in fks:
+                    parent_ids = [v for v in removed.get(parent, ()) if v is not None]
+                    if not parent_ids or child == "users":
+                        continue
+                    found = set()
+                    for i in range(0, len(parent_ids), 400):
+                        block = parent_ids[i:i + 400]
+                        rows = conn.execute(
+                            "SELECT %s FROM %s WHERE %s IN (%s)"
+                            % (pk[child], child, child_col, ",".join("?" * len(block))),
+                            block,
+                        ).fetchall()
+                        found |= {r[0] for r in rows}
+                    found -= removed[child]
+                    if found:
+                        removed[child] |= found
+                        changed = True
+                if not changed:
+                    break
+
+            deleted = {}
+
+            def _delete(table, column, values):
+                n = 0
+                for i in range(0, len(values), 400):
+                    block = values[i:i + 400]
+                    cur = conn.execute(
+                        "DELETE FROM %s WHERE %s IN (%s)"
+                        % (table, column, ",".join("?" * len(block))),
+                        block,
+                    )
+                    n += cur.rowcount
+                return n
+
+            for t in order:
+                values = [v for v in removed.get(t, ()) if v is not None]
+                if values:
+                    n = _delete(t, pk[t], values)
+                    if n:
+                        deleted[t] = n
+
+            # 补扫无外键表，避免孤儿行
+            for table, column, is_audit in NON_FK_USER_TABLES:
+                if is_audit and not include_audit:
+                    continue
+                if table not in tabs:
+                    continue
+                cur = conn.execute(
+                    "DELETE FROM %s WHERE %s = ?" % (table, column), (user_id,)
+                )
+                if cur.rowcount:
+                    deleted[table] = deleted.get(table, 0) + cur.rowcount
+
+            return {"user_id": user_id, "deleted": deleted}
 
     def rate_query(self, query_id: int, rating: int):
         """Rate a query (1-5)."""
