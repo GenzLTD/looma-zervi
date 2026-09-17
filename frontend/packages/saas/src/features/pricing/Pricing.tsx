@@ -103,7 +103,7 @@ export default function Pricing() {
   const { isAuthenticated, token, applySessionToken, fetchProfile } = useSaasAuthStore();
   const navigate = useNavigate();
   const [plans, setPlans] = useState<PlanCard[]>([]);
-  const [stubMode, setStubMode] = useState(true);
+  const [stubMode, setStubMode] = useState(false);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [upgradingTier, setUpgradingTier] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -128,14 +128,24 @@ export default function Pricing() {
     (async () => {
       try {
         const client = createSaasApiClient();
-        const resp = await createPaymentApi(client).plans(BILLING_REGION);
+        const paymentApi = createPaymentApi(client);
+        const [resp, providersResp] = await Promise.all([
+          paymentApi.plans(BILLING_REGION),
+          // stub_mode 的权威源是 /providers：后端刻意不让 /plans 外泄该字段
+          // （见 backend/tests/test_payment_guard.py 公开面守卫）。providers
+          // 单独失败不拦定价加载。
+          paymentApi.providers(BILLING_REGION).catch(() => null),
+        ]);
         if (cancelled) return;
         const cards: PlanCard[] = resp.plans.map((plan) => ({
           ...plan,
           ...PLAN_META[plan.tier],
         }));
         setPlans(IS_OVERSEAS ? cards : [...cards, ENTERPRISE_CARD]);
-        setStubMode(resp.stub_mode ?? true);
+        // 拿不到 providers 响应时缺省 false：宁可让用户看到 Checkout 报错，
+        // 也不误报 stub 挡住真实支付（此前 resp.stub_mode ?? true 曾令生产
+        // 页面显示 Stub 横幅、点了 402 进不了 Stripe）。
+        setStubMode(providersResp?.stub_mode === true);
       } catch {
         if (!cancelled) {
           setMessage("无法加载套餐价格，请稍后重试");
