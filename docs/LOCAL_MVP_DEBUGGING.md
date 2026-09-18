@@ -2,6 +2,10 @@
 
 本文档介绍如何在本地启动完整的MVP联调内测环境，包括后端、前端Web服务和小程序开发环境。
 
+> **没有 Docker / 没有 ServBay？** 请先看 [LOCAL_DEV_MINIMAL_SETUP.md](LOCAL_DEV_MINIMAL_SETUP.md) ——
+> 最小依赖三步启动（后端 venv + vite 代理），本文的一键脚本与容器化组件均为可选增强。
+> 注意：`start-full-mvp.sh` 会重复拉起前端并抢占 5173/5174 端口，与手动启动冲突，分步启动是推荐路径。
+
 ## 📋 系统要求
 
 ### 必需软件
