@@ -139,7 +139,11 @@ PASS  www.genz.ltd / → 404 Unknown host（块已摘）  404
 ```
 
 > 真机变更**不在**本装置范围内：本装置只证明「摘块后配置结构与分流正确」。
-> 真机落地是合 main 之后的**手动步骤**（scp 改后的 `nginx-vultr.conf` → `nginx -t` → `systemctl reload nginx`）。
+> 真机落地是合 main 之后的**手动步骤**，且必须用 **`docker/nginx.conf`**——2026-09-18 实测：
+> Vultr 真机 `/etc/nginx/nginx.conf` 的 md5 逐字节等于改动前的 `docker/nginx.conf`，
+> 且 `deploy-overseas.sh` 第 8 步就是 `cp "${APP_DIR}/docker/nginx.conf" /etc/nginx/nginx.conf`。
+> `nginx-vultr.conf` **不被任何管线引用**（漂移的孤儿件），只作 A1/A3 的额外校验对象，**不要拿它上机**。
+> 顺序：先备份 → scp → `nginx -t` → `reload` → 验 api `/health` 与 tspace → **最后**才 `rm -rf /var/www/genz-web`。
 
 ---
 

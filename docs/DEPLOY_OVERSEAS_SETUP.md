@@ -95,7 +95,8 @@ docker ps
 
 ## Vultr Nginx 架构（monolithic）
 
-Vultr 海外机上的 Nginx **不是** Debian 常见的 `sites-enabled` 多文件模式，而是 **单体配置**：生效内容在 `/etc/nginx/nginx.conf`（或 CI 用 `nginx-vultr.conf` 整文件覆盖该路径）。
+Vultr 海外机上的 Nginx **不是** Debian 常见的 `sites-enabled` 多文件模式，而是 **单体配置**：生效内容在 `/etc/nginx/nginx.conf`，由 `scripts/deploy-overseas.sh` 第 8 步 `cp "${APP_DIR}/docker/nginx.conf" /etc/nginx/nginx.conf` 整文件覆盖。
+**落地件是 `docker/nginx.conf`**（2026-09-18 实测真机 md5 逐字节等于改动前的该文件）。仓内另有 `nginx-vultr.conf`，名字像真机件但**不被任何管线引用**，且已与真机漂移（行数 300 vs 237，api `/health` 与 api `/` 两处差异）——**不要**用它覆盖真机，待单独对账或删除。
 改 `sites-available` / `sites-enabled` 可能 `nginx -t` 通过但 **线上行为不变**——以前海外 CI 对 `sites-enabled` 的操作容易成为「假成功」。
 海外部署 **只** 通过 workflow 覆盖 monolithic 配置；**禁止**再指望 `sites-enabled` 生效（大陆 Tencent 机仍可用 sites-enabled，两套勿混）。
 排查时以运行时配置为准，不要只 `cat sites-enabled/`。
@@ -183,7 +184,7 @@ curl -I https://genz.ltd/
 
 ### Nginx 404 on api.genz.ltd
 - 先确认 monolithic 配置（见上文 **Vultr Nginx 架构**）：`nginx -T 2>/dev/null | grep server_name`
-- 若 `server_name` 无 `api.genz.ltd`，修复 `/etc/nginx/nginx.conf`（或 redeploy 带 `nginx-vultr.conf` 的 tag），**不要**只改 `sites-enabled`
+- 若 `server_name` 无 `api.genz.ltd`，修复 `/etc/nginx/nginx.conf`（或打一个 `overseas-*` tag 走 `deploy-overseas.sh` 用 `docker/nginx.conf` 覆盖），**不要**只改 `sites-enabled`
 - Test locally: `curl -H "Host: api.genz.ltd" http://127.0.0.1/health`
 - Check Cloudflare SSL mode (should be Flexible or Full)
 

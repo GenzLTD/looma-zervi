@@ -54,7 +54,12 @@
 **已摘除的 serve 端（2026-09-18）：**
 
 - `docker/nginx.conf` — `genz.ltd` / `www.genz.ltd` 的 HTTP :80 与 HTTPS :443 server 块 → 替换为「已迁出」注释
-- `nginx-vultr.conf` — 同上（真机在跑这份）
+  → **这份就是 Vultr 真机在跑的文件**（2026-09-18 实测：真机 `/etc/nginx/nginx.conf` md5 `0f505e33f8fb047f4185689b89e4c256`
+  逐字节等于 `a52638e:docker/nginx.conf`），故真机落地就是 scp 这份、`nginx -t`、`reload`。
+- `nginx-vultr.conf` — 同上摘块，但**它并不等于真机文件**：真机版比对下来只有 api `/health`（`location = /health` + `Host` 头）
+  与 api `/`（真机走 Flask 端点列表，此件走 404 JSON）两处历史差异，行数 300 vs 237。
+  即仓内存在一份**失同步兄弟副本**，摘块已同步、其余差异未对账 → 属独立待办（要么与真机对齐，要么标注为参考件），
+  **不要**拿它当真机落地件 scp。
 - `scripts/deploy-overseas.sh` — 原第 7 步（`pnpm build:genz-web` + rsync → `/var/www/genz-web`）→ 替换为「已迁出」注释
 - `scripts/deploy-genz-web.sh` → `scripts/deploy-genz-web.sh.disabled`（归档，默认拒绝执行）
 - `.github/workflows/deploy-overseas.yml` — Bootstrap 的 `mkdir -p ... /var/www/genz-web` 已删；`Public health check` 里对 `https://genz.ltd/` 的断言已删（本管线不得断言别人管线的可用性，否则 Vercel 抖动会拖红 looma 发布）；旧仓名 `szpeter2026/genz-web` → `GenzLTD/genz-web`

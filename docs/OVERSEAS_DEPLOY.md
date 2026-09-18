@@ -28,7 +28,9 @@ Cloudflare SSL/TLS mode: **Full** (upgrade to Full Strict with Origin Certificat
 push `main` 即由 Vercel 自动部署。本机对应的投递链已全部切断：
 `deploy-genz-web.sh` → `.disabled`、`deploy-overseas.sh` 第 7 步移除、
 两份 nginx（`docker/nginx.conf` / `nginx-vultr.conf`）的 `genz.ltd`/`www.genz.ltd`
-server 块摘除。
+server 块摘除。**真机落地件是 `docker/nginx.conf`**（`deploy-overseas.sh` 第 8 步整文件覆盖
+`/etc/nginx/nginx.conf`；2026-09-18 实测真机 md5 逐字节等于改动前该文件）。
+`nginx-vultr.conf` 不被任何管线引用、且已与真机漂移，勿用于上机。
 
 `frontend/packages/genz-web/` 保留为**只读归档副本**，改它不影响线上。
 
