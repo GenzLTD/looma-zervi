@@ -14,7 +14,7 @@
 | 维度 | 大陆线（CN） | 海外线（OVERSEAS） |
 |------|-------------|-------------------|
 | 主域 | `szbolent.cn` / `api.szbolent.com.cn`（规划）或当前内测 `api.genz.ltd` | `genz.ltd` + `api.genz.ltd` |
-| 客户端 | 微信小程序、PlanetX Web（:5173）、T-space SaaS | genz-web、PlanetX Web（英文）、`tspace.genz.ltd` |
+| 客户端 | 微信小程序、PlanetX Web（:5173）、T-space SaaS | `genz.ltd` ← `GenzLTD/genz-web`（**独立仓 → Vercel**）、PlanetX Web（英文）、`tspace.genz.ltd` |
 | 登录 | 微信 `code2session` | Google OAuth |
 | 支付 | 微信 JSAPI / 小程序 · CNY | Stripe Checkout · USD |
 | 主体 | 大陆企业（备案 / 微信商户） | YEDALL LIMITED（香港） |
@@ -51,7 +51,7 @@
 
 | ID | 验收项 | 验证方式 | 勾选 |
 |----|--------|----------|------|
-| OS-P0-1 | 营销站可访问 | `https://genz.ltd/` → 英文首页 | [ ] |
+| OS-P0-1 | 营销站可访问 | `https://genz.ltd/` → 英文首页（**验收点在 Vercel**，非本机） | [ ] |
 | OS-P0-2 | 法律页齐全 | `/legal/privacy` `/terms` `/refund` `/pricing` 均可访问 | [ ] |
 | OS-P0-3 | 法律主体一致 | 页脚 / Terms 显示 **YEDALL LIMITED** | [ ] |
 | OS-P0-4 | 联系邮箱 | 全站 **zervi@genz.ltd** | [ ] |
@@ -62,9 +62,9 @@
 | OS-P0-9 | Google OAuth E2E | 登录 → callback → JWT | [ ] |
 | OS-P0-10 | Stripe 商户材料 | Dashboard URL = `https://genz.ltd`，主体 = YEDALL LIMITED | [ ] |
 | OS-P0-11 | 无敏感泄露 | 同 CN-P0-12；`config.js` 无内部注释 / 密钥 | [ ] |
-| OS-P0-12 | 部署可追溯 | 线上 genz-web ≈ `release/overseas` 目标 commit | [ ] |
+| OS-P0-12 | 部署可追溯 | `GenzLTD/genz-web` 的目标 commit 可由 Vercel 部署记录追溯到（**本仓不接管营销站发布**） | [ ] |
 
-**真源：** `frontend/packages/genz-web/` · `docker/nginx.conf` · `docs/OVERSEAS_DEPLOY.md`
+**真源：** 营销站已迁出本仓 —— 见 `docs/MULTI_REPO_PUBLISH_FEDERATION.md`（三站三线）· 本仓移交 `docker/nginx.conf` / `nginx-vultr.conf` 的 api·tspace 反代口径 · `docs/OVERSEAS_DEPLOY.md`
 
 ---
 

@@ -261,7 +261,7 @@ Web + PWA 的正确定位
 
 | 客户体验组 | 代码包 | 域名示例 |
 |------------|--------|----------|
-| G1 | `frontend/packages/genz-web` | genz.ltd（Vercel） |
+| G1 | `GenzLTD/genz-web`（独立仓 → Vercel）；本仓 `frontend/packages/genz-web` 为归档副本 | genz.ltd（Vercel） |
 | G2 小程序 | `frontend/packages/miniprogram` | 微信 |
 | G2/G3 Web | `frontend/packages/planetx` | genz.ltd / :5173 |
 | G4 合伙人 | `frontend/packages/saas`（T-space 工作台壳） | tspace.genz.ltd / :5174 |

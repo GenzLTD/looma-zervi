@@ -145,23 +145,20 @@ for i in $(seq 1 12); do
 done
 
 # ============================
-# 7. Deploy genz-web static site (genz.ltd marketing + payment provider selection)
+# 7. genz-web 裸域营销站 — 已迁出（2026-09-18），本脚本不再投递
 # ============================
-log "Building genz-web (React + i18n)..."
-cd "${APP_DIR}/frontend"
-if command -v pnpm >/dev/null 2>&1; then
-    pnpm install --frozen-lockfile
-    pnpm build:genz-web
-else
-    log "pnpm not found; ensure dist/ is pre-built on the server"
-fi
-
-log "Deploying genz-web to /var/www/genz-web..."
-GENZ_WEB_DIST="${APP_DIR}/frontend/packages/genz-web/dist"
-GENZ_WEB_DEST="/var/www/genz-web"
-mkdir -p "${GENZ_WEB_DEST}"
-rsync -a --delete "${GENZ_WEB_DIST}/" "${GENZ_WEB_DEST}/"
-log "genz-web deployed ($(find "${GENZ_WEB_DEST}" -type f | wc -l) files)."
+#
+# 原第 7 步在这里把 ${APP_DIR}/frontend/packages/genz-web/dist 用 rsync --delete
+# 灌到 /var/www/genz-web，并依赖 nginx 的 genz.ltd / www.genz.ltd server 块 serve。
+# 该链路属「错链」：把营销站和 backend 捆在同一次海外发布里，等价于把 Vite 静态站
+# 投到本机（Vultr 只该管钱和脑：backend + compose + api/tspace 反代）。
+#
+# 现在：裸域真源 = 独立仓 GenzLTD/genz-web → Vercel 自动部署（push main 即发）。
+# 不要恢复本步骤，也不要把 genz-web 并进 S4–S6 之外的任何发布序列。
+# 详见 docs/MULTI_REPO_PUBLISH_FEDERATION.md
+#
+# 若确需在别的机器上复现营销站：git clone GenzLTD/genz-web && npm run build，
+# 由该仓自己的管线发，不经本脚本。
 
 # ============================
 # 8. Nginx config (host-level, reverse proxy to Docker)
@@ -196,9 +193,11 @@ log "Health check (local):"
 log "  curl http://localhost:5200/health"
 log ""
 log "Public URLs (after Cloudflare DNS propagates):"
-log "  https://${DOMAIN}/health"
 log "  https://${API_SUBDOMAIN}/health"
 log "  https://${TSPACE_SUBDOMAIN}"
+log ""
+log "Note: https://${DOMAIN} (+ www) is served by Vercel from GenzLTD/genz-web,"
+log "      NOT by this host. Do not point DNS back here expecting a marketing site."
 log ""
 log "Cloudflare SSL/TLS mode: set to 'Full' (not Strict)"
 log "  (upgrade to Full Strict later with Cloudflare Origin Certificate)"

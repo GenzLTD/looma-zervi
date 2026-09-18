@@ -71,6 +71,9 @@ package-lock.json
 # Reports archive
 reports.zip
 
+# cutover-test runtime artifacts (rendered nginx.conf / mime.types / logs)
+scripts/cutover-test/.generated/
+
 # Legacy web UI
 web/
 

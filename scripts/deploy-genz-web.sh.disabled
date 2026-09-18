@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# ============================================================================
+# ⛔ ARCHIVED — 2026-09-18 已停用，默认拒绝执行（exit 1）
+# ============================================================================
+#
+# 原用途：
+#   把 frontend/packages/genz-web/dist 用 rsync --delete 灌到 /var/www/genz-web，
+#   再由 nginx 的 genz.ltd / www.genz.ltd server 块 serve（注释原文：
+#   "VPS fallback if not on Vercel"）。
+#
+# 停用原因（错链 B）：
+#   裸域营销站真源 = 独立仓 GenzLTD/genz-web → Vercel 自动部署（push main 即发）。
+#   把营销站与 backend 捆在同一次海外发布里，等于把 Vite 静态站投到新加坡机；
+#   Vultr 只该管钱和脑（backend + compose + api/tspace 反代）。
+#   公网 apex 已在 Vercel，本机那份是死副本 —— 一旦 DNS 被指回本机，
+#   ICP 已删的旧营销壳会复活。
+#
+# 同时 docker/nginx.conf 与 nginx-vultr.conf 中的 genz.ltd / www.genz.ltd server
+# 块已摘除，本脚本已无对应 serve 端：执行它只会往一个没人读的目录写文件。
+#
+# 保留本文件仅为历史归档与回滚参考。**不要改回 scripts/deploy-genz-web.sh**，
+# 也不要把它重新接回 deploy-overseas.sh 或任何发布序列。
+#
+# 原实现（用于回滚参考，勿执行）：
+#   APP_DIR="${APP_DIR:-/opt/looma-zervi}"
+#   GENZ_WEB_DIST="${APP_DIR}/frontend/packages/genz-web/dist"
+#   GENZ_WEB_DEST="/var/www/genz-web"
+#   [ -d "${GENZ_WEB_DIST}" ] || { echo "Missing ${GENZ_WEB_DIST}" >&2; exit 1; }
+#   mkdir -p "${GENZ_WEB_DEST}"
+#   rsync -a --delete "${GENZ_WEB_DIST}/" "${GENZ_WEB_DEST}/"
+#   nginx -t && systemctl reload nginx
+# 完整历史见 git log --follow scripts/deploy-genz-web.sh.disabled
+#
+# 详见：docs/MULTI_REPO_PUBLISH_FEDERATION.md
+# ============================================================================
+
+set -euo pipefail
+
+cat >&2 <<'EOF'
+⛔ deploy-genz-web.sh 已于 2026-09-18 停用（裸域营销站迁出到 Vercel）。
+
+   真源：GenzLTD/genz-web  →  Vercel（push main 自动部署）
+   本机：不再 serve genz.ltd / www.genz.ltd（nginx server 块已摘）
+
+   营销站要改，请到 GenzLTD/genz-web 仓提交，不要在本机执行任何部署。
+   详见 docs/MULTI_REPO_PUBLISH_FEDERATION.md
+EOF
+exit 1

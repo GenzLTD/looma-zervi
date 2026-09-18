@@ -10,7 +10,7 @@
     "build:saas": "pnpm --filter @looma/saas build",
     "dev:genz-web": "pnpm --filter @looma/genz-web dev",
     "build:genz-web": "pnpm --filter @looma/genz-web build",
-    "build:all": "pnpm --filter @looma/shared-core build && pnpm build:planetx && pnpm build:saas && pnpm build:genz-web",
+    "build:all": "pnpm --filter @looma/shared-core build && pnpm build:planetx && pnpm build:saas",
     "lint": "pnpm -r run lint",
     "typecheck": "pnpm -r run typecheck",
     "test": "vitest run",

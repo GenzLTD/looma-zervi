@@ -1,12 +1,13 @@
 # ============================================================
 # Deploy Overseas — tag overseas-* → Vultr 新加坡（仅 tag 触发）
 #
-# 目标机: 139.180.184.25 · genz.ltd + tspace.genz.ltd + api.genz.ltd
+# 目标机: 139.180.184.25 · tspace.genz.ltd + api.genz.ltd
 #
-# URL 契约（与独立营销仓 szpeter2026/genz-web 对齐）:
+# URL 契约（与独立营销仓 GenzLTD/genz-web 对齐）:
 #   营销 CTA appRegisterUrl = https://tspace.genz.ltd/register
 #   本 CI 发布 SaaS → /var/www/saas/dist → nginx host tspace.genz.ltd
-#   genz.ltd 营销站由 Vercel 独立部署，本 workflow 不发布 genz-web
+#   genz.ltd 裸域由独立仓 GenzLTD/genz-web → Vercel 发布，本机不承载、本 workflow 不发布
+#   （2026-09-18 拆链；见 docs/MULTI_REPO_PUBLISH_FEDERATION.md）
 #
 # 触发: git tag overseas-v1.4.3 && git push origin overseas-v1.4.3
 #       或 Actions 页 workflow_dispatch 手动部署
@@ -117,8 +118,11 @@ jobs:
           path: frontend/packages/saas/dist
           retention-days: 1
 
-  # genz.ltd marketing is owned by independent repo szpeter2026/genz-web (Vercel).
-  # Do not dual-publish monorepo frontend/packages/genz-web here.
+  # genz.ltd marketing is owned by independent repo GenzLTD/genz-web (Vercel).
+  # Do not dual-publish monorepo frontend/packages/genz-web here (archived).
+
+  # NOTE (2026-09-18): 本 workflow 不创建、不写入、不校验 /var/www/genz-web。
+  # Vultr 只负责「钱和脑」= backend + compose + nginx（api / tspace 反代）。
 
   deploy:
     name: "Deploy to Vultr SG"
@@ -182,7 +186,7 @@ jobs:
           TSPACE_HOST="tspace.\${DOMAIN}"
 
           echo "=== Bootstrap overseas server (DEPLOY_PATH=\${DEPLOY_PATH}) ==="
-          mkdir -p "\${DEPLOY_PATH}" /var/www/genz-web /var/www/saas/dist "\${DEPLOY_PATH}/data" "\${DEPLOY_PATH}/logs" "\${DEPLOY_PATH}/data/chroma_models"
+          mkdir -p "\${DEPLOY_PATH}" /var/www/saas/dist "\${DEPLOY_PATH}/data" "\${DEPLOY_PATH}/logs" "\${DEPLOY_PATH}/data/chroma_models"
 
           ENV_FILE="\${DEPLOY_PATH}/backend/.env"
           mkdir -p "\$(dirname "\${ENV_FILE}")"
@@ -492,11 +496,10 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"email":"beta_free@looma.test","password":"looma123"}' | head -c 80
           echo ""
-          echo "=== Public https://genz.ltd/ (first bytes) ==="
-          curl -sf --connect-timeout 20 "https://genz.ltd/" | head -c 120
-          echo ""
           echo "=== Marketing CTA target: https://tspace.genz.ltd/register ==="
-          # Must match szpeter2026/genz-web SITE_CONFIG.appRegisterUrl
+          # 裸域 genz.ltd 由独立仓 GenzLTD/genz-web → Vercel 发布，不在本管线验收范围
+          # （此处只校验本管线自有的 tspace 目标；不得断言别人管线的可用性）
+          # Must match GenzLTD/genz-web SITE_CONFIG.appRegisterUrl
           REG_CODE=$(curl -sS -o /tmp/tspace-register.html -w '%{http_code}' --connect-timeout 20 \
             "https://tspace.genz.ltd/register")
           echo "HTTP ${REG_CODE}"
