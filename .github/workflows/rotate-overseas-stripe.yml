@@ -1,0 +1,126 @@
+# ============================================================
+# Rotate Overseas Stripe webhook secret — no code rsync, no compose rewrite
+#
+# 用途: Owner 在 Dashboard 对 we_1UGJAw Roll signing secret 之后，
+#       把 GitHub ENV_STRIPE_WEBHOOK_SECRET 写进 Vultr backend/.env，
+#       并只 recreate looma-backend，让 gunicorn 读到新 whsec。
+#
+# 不做什么:
+#   - 不 rsync /opt/looma-zervi
+#   - 不改 docker-compose.yml / nginx
+#   - 不覆盖 STRIPE_SECRET_KEY（收银 sk_live 仍在用）
+#   - 不打 overseas-* tag
+#
+# 前置: `gh secret set ENV_STRIPE_WEBHOOK_SECRET`（stdin，禁止贴聊天）
+# 触发: Actions → Rotate Overseas Stripe webhook → Run workflow
+#       confirm 必须等于 rotate-stripe
+# ============================================================
+name: Rotate Overseas Stripe webhook
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type rotate-stripe to overwrite Vultr STRIPE_WEBHOOK_SECRET from GitHub secret"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-overseas
+  cancel-in-progress: false
+
+env:
+  DEPLOY_PATH: ${{ vars.DEPLOY_PATH_SG != '' && vars.DEPLOY_PATH_SG || secrets.VULTR_DEPLOY_PATH || '/opt/looma-zervi' }}
+
+jobs:
+  rotate:
+    name: Write whsec + recreate backend
+    if: ${{ github.event.inputs.confirm == 'rotate-stripe' }}
+    runs-on: ubuntu-latest
+    env:
+      SSH_HOST: ${{ secrets.VULTR_SSH_HOST || secrets.SSH_HOST_OVERSEAS || secrets.SSH_HOST_SG }}
+      SSH_USER: ${{ secrets.VULTR_SSH_USER || secrets.SSH_USER_OVERSEAS || secrets.SSH_USER_SG }}
+    steps:
+      - name: Require webhook secret
+        env:
+          WHSEC: ${{ secrets.ENV_STRIPE_WEBHOOK_SECRET }}
+        run: |
+          if [ -z "$WHSEC" ]; then
+            echo "::error::ENV_STRIPE_WEBHOOK_SECRET is empty. gh secret set first; do not paste into chat."
+            exit 1
+          fi
+          case "$WHSEC" in
+            whsec_*) ;;
+            *) echo "::error::ENV_STRIPE_WEBHOOK_SECRET does not look like a Stripe signing secret"; exit 1 ;;
+          esac
+          python3 -c 'import hashlib,os; v=os.environ["WHSEC"]; print("github_secret sha256[:12]=%s len=%d"%(hashlib.sha256(v.encode()).hexdigest()[:12], len(v)))'
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.VULTR_SSH_PRIVATE_KEY || secrets.SSH_PRIVATE_KEY_OVERSEAS || secrets.SSH_PRIVATE_KEY_SG || secrets.OVERSEAS_SSH_PRIVATE_KEY }}
+
+      - name: Add host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
+          echo "DEPLOY_TARGET=${{ env.SSH_USER }}@${{ env.SSH_HOST }}" >> $GITHUB_ENV
+          echo 'SSH_CMD=ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o StrictHostKeyChecking=accept-new' >> $GITHUB_ENV
+
+      - name: Overwrite STRIPE_WEBHOOK_SECRET on Vultr
+        run: |
+          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << BOOTSTRAP
+          set -euo pipefail
+          ENV_FILE="${{ env.DEPLOY_PATH }}/backend/.env"
+          if [ ! -f "\${ENV_FILE}" ]; then
+            echo "::error::missing \${ENV_FILE}"
+            exit 1
+          fi
+          set_kv() {
+            local key="\$1" val="\$2"
+            [ -n "\${val}" ] || return 1
+            if grep -q "^\${key}=" "\${ENV_FILE}"; then
+              awk -v key="\${key}" -v val="\${val}" '
+                BEGIN { done=0 }
+                index(\$0, key "=")==1 { print key "=" val; done=1; next }
+                { print }
+                END { if (!done) print key "=" val }
+              ' "\${ENV_FILE}" > "\${ENV_FILE}.tmp" && mv "\${ENV_FILE}.tmp" "\${ENV_FILE}"
+            else
+              echo "\${key}=\${val}" >> "\${ENV_FILE}"
+            fi
+          }
+          set_kv STRIPE_WEBHOOK_SECRET "${{ secrets.ENV_STRIPE_WEBHOOK_SECRET }}"
+          python3 -c "
+          from pathlib import Path
+          import hashlib
+          for line in Path('\${ENV_FILE}').read_text(errors='replace').splitlines():
+              if line.startswith('STRIPE_WEBHOOK_SECRET='):
+                  v=line.split('=',1)[1]
+                  print('machine sha256[:12]=%s empty=%s'%(hashlib.sha256(v.encode()).hexdigest()[:12], int(not v)))
+                  break
+          else:
+              raise SystemExit('STRIPE_WEBHOOK_SECRET missing after write')
+          "
+          BOOTSTRAP
+
+      - name: Recreate backend only
+        run: |
+          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'REMOTE'
+          set -euo pipefail
+          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
+          COMPOSE="docker compose --env-file ${DEPLOY_PATH}/backend/.env -f ${DEPLOY_PATH}/docker/docker-compose.yml -p looma-zervi"
+          ${COMPOSE} up -d --no-build --force-recreate backend
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:5200/health >/dev/null 2>&1; then
+              echo "backend healthy after ${i}s"
+              curl -sf http://127.0.0.1:5200/health
+              echo
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "backend failed to become healthy"
+          ${COMPOSE} logs --tail 40 backend
+          exit 1
+          REMOTE

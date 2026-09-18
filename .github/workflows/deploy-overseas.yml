@@ -31,6 +31,12 @@
 #   ENV_GOOGLE_CLIENT_ID / ENV_GOOGLE_CLIENT_SECRET
 #   ENV_STRIPE_SECRET_KEY / ENV_STRIPE_WEBHOOK_SECRET
 #
+# 密钥写入纪律（支付窗口 / S5）:
+#   运行时真值（STRIPE_* / JWT / API keys）用 seed_kv：键已存在则不覆盖，
+#   避免 overseas-* 把 GitHub 旧 secret 打回机器、把 Live 验签打成 400。
+#   轮换 STRIPE_WEBHOOK_SECRET 不要走本 workflow，走
+#   .github/workflows/rotate-overseas-stripe.yml（只改这一键 + recreate backend）。
+#
 # Repository Variables（可选）:
 #   DEPLOY_PATH_SG         - 默认 /opt/looma-zervi
 # ============================================================
@@ -247,6 +253,15 @@ jobs:
             fi
           }
 
+          # Runtime secrets: write only when missing. Overwrite path is
+          # rotate-overseas-stripe.yml (webhook) — not this deploy job.
+          seed_kv() {
+            local key="\$1" val="\$2"
+            [ -n "\${val}" ] || return 0
+            grep -q "^\${key}=" "\${ENV_FILE}" && return 0
+            echo "\${key}=\${val}" >> "\${ENV_FILE}"
+          }
+
           set_kv FLASK_PORT 5200
           set_kv WECHAT_DEV_MODE false
           set_kv PAYMENT_STUB_MODE false
@@ -259,20 +274,20 @@ jobs:
           set_kv DEPLOY_REGION SG
           set_kv CORS_ORIGINS "https://\${DOMAIN},https://www.\${DOMAIN},https://\${TSPACE_HOST},https://\${API_HOST},https://app.\${DOMAIN},https://tspace.szbolent.cn,http://localhost:5173,http://localhost:5174,http://localhost:3000"
           set_kv GOOGLE_REDIRECT_URI "https://\${API_HOST}/v1/auth/google/callback"
-          set_kv JWT_SECRET "${{ env.ENV_JWT_SECRET }}"
-          set_kv DEEPSEEK_API_KEY "${{ secrets.VULTR_DEEPSEEK_API_KEY || secrets.ENV_DEEPSEEK_API_KEY }}"
+          seed_kv JWT_SECRET "${{ env.ENV_JWT_SECRET }}"
+          seed_kv DEEPSEEK_API_KEY "${{ secrets.VULTR_DEEPSEEK_API_KEY || secrets.ENV_DEEPSEEK_API_KEY }}"
           set_kv DEEPSEEK_BASE_URL "https://api.deepseek.com/v1"
           set_kv DEEPSEEK_MODEL deepseek-chat
           # Prefer DeepSeek overseas; OpenAI only if secret present. Do not rely on host Ollama.
           set_kv LLM_PROVIDER_ORDER deepseek,openai,ollama
-          set_kv QCC_AUTH_TOKEN "${{ secrets.VULTR_QCC_AUTH_TOKEN || secrets.ENV_QCC_AUTH_TOKEN }}"
+          seed_kv QCC_AUTH_TOKEN "${{ secrets.VULTR_QCC_AUTH_TOKEN || secrets.ENV_QCC_AUTH_TOKEN }}"
           set_kv QCC_ENABLED true
           set_kv QCC_MCP_BASE_URL "${{ vars.QCC_MCP_BASE_URL || 'http://1.14.202.161:8998/mcp' }}"
-          set_kv OPENAI_API_KEY "${{ secrets.ENV_OPENAI_API_KEY }}"
-          set_kv GOOGLE_CLIENT_ID "${{ secrets.ENV_GOOGLE_CLIENT_ID }}"
-          set_kv GOOGLE_CLIENT_SECRET "${{ secrets.ENV_GOOGLE_CLIENT_SECRET }}"
-          set_kv STRIPE_SECRET_KEY "${{ secrets.ENV_STRIPE_SECRET_KEY }}"
-          set_kv STRIPE_WEBHOOK_SECRET "${{ secrets.ENV_STRIPE_WEBHOOK_SECRET }}"
+          seed_kv OPENAI_API_KEY "${{ secrets.ENV_OPENAI_API_KEY }}"
+          seed_kv GOOGLE_CLIENT_ID "${{ secrets.ENV_GOOGLE_CLIENT_ID }}"
+          seed_kv GOOGLE_CLIENT_SECRET "${{ secrets.ENV_GOOGLE_CLIENT_SECRET }}"
+          seed_kv STRIPE_SECRET_KEY "${{ secrets.ENV_STRIPE_SECRET_KEY }}"
+          seed_kv STRIPE_WEBHOOK_SECRET "${{ secrets.ENV_STRIPE_WEBHOOK_SECRET }}"
           set_kv STRIPE_SUCCESS_URL "https://\${TSPACE_HOST}/pricing?status=success"
           set_kv STRIPE_CANCEL_URL "https://\${TSPACE_HOST}/pricing?status=cancel"
 
