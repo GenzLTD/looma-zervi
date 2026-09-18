@@ -94,6 +94,13 @@ test.describe("overseas B2C closed loop @overseas", () => {
 
   // ==============================================
   // Phase 2: genz-web landing page (English)
+  //
+  // 注意（2026-09-18 拆链）：裸域 genz.ltd 的真源是独立仓 GenzLTD/genz-web → Vercel。
+  // 本阶段在 CI / 本地跑的是**仓内归档副本**（pnpm dev:genz-web :5180），
+  // 它只是闭环链路的入口替身，**不代表线上真源**：
+  //   - 这里的绿灯不能当作「线上营销站正常」的证据；
+  //   - 不要引入 https://genz.ltd 作为默认 base（会把 Vercel 可用性变成 looma 门禁）。
+  // 见 docs/MULTI_REPO_PUBLISH_FEDERATION.md §2。
   // ==============================================
 
   test.describe("genz-web landing", () => {

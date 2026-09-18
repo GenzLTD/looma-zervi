@@ -73,6 +73,8 @@ export default defineConfig({
           timeout: 120_000,
         },
         {
+          // 仓内归档副本，仅作闭环入口替身；线上真源是 GenzLTD/genz-web → Vercel。
+          // 不要改成 https://genz.ltd（会让 Vercel 可用性成为 looma 的门禁）。
           command: "pnpm dev:genz-web",
           url: "http://localhost:5180",
           reuseExistingServer: !process.env.CI,

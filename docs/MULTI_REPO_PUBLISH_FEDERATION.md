@@ -63,7 +63,23 @@
 
 `nginx-looma-zervi-overseas.conf` 本就已是干净版（头部：「Frontend is on Vercel (genz.ltd) — this config is API-only by default」），未改动，可作正确口径样板。
 
-**刻意保留的跨管线耦合（手动工具，非管线）：** `frontend/e2e/overseas-closed-loop.live.spec.ts` 的 «genz-web landing» 阶段会访问营销站（本地 dev server 或线上 Vercel）。它是**人工验收工具、不进 CI**（两个 workflow 均无 playwright 步骤），且端到端闭环本来就要跨站，故保留；但**不得**把它接进任何 workflow，否则等于让 Vercel 的可用性成为 looma 发布门禁。
+**关于 Live E2E 的 «genz-web landing» 阶段（实测口径，勿想当然）：**
+
+`frontend/e2e/overseas-closed-loop.live.spec.ts` 里有一段访问营销站的断言。它**确实在 CI 里跑**——
+`ci.yml` 的 `frontend-e2e-live` job → `pnpm e2e:live` → `playwright.overseas.live.config.ts`。
+但**不构成对 Vercel 的依赖**，因为：
+
+- CI 未设 `E2E_OVERSEAS_WEB/SAAS/API`，故 `IS_PRODUCTION=false` → 走 **local 模式**，
+  由 webServer 起 `pnpm dev:genz-web`（`:5180`），测的是**仓内归档副本**，**从不碰 genz.ltd**；
+- 只有在本地显式 `E2E_ALLOW_REMOTE_API=1` + `E2E_OVERSEAS_WEB=https://genz.ltd` 时才会打线上，
+  那是人工验收，不是门禁。
+
+所以：**Vercel 抖动不会拖红 looma CI**（这点是对的），但这段断言现在测的是**已归档的过期副本**——
+按 §6 的反模式口径，它是「本地替身」而非「线上真源」的代表。因此：
+
+- 不得把 `https://genz.ltd` 写进任何 workflow 的默认路径或断言；
+- 该阶段的绿灯**不能**当成「线上营销站正常」的证据（线上真源看 GenzLTD/genz-web 的 Vercel 部署记录）；
+- 若日后要真正校验线上营销站，应放在 genz-web 仓自己的管线里，不放在 looma。
 
 ---
 
