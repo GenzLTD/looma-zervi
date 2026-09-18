@@ -61,6 +61,17 @@
 - `frontend/package.json` — `build:genz-web` 已移出 `build:all` 串联（脚本本身保留供本地比对，产物**不得**投递）
 - `frontend/packages/genz-web/README.md` — 头部加 ARCHIVED 只读声明
 
+**摘块前的越界影响核查（证明不会断营销站）：** 被摘掉的 apex server 块里除静态 serve 外还挂着 `/v1/*` 与 `/health` 反代，
+所以必须确认营销站不靠**裸域同源**调 API。实测 `frontend/packages/genz-web/src/`：
+
+```text
+src/config/site.ts:9   apiBase: import.meta.env.VITE_API_BASE || "https://api.genz.ltd"
+src/pages/PricingPage.tsx   fetch(`${apiBase}/v1/payment/providers|plans|checkout`)
+```
+
+营销站**全部**经 `apiBase` 出站，仓内无 `https://genz.ltd/v1/...` 之类同源调用 →
+摘掉 apex `/v1` 反代不会影响定价页与结账。今后若要改 `apiBase`，必须先回到本条复核。
+
 `nginx-looma-zervi-overseas.conf` 本就已是干净版（头部：「Frontend is on Vercel (genz.ltd) — this config is API-only by default」），未改动，可作正确口径样板。
 
 **关于 Live E2E 的 «genz-web landing» 阶段（实测口径，勿想当然）：**
