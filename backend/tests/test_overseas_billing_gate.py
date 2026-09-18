@@ -9,10 +9,11 @@ Runtime (what users hit):
   2. Stripe success/cancel URLs are built in Pricing.tsx from
      window.location.origin — Python does not read STRIPE_SUCCESS_URL.
 
-Config intent only (not runtime):
-  deploy-overseas.yml still writes STRIPE_SUCCESS_URL / CANCEL to
-  ${TSPACE_HOST}. Those env vars are dead until some future backend reads
-  them; the YAML tests below only prevent a silent rollback to ${DOMAIN}.
+Config intent retired 2026-09-19:
+  deploy-overseas.yml was removed from main (境内 Owner P1).
+  TestOverseasWorkflowContract now guards its *absence* — the old
+  overseas channel cannot be silently resurrected. Overseas deployment
+  truth lives in GenzLTD/Vultr-Genzltd (deploy.yml dual-gate + stack-v*).
 """
 from __future__ import annotations
 
@@ -174,36 +175,20 @@ class TestStripeCheckoutStub:
 
 
 class TestOverseasWorkflowContract:
-    def test_workflow_stripe_env_keeps_tspace_host_intent(self):
-        """Config-intent lock only — Python does not read STRIPE_SUCCESS_URL.
+    """Retired 2026-09-19: the old channel must stay dead.
 
-        This assertion does NOT prove checkout return URLs work. Runtime
-        redirects are built in Pricing.tsx (see TestStripeReturnUrlSource).
-        Fail here if deploy-overseas.yml rolls Success/Cancel back to ${DOMAIN}.
-        """
-        text = OVERSEAS_WORKFLOW.read_text(encoding="utf-8")
-        success = [
-            line
-            for line in text.splitlines()
-            if "STRIPE_SUCCESS_URL" in line and not line.strip().startswith("#")
-        ]
-        cancel = [
-            line
-            for line in text.splitlines()
-            if "STRIPE_CANCEL_URL" in line and not line.strip().startswith("#")
-        ]
-        assert len(success) >= 2
-        assert len(cancel) >= 2
-        for line in success + cancel:
-            assert "TSPACE_HOST" in line
-            assert "${DOMAIN}/pricing" not in line.replace("\\", "")
+    deploy-overseas.yml was deleted from main by 境内 Owner P1
+    (archive/release-overseas-2026-09-15 preserves the history).
+    Recreating this file would revive the rsync channel that can
+    overwrite the Vultr live stack — fail loudly if it comes back.
+    """
 
-    def test_git_commit_marker_is_written_before_compose_up(self):
-        text = OVERSEAS_WORKFLOW.read_text(encoding="utf-8")
-        marker = 'echo "${{ github.sha }}" > "${DEPLOY_PATH}/backend/git_commit.txt"'
-        up = "${COMPOSE} up -d --remove-orphans --force-recreate --no-build backend"
-        assert marker in text
-        assert text.index(marker) < text.index(up)
+    def test_deploy_overseas_workflow_is_retired(self):
+        assert not OVERSEAS_WORKFLOW.exists(), (
+            "deploy-overseas.yml 已于 2026-09-19 退役（境内 Owner P1）。"
+            "海外部署真源是 GenzLTD/Vultr-Genzltd 的 deploy.yml；"
+            "复活本文件需重新拍板并更新 Vultr-Genzltd 的 docs/looma-overseas/。"
+        )
 
 
 class TestStripeReturnUrlSource:
