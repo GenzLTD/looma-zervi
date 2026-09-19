@@ -1064,6 +1064,31 @@ NON_FK_USER_TABLES = (
     ("audit_logs", "actor", True),   # 审计轨迹默认保留，include_audit=True 时才清
 )
 
+# 有真实资金流水痕迹的订单状态：paid（已支付）/ refunded（已退款，同样存在支付历史）。
+# delete_user / purge 对存在此类订单的用户一律拒绝（对齐 Stripe 自身：
+# 不允许删除有支付历史的客户）。要清这类账号，先走「按订单清理」处理掉订单。
+PAID_ORDER_STATUSES = ("paid", "refunded")
+
+# purge_test_orders 允许清理的订单状态白名单默认值（绝不含 PAID_ORDER_STATUSES）。
+PURGEABLE_ORDER_STATUSES = ("pending", "expired")
+
+
+class PaidOrderBlockedError(Exception):
+    """用户存在已支付/已退款订单，删除被资金安全护栏拒绝。
+
+    orders 携带订单明细（id / out_trade_no / amount / currency / status / paid_at），
+    供管理端接口透出给运维定位。
+    """
+
+    def __init__(self, user_id: str, orders: list):
+        self.user_id = user_id
+        self.orders = orders
+        preview = ", ".join(o["out_trade_no"] for o in orders[:5])
+        super().__init__(
+            "refusing to delete user %s: %d order(s) with real payment history (%s)"
+            " — clear/refund those orders first" % (user_id, len(orders), preview)
+        )
+
 
 class DatabaseManager:
     """Thread-safe SQLite manager with WAL mode.
@@ -2850,8 +2875,23 @@ class DatabaseManager:
                 created.append(user_id)
         return created
 
+    def list_paid_orders(self, user_id: str) -> list:
+        """列出用户有真实资金流水痕迹的订单（paid / refunded）。"""
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, out_trade_no, plan_id, tier, amount, currency, status, paid_at"
+                " FROM orders WHERE user_id = ? AND status IN (?, ?)",
+                (user_id, *PAID_ORDER_STATUSES),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def delete_user(self, user_id: str, include_audit: bool = False) -> dict:
         """删除用户及其全部依赖行，返回 ``{"user_id":..., "deleted": {table: n}}``。
+
+        资金安全护栏（2026-09-19）：用户存在任一 paid / refunded 订单时直接抛
+        PaidOrderBlockedError 拒绝删除——orders 落在删除拓扑内，不设护栏会连
+        真金白银订单一起级联清掉。要清这类账号，先用 purge_test_orders
+        处理订单（或确认走退款流程），再删用户。
 
         为什么不能直接 ``DELETE FROM users``：
           库内 34 张表以裸外键引用 users(id)，没有任何 ``ON DELETE CASCADE``，
@@ -2866,6 +2906,11 @@ class DatabaseManager:
 
         ``include_audit=False``（默认）保留 audit_logs 中的审计轨迹。
         """
+        # 资金安全护栏：paid / refunded 订单存在 → 一票否决，用户与依赖行全不动。
+        paid_orders = self.list_paid_orders(user_id)
+        if paid_orders:
+            raise PaidOrderBlockedError(user_id, paid_orders)
+
         with self.get_conn() as conn:
             tabs = [
                 r[0] for r in conn.execute(
@@ -2960,6 +3005,84 @@ class DatabaseManager:
                     deleted[table] = deleted.get(table, 0) + cur.rowcount
 
             return {"user_id": user_id, "deleted": deleted}
+
+    def purge_test_orders(
+        self,
+        prefixes,
+        statuses=None,
+        zero_amount_only: bool = False,
+        dry_run: bool = False,
+    ) -> dict:
+        """按订单维度清理测试订单（**不触碰 users 及其他任何表**）。
+
+        与 delete_user 的分工：delete_user 以用户为中心、有 paid 护栏；
+        本方法以订单为中心，用于在不动用户的前提下清掉测试订单
+        （如 LOOMA-WIN-* 零元单、灰度残留 pending 单）。
+
+        匹配规则（各条件 AND）：
+          * ``out_trade_no`` 以 ``prefixes`` 中任一前缀开头（必填——不允许全表扫）；
+          * ``status`` ∈ ``statuses``（默认 PURGEABLE_ORDER_STATUSES）；
+          * ``zero_amount_only=True`` 时还要求 ``amount == 0``。
+
+        paid / refunded 订单在结构上不可能被本方法选中：状态白名单显式排除
+        （传入即 ValueError），与 delete_user 护栏互为犄角。
+
+        返回 ``{"matched": n, "deleted": n, "orders": [...], "skipped_non_purgeable": n}``；
+        ``orders`` 为命中明细（最多 100 条，dry_run 与实际删除一致）。
+        """
+        if not prefixes:
+            raise ValueError("prefixes 必填——按订单清理不允许无前缀全表扫")
+        prefixes = [str(p) for p in prefixes if str(p).strip()]
+        if not prefixes:
+            raise ValueError("prefixes 不能全为空串")
+
+        statuses = tuple(statuses) if statuses else PURGEABLE_ORDER_STATUSES
+        bad = set(statuses) & set(PAID_ORDER_STATUSES)
+        if bad:
+            raise ValueError(
+                "paid/refunded 订单不允许按订单清理（状态命中: %s）" % sorted(bad)
+            )
+
+        where = ["out_trade_no LIKE ?"] * len(prefixes)
+        params = [p + "%" for p in prefixes]
+        where.append("status IN (%s)" % ",".join("?" * len(statuses)))
+        params.extend(statuses)
+        if zero_amount_only:
+            where.append("amount = 0")
+        sql_where = " AND ".join("(%s)" % w for w in where)
+
+        with self.get_conn() as conn:
+            matched = [
+                dict(r)
+                for r in conn.execute(
+                    "SELECT id, user_id, out_trade_no, plan_id, tier, amount, currency,"
+                    " status, created_at FROM orders WHERE %s" % sql_where,
+                    params,
+                ).fetchall()
+            ]
+            # 同前缀但状态不在白名单内的单（含 paid/refunded——结构上不可清）
+            any_prefix_sql = " OR ".join("out_trade_no LIKE ?" for _ in prefixes)
+            total_prefixed = conn.execute(
+                "SELECT COUNT(*) FROM orders WHERE (%s)" % any_prefix_sql,
+                [p + "%" for p in prefixes],
+            ).fetchone()[0]
+            skipped_non_purgeable = total_prefixed - len(matched)
+
+            if dry_run or not matched:
+                deleted = 0
+            else:
+                deleted = conn.execute(
+                    "DELETE FROM orders WHERE id IN (%s)"
+                    % ",".join("?" * len(matched)),
+                    [o["id"] for o in matched],
+                ).rowcount
+
+        return {
+            "matched": len(matched),
+            "deleted": deleted,
+            "orders": matched[:100],
+            "skipped_non_purgeable": max(skipped_non_purgeable, 0),
+        }
 
     def rate_query(self, query_id: int, rating: int):
         """Rate a query (1-5)."""

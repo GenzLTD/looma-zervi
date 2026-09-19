@@ -43,13 +43,16 @@ def admin_purge_test_accounts():
 
     安全约束（任一不满足即拒绝，故不可能误删真人账号）：
       * 后缀必须在 manager.TEST_EMAIL_SUFFIXES 白名单内；
-      * 永不触碰 BETA_USERS 里 seed 的账号（删了会被重新 seed，属白删）。
+      * 永不触碰 BETA_USERS 里 seed 的账号（删了会被重新 seed，属白删）；
+      * 用户存在任一 paid / refunded 订单时拒绝（PaidOrderBlockedError，
+        对齐 Stripe 不允许删除有支付历史的客户），该用户整单跳过、
+        不连坐其余账号——先走 /admin/test-orders/purge 清订单再删用户。
 
     Body（都可选）::
 
         {"suffixes": ["@test.local"], "dry_run": true}
 
-    返回 ``{"purged": n, "failed": n, "deleted": {table: rows}}``。
+    返回 ``{"purged": n, "failed": n, "blocked": n, "deleted": {table: rows}}``。
     """
     err = _require_admin()
     if err:
@@ -86,36 +89,119 @@ def admin_purge_test_accounts():
         ).fetchall()
 
     targets = [
-        r["id"]
+        (r["id"], r["email"])
         for r in rows
         if r["email"].strip().lower() not in seeded
         and any(r["email"].strip().lower().endswith(s) for s in suffixes)
     ]
 
-    if body.get("dry_run"):
-        return jsonify(dry_run=True, matched=len(targets), suffixes=suffixes)
+    # paid 订单明细（dry_run 与实跑都要透出，运维据此决定先清哪些订单）
+    paid_blocked = []
+    for uid, email in targets:
+        paid_orders = db.list_paid_orders(uid)
+        if paid_orders:
+            paid_blocked.append(
+                {"user_id": uid, "email": email, "paid_orders": paid_orders}
+            )
 
-    deleted, failures = {}, []
-    for uid in targets:
+    if body.get("dry_run"):
+        return jsonify(
+            dry_run=True,
+            matched=len(targets),
+            eligible=len(targets) - len(paid_blocked),
+            blocked_by_paid=len(paid_blocked),
+            blocked_details=paid_blocked[:20],
+            suffixes=suffixes,
+        )
+
+    deleted, failures, blocked = {}, [], []
+    for uid, email in targets:
         try:
             result = db.delete_user(uid)
         except Exception as exc:  # noqa: BLE001 — 单个失败不应中断整批
-            logger.warning("purge test account %s failed: %s", uid, exc)
-            failures.append({"user_id": uid, "error": str(exc)})
+            from src.db.manager import PaidOrderBlockedError
+
+            if isinstance(exc, PaidOrderBlockedError):
+                blocked.append({"user_id": uid, "email": email,
+                                "paid_orders": exc.orders})
+            else:
+                logger.warning("purge test account %s failed: %s", uid, exc)
+                failures.append({"user_id": uid, "error": str(exc)})
             continue
         for table, n in result["deleted"].items():
             deleted[table] = deleted.get(table, 0) + n
 
-    purged = len(targets) - len(failures)
+    purged = len(targets) - len(failures) - len(blocked)
     logger.info(
-        "admin %s purged %d test accounts (failed=%d)", g.user_id, purged, len(failures)
+        "admin %s purged %d test accounts (failed=%d, blocked_by_paid=%d)",
+        g.user_id, purged, len(failures), len(blocked),
     )
     return jsonify(
         purged=purged,
         failed=len(failures),
+        blocked_by_paid=len(blocked),
+        blocked_details=blocked[:20],
         errors=failures[:10],
         deleted=deleted,
     )
+
+
+# ── 清理测试订单（按订单维度，不动用户）──
+
+@admin_bp.route("/admin/test-orders/purge", methods=["POST"])
+@require_auth
+def admin_purge_test_orders():
+    """按 out_trade_no 前缀清理测试订单（admin only，**不触碰 users**）。
+
+    用于在不动用户账号的前提下清掉测试订单（如 LOOMA-WIN-* 零元单、
+    灰度残留 pending 单）——与 test-accounts/purge 的 paid 护栏配套：
+    先清订单，再删用户。
+
+    Body::
+
+        {
+          "prefixes": ["LOOMA-WIN-"],        # 必填，防全表扫
+          "statuses": ["pending", "expired"], # 可选，默认 pending+expired；
+                                              # 传 paid/refunded 直接 400
+          "zero_amount_only": false,          # 可选，true 时只清零元单
+          "dry_run": true                     # 可选，默认 false
+        }
+
+    返回 ``{"matched": n, "deleted": n, "orders": [...],
+    "skipped_non_purgeable": n}``。
+    """
+    err = _require_admin()
+    if err:
+        return err
+
+    body = request.get_json(silent=True) or {}
+    prefixes = body.get("prefixes")
+    if not isinstance(prefixes, list) or not prefixes:
+        return jsonify(
+            error="bad_request",
+            message="prefixes 必填（非空数组）——按订单清理不允许无前缀全表扫",
+        ), 400
+
+    statuses = body.get("statuses")
+    if statuses is not None and (not isinstance(statuses, list) or not statuses):
+        return jsonify(error="bad_request", message="statuses 需为非空数组或省略"), 400
+
+    db = _get_db()
+    try:
+        result = db.purge_test_orders(
+            prefixes=prefixes,
+            statuses=statuses,
+            zero_amount_only=bool(body.get("zero_amount_only")),
+            dry_run=bool(body.get("dry_run")),
+        )
+    except ValueError as exc:
+        return jsonify(error="bad_request", message=str(exc)), 400
+
+    logger.info(
+        "admin %s purged test orders by prefix %s (matched=%d deleted=%d)",
+        g.user_id, prefixes, result["matched"], result["deleted"],
+    )
+    return jsonify(**result)
 
 
 # ── Full admin stats ──
