@@ -33,7 +33,11 @@ services:
       - AIRWALLEX_MODE=${AIRWALLEX_MODE:-demo}
       - AIRWALLEX_WEBHOOK_SECRET=${AIRWALLEX_WEBHOOK_SECRET:-}
       - RATE_LIMIT_STORAGE_URI=${RATE_LIMIT_STORAGE_URI:-memory://}
-      - DEPLOY_REGION=${DEPLOY_REGION:-US}
+      # 计费部署位。缺省 CN：境内机不配此键时正确回落 CNY/微信路径
+      # （DEPLOY_ALIASES 未收录 CN，等价于未设置）。海外机（Vultr）必须在
+      # docker/.env 或 shell 显式钉 DEPLOY_REGION=SG——deploy-overseas.yml
+      # 退役后不再有 workflow 兜底 export（2026-09-19 修复境内机自称海外站缺陷）。
+      - DEPLOY_REGION=${DEPLOY_REGION:-CN}
       # QCC (企查查官方 MCP；2026-08-27 迁入 base，防 full.yml 重新生成丢配置。
       # 注意：compose environment 优先于 backend/.env，重新生成 full.yml 前
       # 必须确保插值源（docker/.env 或 shell）已配 QCC_ENABLED=true + QCC_AUTH_TOKEN)
