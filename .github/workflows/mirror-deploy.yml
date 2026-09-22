@@ -1,0 +1,23 @@
+name: Mirror to deploy repo
+
+on:
+  push:
+    branches: [release/overseas]
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.MIRROR_DEPLOY_KEY }}
+      - name: Push mirror to szpeter2026/looma-zervi-deploy
+        run: |
+          git config user.name "genz-mirror-bot"
+          git config user.email "bot@genz.ltd"
+          git remote add mirror git@github.com:szpeter2026/looma-zervi-deploy.git
+          git push mirror HEAD:refs/heads/release/overseas --force
