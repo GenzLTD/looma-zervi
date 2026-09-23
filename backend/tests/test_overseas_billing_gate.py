@@ -73,8 +73,9 @@ class TestWechatRegionGate:
             assert resp.status_code == 401
             assert resp.get_json()["error"] == "unauthorized"
 
-    def test_stub_mode_short_circuits_before_region_gate(self):
-        """Live Vultr still has PAYMENT_STUB_MODE=true; region=US never reaches 403."""
+    def test_region_gate_applies_in_stub_mode(self):
+        """双主体定案后（v1.1.0）：微信只服务 CN 计费区，stub 也不例外——
+        stub 会真发模拟订单，region=US 在 stub 下同样必须 403（不再短路）。"""
         with _client("true") as c:
             token = _register(c, "wx_stub_us@test.com")
             resp = c.post(
@@ -82,8 +83,8 @@ class TestWechatRegionGate:
                 json={"tier": "supporter", "trade_type": "NATIVE"},
                 headers=_auth(token),
             )
-            assert resp.status_code == 400
-            assert resp.get_json()["error"] == "stub_mode"
+            assert resp.status_code == 403
+            assert resp.get_json()["error"] == "region_not_supported"
 
     def test_us_region_rejected_with_403_when_stub_off(self):
         with _client("false") as c:

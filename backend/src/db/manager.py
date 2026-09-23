@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -4330,3 +4331,178 @@ END;
                 (user_id,),
             ).fetchone()
         return int(row["n"]) if row else 0
+
+    # ============================================
+    # Driver content (橱窗/书店 多租户 API 层)
+    #
+    # 归属过滤纪律：所有按 id 定位的读写都在 WHERE 里带上 driver_id，
+    # 由 DB 方法层强制 —— 调用方（路由）拿不到"绕过归属"的口子。
+    # DB 复合外键（articles_col_driver_fk 等）是最后一道闸，这里才是第一道。
+    # ============================================
+
+    # ---- columns（书店专栏容器）----
+
+    def create_column(self, driver_id: str, slug: str, name: str,
+                      description: str = None, content_type: str = "article",
+                      icon: str = None, sort_order: int = 0) -> dict:
+        """创建专栏。UNIQUE(driver_id, slug) —— 同驾驶员内 slug 唯一。"""
+        col_id = str(uuid.uuid4())
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO columns (id, driver_id, slug, name, description,
+                                        content_type, icon, sort_order)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (col_id, driver_id, slug, name, description,
+                 content_type, icon, sort_order),
+            )
+        return self.get_column(col_id, driver_id)
+
+    def get_column(self, column_id: str, driver_id: str = None) -> dict | None:
+        """按 id 取专栏。driver_id 非空时强制归属过滤（非本人视为不存在）。"""
+        sql, params = "SELECT * FROM columns WHERE id = ?", [column_id]
+        if driver_id is not None:
+            sql += " AND driver_id = ?"
+            params.append(driver_id)
+        with self.get_conn() as conn:
+            row = conn.execute(sql, params).fetchone()
+        return dict(row) if row else None
+
+    def list_columns(self, driver_id: str = None) -> list[dict]:
+        """列专栏。driver_id 非空时只返回该驾驶员的。"""
+        sql, params = "SELECT * FROM columns", []
+        if driver_id is not None:
+            sql += " WHERE driver_id = ?"
+            params.append(driver_id)
+        sql += " ORDER BY sort_order, created_at"
+        with self.get_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_column(self, column_id: str, driver_id: str,
+                      name: str = None, description: str = None,
+                      icon: str = None, sort_order: int = None) -> dict | None:
+        """更新专栏（仅本人）。归属不匹配返回 None，路由层转 404。"""
+        sets, params = [], []
+        for field, value in (("name", name), ("description", description),
+                             ("icon", icon), ("sort_order", sort_order)):
+            if value is not None:
+                sets.append(f"{field} = ?")
+                params.append(value)
+        if not sets:
+            return self.get_column(column_id, driver_id)
+        params.extend([column_id, driver_id])
+        with self.get_conn() as conn:
+            cur = conn.execute(
+                f"UPDATE columns SET {', '.join(sets)} WHERE id = ? AND driver_id = ?",
+                params,
+            )
+            if cur.rowcount == 0:
+                return None
+        return self.get_column(column_id, driver_id)
+
+    def delete_column(self, column_id: str, driver_id: str) -> bool:
+        """删除专栏（仅本人）。仍挂着内容的专栏由 FK 拒绝删除。"""
+        with self.get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM columns WHERE id = ? AND driver_id = ?",
+                (column_id, driver_id),
+            )
+        return cur.rowcount > 0
+
+    # ---- articles（书店存货）----
+
+    def create_article(self, driver_id: str, title: str, slug: str, content: str,
+                       column_id: str = None, excerpt: str = None,
+                       tags: str = "", status: str = "published") -> dict:
+        """创建文章。column_id 归属一致性由复合外键 articles_col_driver_fk 兜底。"""
+        art_id = str(uuid.uuid4())
+        published_at = (time.strftime("%Y-%m-%d %H:%M:%S")
+                        if status == "published" else None)
+        with self.get_conn() as conn:
+            conn.execute(
+                """INSERT INTO articles (id, driver_id, column_id, title, slug,
+                                         excerpt, content, tags, status, published_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (art_id, driver_id, column_id, title, slug,
+                 excerpt, content, tags, status, published_at),
+            )
+        return self.get_article(art_id, driver_id)
+
+    def get_article(self, article_id: str, driver_id: str = None) -> dict | None:
+        """按 id 取文章。driver_id 非空时强制归属过滤（非本人视为不存在）。"""
+        sql, params = "SELECT * FROM articles WHERE id = ?", [article_id]
+        if driver_id is not None:
+            sql += " AND driver_id = ?"
+            params.append(driver_id)
+        with self.get_conn() as conn:
+            row = conn.execute(sql, params).fetchone()
+        return dict(row) if row else None
+
+    def get_article_by_slug(self, driver_id: str, slug: str,
+                            column_id: str = None) -> dict | None:
+        """稳定键 (publisher_id, slug) 查找 —— 三方对账/信号去重用。"""
+        sql, params = "SELECT * FROM articles WHERE driver_id = ? AND slug = ?", [driver_id, slug]
+        if column_id is not None:
+            sql += " AND column_id = ?"
+            params.append(column_id)
+        with self.get_conn() as conn:
+            row = conn.execute(sql, params).fetchone()
+        return dict(row) if row else None
+
+    def list_articles(self, driver_id: str = None, column_id: str = None,
+                      status: str = None, limit: int = 50, offset: int = 0) -> list[dict]:
+        """列文章。driver_id 非空时强制归属过滤。"""
+        conds, params = [], []
+        if driver_id is not None:
+            conds.append("driver_id = ?")
+            params.append(driver_id)
+        if column_id is not None:
+            conds.append("column_id = ?")
+            params.append(column_id)
+        if status is not None:
+            conds.append("status = ?")
+            params.append(status)
+        sql = "SELECT * FROM articles"
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        sql += " ORDER BY COALESCE(published_at, created_at) DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        with self.get_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_article(self, article_id: str, driver_id: str,
+                       title: str = None, content: str = None, excerpt: str = None,
+                       tags: str = None, status: str = None,
+                       column_id: str = ..., ) -> dict | None:
+        """更新文章（仅本人）。column_id 变更同样吃复合外键约束。"""
+        sets, params = [], []
+        for field, value in (("title", title), ("content", content),
+                             ("excerpt", excerpt), ("tags", tags), ("status", status)):
+            if value is not None:
+                sets.append(f"{field} = ?")
+                params.append(value)
+        if column_id is not ...:
+            sets.append("column_id = ?")
+            params.append(column_id)
+        if not sets:
+            return self.get_article(article_id, driver_id)
+        sets.append("updated_at = datetime('now')")
+        params.extend([article_id, driver_id])
+        with self.get_conn() as conn:
+            cur = conn.execute(
+                f"UPDATE articles SET {', '.join(sets)} WHERE id = ? AND driver_id = ?",
+                params,
+            )
+            if cur.rowcount == 0:
+                return None
+        return self.get_article(article_id, driver_id)
+
+    def delete_article(self, article_id: str, driver_id: str) -> bool:
+        """删除文章（仅本人）。"""
+        with self.get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM articles WHERE id = ? AND driver_id = ?",
+                (article_id, driver_id),
+            )
+        return cur.rowcount > 0

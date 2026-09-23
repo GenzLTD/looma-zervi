@@ -95,6 +95,29 @@ def require_tier(min_tier: str):
     return decorator
 
 
+def require_driver(f):
+    """
+    Require the authenticated user to hold a driver (or admin) role.
+    On success sets g.driver_id = g.user_id —— 多租户归属过滤的锚点：
+    后续所有 columns/articles 读写都必须以 g.driver_id 作用域执行，
+    路由层不允许出现"无归属"的查询。
+
+    Usage: @require_auth @require_driver
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        role = g.get("user_role", "user")
+        if role not in ("driver", "admin"):
+            return jsonify(
+                error="forbidden",
+                message="Driver role required for content management",
+            ), 403
+        g.driver_id = g.user_id
+        return f(*args, **kwargs)
+
+    return decorated
+
+
 def optional_auth(f):
     """
     Optional auth — if token is present, set g.user_id/g.user_tier;

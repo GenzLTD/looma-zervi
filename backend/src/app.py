@@ -265,6 +265,9 @@ def create_app(env="development"):
     from src.api.routes.huawei_iap_routes import huawei_iap_bp  # HarmonyOS IAP
     from src.api.routes.huawei_push_routes import huawei_push_bp  # HarmonyOS Push
     from src.api.routes.card_routes import card_bp  # HarmonyOS Card API
+    from src.api.routes.driver_content_routes import (  # 橱窗/书店多租户 API + 通道 B 内容信号
+        driver_content_bp, signal_content_bp,
+    )
 
     app.register_blueprint(auth_bp, url_prefix="/v1/auth")
     app.register_blueprint(game_bp, url_prefix="/v1/game")
@@ -291,6 +294,8 @@ def create_app(env="development"):
     app.register_blueprint(huawei_iap_bp, url_prefix="/v1/payment/huawei")  # HarmonyOS IAP
     app.register_blueprint(huawei_push_bp, url_prefix="/v1/push/huawei")  # HarmonyOS Push
     app.register_blueprint(card_bp, url_prefix="/v1")  # HarmonyOS Cards (/v1/card/*)
+    app.register_blueprint(driver_content_bp, url_prefix="/v1/driver")  # 多租户内容
+    app.register_blueprint(signal_content_bp, url_prefix="/v1")  # 通道 B：/v1/signals/content
 
     # --- Health check ---
     @app.route("/health", methods=["GET"])
