@@ -324,6 +324,7 @@ def create_wechat_order():
     if _is_stub_mode():
         db = current_app._db
         out_trade_no = generate_out_trade_no()
+        stub_qr = f"weixin://wxpay/stub/{out_trade_no}"
         order = db.create_order(
             user_id=g.user_id,
             plan_id=plan["plan_id"],
@@ -331,22 +332,37 @@ def create_wechat_order():
             amount=plan["price_monthly"],
             currency=plan["currency"],
             out_trade_no=out_trade_no,
-            qr_code_url=f"weixin://wxpay/stub/{out_trade_no}",
+            prepay_id=f"stub_{out_trade_no}",
+            qr_code_url=stub_qr,
             metadata_json={
                 "trade_type": trade_type,
                 "region": region,
                 "mode": "stub",
             },
         )
-        return jsonify(
-            order_id=order["id"],
-            out_trade_no=out_trade_no,
-            qr_code_url=f"weixin://wxpay/stub/{out_trade_no}",
-            amount=plan["price_monthly"],
-            currency=plan["currency"],
-            tier=new_tier,
-            stub_mode=True,
-        ), 201
+        resp = {
+            "order_id": order["id"],
+            "out_trade_no": out_trade_no,
+            "prepay_id": f"stub_{out_trade_no}",
+            "qr_code_url": stub_qr,
+            "amount": plan["price_monthly"],
+            "currency": plan["currency"],
+            "tier": new_tier,
+            "stub_mode": True,
+        }
+        # JSAPI（小程序内支付）：返回与生产同形状的模拟 jsapi_params，
+        # 小程序端代码无需为 stub 改动——生产换凭证后原样走 wx.requestPayment。
+        if trade_type == "JSAPI":
+            import time as _time
+            resp["jsapi_params"] = {
+                "appId": current_app.config.get("WECHAT_APPID", "") or "stub-appid",
+                "timeStamp": str(int(_time.time())),
+                "nonceStr": out_trade_no[-16:],
+                "package": f"prepay_id=stub_{out_trade_no}",
+                "signType": "RSA",
+                "paySign": "STUB_SIGNATURE",
+            }
+        return jsonify(**resp), 201
 
     # 方案 A：JSAPI 支付时若前端未传 openid，从用户 DB 自动填充
     if trade_type == "JSAPI" and not openid:

@@ -110,3 +110,25 @@ def test_notify_simulate_requires_stub_mode(app):
         json={"out_trade_no": "LOOMAX"},
     )
     assert resp.status_code == 403
+
+
+def test_stub_jsapi_order_returns_mock_params(client):
+    """小程序 JSAPI 下码：stub 返回与生产同形状的 jsapi_params（wx.requestPayment 可直连）。"""
+    resp = client.post("/v1/auth/register", json={
+        "email": "stub-jsapi@test.com",
+        "password": "password123",
+    })
+    token = resp.get_json()["access_token"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    resp = client.post(
+        "/v1/payment/wechat/order?region=CN",
+        json={"tier": "supporter", "trade_type": "JSAPI", "openid": "dev_e2e"},
+        headers=auth,
+    )
+    assert resp.status_code == 201
+    data = resp.get_json()
+    params = data["jsapi_params"]
+    assert set(params) == {"appId", "timeStamp", "nonceStr", "package", "signType", "paySign"}
+    assert params["package"].startswith("prepay_id=stub_")
+    assert data["prepay_id"].startswith("stub_")
