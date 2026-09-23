@@ -1,22 +1,19 @@
 /**
  * Miniprogram runtime config.
- * 
- * 环境切换说明：
- * - dev:    本地开发环境，后端运行在 :5200
- * - staging: 远程内测环境，后端运行在服务器 IP
- * - prod:    生产环境，备案域名
- * 
+ *
+ * 环境说明：
+ * - 当前固定本地环境：ServBay 反代 http://api.servbay.host
+ * - 云上上线时改为：https://api.genz.ltd
+ *
  * 本地联调步骤：
- * 1. 切换到 dev 环境：API_BASE = 'http://127.0.0.1:5200'
- * 2. 启动后端：cd backend && ./dev.sh
- * 3. 微信开发者工具：设置 → 不校验合法域名
- * 4. 构建 npm：pnpm run build:npm
+ * 1. 确认后端挂在 ServBay 反代域名 api.servbay.host（如后端在 :5200）
+ * 2. 微信开发者工具：设置 → 不校验合法域名（本地 http 域名）
+ * 3. 构建 npm：pnpm run build:npm
  */
 
-// 开发环境（本地联调）
-export const API_BASE = 'http://127.0.0.1:5200'
-// export const API_BASE = 'http://1.14.202.161'  // staging 环境
-// export const API_BASE = 'https://your-domain.com'  // prod 环境
+// 本地（ServBay 反代）
+export const API_BASE = 'http://api.servbay.host'
+// 云上：export const API_BASE = 'https://api.genz.ltd'
 
 export const SAAS_BASE = 'http://localhost:5174'
 
