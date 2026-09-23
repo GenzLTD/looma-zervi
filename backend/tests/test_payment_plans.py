@@ -11,10 +11,10 @@ def test_payment_plans_default_cn(client):
     assert data["payment_provider"] == "wechat"
 
     tiers = {plan["tier"]: plan for plan in data["plans"]}
-    assert tiers["supporter"]["price_monthly"] == 9.9
+    assert tiers["supporter"]["price_monthly"] == 29
     assert tiers["supporter"]["currency"] == "CNY"
     assert tiers["supporter"]["plan_id"] == "supporter_monthly_cn"
-    assert tiers["pro"]["price_monthly"] == 29.9
+    assert tiers["pro"]["price_monthly"] == 99
 
 
 def test_payment_plans_us_region(client):
@@ -57,7 +57,7 @@ def test_payment_plans_non_chinese_language_falls_back_us(client):
     assert data["currency"] == "USD"
 
 
-@pytest.mark.parametrize("tier,expected_price", [("supporter", 9.9), ("pro", 29.9)])
+@pytest.mark.parametrize("tier,expected_price", [("supporter", 29), ("pro", 99)])
 def test_payment_upgrade_includes_regional_plan(client, tier, expected_price):
     resp = client.post("/v1/auth/register", json={
         "email": f"{tier}-plan@test.com",

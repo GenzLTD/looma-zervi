@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Looma Payment Contract v1",
-  "version": "1.0.0",
-  "description": "Tier 全球统一；价格按 region 分叉。真源：looma-zervi/backend/contracts/payment.v1.json",
+  "version": "1.1.0",
+  "description": "Tier 全球统一；价格按 region 分叉，商品决定定价（不要求跨区一致）。双主体：CN=深伯乐（诗词 AI 辅助，微信收款）；US=YeDall（求职 SaaS 订阅，Stripe 收款）。真源：looma-zervi/backend/contracts/payment.v1.json",
   "tier_enum": ["free", "supporter", "pro", "enterprise"],
   "deprecated_tier_aliases": {
     "basic": "supporter"
@@ -77,9 +77,9 @@
       },
       "features": {
         "CN": [
-          "每日 30 次 AI 对话",
-          "基础岗位匹配",
-          "简历解析（3次/天）"
+          "每日 10 次诗词搜索",
+          "基础诗人浏览",
+          "诗词收藏"
         ],
         "US": [
           "30 AI chats per day",
@@ -98,7 +98,7 @@
       "prices": {
         "CN": {
           "plan_id": "supporter_monthly_cn",
-          "amount": 9.9,
+          "amount": 29,
           "currency": "CNY"
         },
         "US": {
@@ -109,10 +109,10 @@
       },
       "features": {
         "CN": [
-          "每日 100 次 AI 对话",
-          "高级岗位匹配",
-          "简历解析（不限）",
-          "专属星球徽章"
+          "无限诗词搜索",
+          "AI 诗词问答",
+          "深度诗人分析",
+          "去广告"
         ],
         "US": [
           "100 AI chats per day",
@@ -132,7 +132,7 @@
       "prices": {
         "CN": {
           "plan_id": "pro_monthly_cn",
-          "amount": 29.9,
+          "amount": 99,
           "currency": "CNY"
         },
         "US": {
@@ -143,11 +143,10 @@
       },
       "features": {
         "CN": [
-          "AI 对话不限",
-          "全功能岗位匹配",
-          "简历解析（不限）",
-          "企业级报告",
-          "优先客服"
+          "支持者全部功能",
+          "API 调用额度 ×10",
+          "企业级 RAG 知识库",
+          "优先客服支持"
         ],
         "US": [
           "Unlimited AI chats",

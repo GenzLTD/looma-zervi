@@ -53,35 +53,35 @@ QUOTA_LIMITS = {
 # Upgrade hints
 UPGRADE_HINT_GUEST_EXHAUSTED = {
     "reason": "guest_quota_exhausted",
-    "message": "今日免费体验次数已用完（3次）。注册账号解锁每日30次AI问答，还有职位匹配、诗词推荐等更多功能！",
+    "message": "今日免费体验次数已用完（3次）。注册账号解锁每日30次AI诗词问答，还有诗词搜索、诗人分析等更多功能！",
     "register_url": "/v1/auth/register",
     "upgrade_tiers": [
         {"tier": "free", "name": "免费版", "daily_quota": 30, "price_monthly": "免费",
-         "features": ["每日30次AI问答", "5次职位匹配", "3次简历解析", "基础诗词推荐"]},
-        {"tier": "supporter", "name": "支持者版", "daily_quota": 99999, "price_monthly": "¥9.9/月·自愿赞助",
-         "features": ["无限次AI问答", "无限职位匹配", "简历解析", "MBTI分析", "高级RAG"]},
+         "features": ["每日10次诗词搜索", "每日30次AI诗词问答", "基础诗人浏览", "诗词收藏"]},
+        {"tier": "supporter", "name": "支持者版", "daily_quota": 99999, "price_monthly": "¥29/月",
+         "features": ["无限诗词搜索", "AI 诗词问答", "深度诗人分析", "去广告"]},
     ],
 }
 
 UPGRADE_HINT_FREE_EXHAUSTED = {
     "reason": "free_quota_exhausted",
-    "message": "今日免费版配额已用尽。免费版每日30次对话，覆盖大部分真实求职场景。如需无限使用，9.9元/月支持我们。",
+    "message": "今日免费版配额已用尽。免费版每日30次AI诗词问答、10次诗词搜索。如需无限使用，29元/月解锁支持者版。",
     "register_url": None,
     "upgrade_tiers": [
-        {"tier": "supporter", "name": "支持者版 · 去限制", "daily_quota": 99999, "price_monthly": "¥9.9/月",
-         "features": ["无限次AI问答", "无限职位匹配", "MBTI分析", "高级诗词RAG"]},
+        {"tier": "supporter", "name": "支持者版 · 去限制", "daily_quota": 99999, "price_monthly": "¥29/月",
+         "features": ["无限诗词搜索", "AI 诗词问答", "深度诗人分析", "去广告"]},
         {"tier": "enterprise", "name": "企业版", "daily_quota": 99999, "price_monthly": "联系销售",
-         "features": ["无限AI问答", "私有云部署", "数据隔离", "专属支持"]},
+         "features": ["企业级 RAG 知识库", "私有云部署", "数据隔离", "专属支持"]},
     ],
 }
 
 UPGRADE_HINT_SCOPE_FORBIDDEN = {
     "reason": "scope_forbidden",
-    "message": "当前免费版仅支持公开知识库查询。升级支持者版可解锁私有文档上传和检索。",
+    "message": "当前免费版仅支持公开诗词知识库查询。升级支持者版可解锁深度诗人分析与企业级 RAG 检索。",
     "register_url": None,
     "upgrade_tiers": [
-        {"tier": "supporter", "name": "支持者版", "daily_quota": 99999, "price_monthly": "¥9.9/月",
-         "features": ["私有文档上传", "文档管理", "高级检索"]},
+        {"tier": "supporter", "name": "支持者版", "daily_quota": 99999, "price_monthly": "¥29/月",
+         "features": ["深度诗人分析", "企业级 RAG 知识库", "无限诗词搜索"]},
     ],
 }
 
