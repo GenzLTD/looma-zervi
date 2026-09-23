@@ -525,6 +525,70 @@ CREATE INDEX IF NOT EXISTS idx_poems_dynasty ON poems(dynasty);
 CREATE INDEX IF NOT EXISTS idx_poems_author ON poems(author);
 CREATE INDEX IF NOT EXISTS idx_poems_theme ON poems(theme);
 CREATE INDEX IF NOT EXISTS idx_poems_title ON poems(title);
+-- NOTE: poems.publisher_id / column_id 由 init_schema 迁移块创建（旧库需先 ALTER 加列）
+
+-- ============================================
+-- Driver / multi-tenant: 驾驶员（博主）平台
+--   参考：docs 多租户改造清单 §1.2 / §1.3 / §2.1
+--   方言：本机运行时为 SQLite —— jsonb→TEXT、timestamptz→TEXT、
+--         boolean→INTEGER(0/1)、ARRAY→TEXT（向量实际在 Chroma）
+-- ============================================
+CREATE TABLE IF NOT EXISTS driver_profiles (
+    id            TEXT PRIMARY KEY,            -- = users.id（1:1 驾驶员）
+    display_name  TEXT,
+    tagline       TEXT,
+    avatar_url    TEXT,
+    bio           TEXT,
+    show_resume   INTEGER NOT NULL DEFAULT 1,  -- 橱窗模块开关（千人千面第一层）
+    show_mbti     INTEGER NOT NULL DEFAULT 1,
+    show_social   INTEGER NOT NULL DEFAULT 1,
+    show_columns  INTEGER NOT NULL DEFAULT 1,
+    theme         TEXT NOT NULL DEFAULT '{}',  -- 主题/布局 JSON
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS columns (
+    id            TEXT PRIMARY KEY,
+    driver_id     TEXT NOT NULL,               -- 归属驾驶员
+    slug          TEXT NOT NULL,               -- 专栏 URL slug
+    name          TEXT NOT NULL,               -- 诗词 / 人力 / 法务 / 电梯 / 物联网
+    description   TEXT,
+    content_type  TEXT NOT NULL DEFAULT 'article',
+    icon          TEXT,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (driver_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE (driver_id, slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_columns_driver ON columns(driver_id);
+
+CREATE TABLE IF NOT EXISTS articles (
+    id                TEXT PRIMARY KEY,
+    driver_id         TEXT NOT NULL,
+    column_id         TEXT,
+    title             TEXT NOT NULL,
+    slug              TEXT NOT NULL,
+    excerpt           TEXT,
+    content           TEXT NOT NULL,
+    tags              TEXT DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'published',   -- draft | published
+    view_count        INTEGER NOT NULL DEFAULT 0,
+    comment_count     INTEGER NOT NULL DEFAULT 0,
+    content_embedding TEXT DEFAULT NULL,       -- JSON 数组占位；向量真源在 Chroma
+    published_at      TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (driver_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (column_id) REFERENCES columns(id),
+    UNIQUE (driver_id, slug)
+);
+
+CREATE INDEX IF NOT EXISTS idx_articles_driver ON articles(driver_id);
+CREATE INDEX IF NOT EXISTS idx_articles_column ON articles(column_id);
+-- NOTE: poems.publisher_id / idx_poems_publisher / idx_poems_column 由 init_schema 迁移块创建
 
 -- ============================================
 -- Poetry challenge: 信达雅英译赛 (Jason / overseas)
@@ -1239,6 +1303,102 @@ class DatabaseManager:
                 logger.warning(
                     "Migration UNIQUE INDEX idx_users_supabase_uid failed: %s", e
                 )
+
+            # ============================================================
+            # Migration: 驾驶员 / 多租户（清单 §1.1 ~ §1.5）
+            #   结构部分（加列 + 索引 + 触发器）必须幂等；
+            #   种子与存量回填也放在这里，保证新库开箱可用。
+            #   一次性离线执行也可用 scripts/migrate_driver_multitenant.py
+            # ============================================================
+            # 1) poems 补归属字段（保留 author 原语义 = 诗词作者）
+            for _col, _decl in (
+                ("publisher_id", "TEXT REFERENCES users(id)"),
+                ("column_id", "TEXT REFERENCES columns(id)"),
+            ):
+                try:
+                    conn.execute(f"ALTER TABLE poems ADD COLUMN {_col} {_decl}")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e):
+                        logger.warning(
+                            "Migration ALTER TABLE poems ADD COLUMN %s failed: %s", _col, e
+                        )
+            for _sql in (
+                "CREATE INDEX IF NOT EXISTS idx_poems_publisher ON poems(publisher_id)",
+                "CREATE INDEX IF NOT EXISTS idx_poems_column ON poems(column_id)",
+            ):
+                try:
+                    conn.execute(_sql)
+                except sqlite3.OperationalError as e:
+                    logger.warning("Migration INDEX on poems failed: %s", e)
+
+            # 2) role 枚举收口：SQLite 无法给已有表加 CHECK（需重建表，违反"只增量"），
+            #    用触发器等价实现 —— 只允许 user | enterprise | admin | driver
+            for _sql in (
+                """
+CREATE TRIGGER IF NOT EXISTS trg_users_role_check_insert
+BEFORE INSERT ON users
+FOR EACH ROW WHEN NEW.role IS NOT NULL
+     AND NEW.role NOT IN ('user','enterprise','admin','driver')
+BEGIN
+    SELECT RAISE(ABORT, 'users.role must be one of: user enterprise admin driver');
+END;
+""",
+                """
+CREATE TRIGGER IF NOT EXISTS trg_users_role_check_update
+BEFORE UPDATE OF role ON users
+FOR EACH ROW WHEN NEW.role IS NOT NULL
+     AND NEW.role NOT IN ('user','enterprise','admin','driver')
+BEGIN
+    SELECT RAISE(ABORT, 'users.role must be one of: user enterprise admin driver');
+END;
+""",
+            ):
+                try:
+                    conn.execute(_sql)
+                except sqlite3.OperationalError as e:
+                    logger.warning("Migration CREATE TRIGGER role_check failed: %s", e)
+
+            # 3) 种子：平台官方驾驶员 + 官方橱窗 + 首个专栏（承接存量诗词）
+            try:
+                if not conn.execute(
+                    "SELECT 1 FROM users WHERE id = 'driver-official'"
+                ).fetchone():
+                    conn.execute(
+                        """INSERT INTO users (id, email, email_hash, name, tier, role)
+                           VALUES ('driver-official', ?, ?, '深伯乐官方', 'pro', 'driver')""",
+                        (
+                            "official@szbolent.com.cn",
+                            email_hash("official@szbolent.com.cn"),
+                        ),
+                    )
+                if not conn.execute(
+                    "SELECT 1 FROM driver_profiles WHERE id = 'driver-official'"
+                ).fetchone():
+                    conn.execute(
+                        """INSERT INTO driver_profiles (id, display_name, tagline, bio)
+                           VALUES ('driver-official', '深伯乐',
+                                   'AI 驱动的智能个人品牌平台',
+                                   '诗词 / 人力 / 法务 / 电梯 / 物联网多专栏作者')"""
+                    )
+                if not conn.execute(
+                    "SELECT 1 FROM columns WHERE id = 'col-poetry'"
+                ).fetchone():
+                    conn.execute(
+                        """INSERT INTO columns (id, driver_id, slug, name, content_type, sort_order)
+                           VALUES ('col-poetry', 'driver-official', 'poetry', '诗词', 'poem', 1)"""
+                    )
+            except sqlite3.IntegrityError as e:
+                logger.warning("Migration seed driver-official failed: %s", e)
+
+            # 4) 存量回填（幂等：只补 publisher_id IS NULL 的行）
+            try:
+                conn.execute(
+                    """UPDATE poems SET publisher_id = 'driver-official',
+                                        column_id = 'col-poetry'
+                        WHERE publisher_id IS NULL"""
+                )
+            except sqlite3.Error as e:
+                logger.warning("Migration backfill poems ownership failed: %s", e)
 
     # ============================================
     # User operations (joint)
