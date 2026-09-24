@@ -127,11 +127,17 @@ mkdir -p data/chroma_models
 # ============================
 # 6. Build and start Docker services
 # ============================
-log "Building and starting Docker services..."
+# PyPI：Vultr SG 访问阿里云镜像会卡死。端口：backend 只绑宿主回环，
+# Chroma / Redis 不发布到宿主（与 2026-09-19 现网收紧一致）。
+# DEPLOY_REGION 必须进 shell：compose 的 ${DEPLOY_REGION:-CN} 会覆盖 backend/.env。
+log "Building and starting Docker services (PyPI, loopback ports)..."
 cd "${APP_DIR}/docker"
+export PIP_INDEX_URL="https://pypi.org/simple"
+export DEPLOY_REGION="SG"
+COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.overseas.yml)
 
-docker compose down 2>/dev/null || true
-docker compose up -d --build
+docker compose "${COMPOSE_FILES[@]}" down 2>/dev/null || true
+docker compose "${COMPOSE_FILES[@]}" up -d --build
 
 log "Waiting for backend to start..."
 sleep 15
@@ -204,6 +210,6 @@ log "  (upgrade to Full Strict later with Cloudflare Origin Certificate)"
 log ""
 log "Next steps:"
 log "1. Edit ${APP_DIR}/backend/.env with real secrets (OpenAI, Google, Stripe)."
-log "2. Restart: cd ${APP_DIR}/docker && docker compose restart"
+log "2. Restart: cd ${APP_DIR}/docker && PIP_INDEX_URL=https://pypi.org/simple DEPLOY_REGION=SG docker compose -f docker-compose.yml -f docker-compose.overseas.yml restart"
 log "3. Configure Google OAuth + payment provider webhooks (Stripe/PayPal/Airwallex)."
 log "========================================"

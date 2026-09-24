@@ -1,0 +1,16 @@
+# 仅由 scripts/deploy-overseas.sh 叠加到 docker-compose.yml 之上。
+# 不要在 Vultr 上单独用基础 compose 执行 up：那会走阿里云 PyPI，并把 5200/8000/6379 对公网打开。
+services:
+  backend:
+    build:
+      args:
+        # 新加坡访问 mirrors.aliyun.com 会卡死。Dockerfile 默认值留给境内机构建。
+        PIP_INDEX_URL: https://pypi.org/simple
+    ports: !override
+      - "127.0.0.1:5200:5200"
+  chromadb:
+    # 基础文件里的 "8000:8000" 等价 0.0.0.0。backend 走 looma-net 的服务名访问。
+    ports: !reset []
+  redis:
+    # 基础文件里的 "6379:6379" 无 requirepass，不能对公网发布。
+    ports: !reset []
