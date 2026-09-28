@@ -162,6 +162,14 @@ ssh ubuntu@1.14.202.161 'python3 -V; df -h /home | tail -1'      # Python 3.10.1
 > D1 之后它成了项目成员 ⇒ **每次部署都会把它删掉**，而第 370/371 行只 `up backend/chromadb`
 > ⇒ PG 会"部署一次、死一次"。这是 D1 的**隐藏耦合**，只在真正接进 compose 后才暴露（数据安全：容器被删但卷 `pgdata` 保留）。
 
+> **同一 `down` 还删了 `redis`，为什么它没死？** 因为 `docker-compose.yml` 里 `backend: depends_on: [redis]` ——
+> `up -d backend` 会把依赖链上的 `redis` 一起拉起。**pgvector 不在任何 `depends_on` 里**，所以它必须被显式写进 `up` 列表。
+> （若将来给 backend 加 `depends_on: pgvector`，本行可简化，但**不要把 up 列表里的 pgvector 删掉**。）
+
+> **配套守卫（同日追加，D1b+）**：`deploy.yml` 在 `up` 之后新增断言 —— `looma-pgvector` 必须在跑、
+> `pg_isready -U looma -d genzltd` 必须就绪（≤20s）、`genzltd` 表数必须 **≥ 55**，任一不满足即 `exit 1` 让部署变红。
+> 作用：把"有人再把 pgvector 移出 up 列表"或"卷丢失"这类事故**从静默停摆变成部署期硬失败**。
+
 ### D2 【生产机，手工一次】`/home/ubuntu/looma-zervi/docker/.env`
 
 ```bash

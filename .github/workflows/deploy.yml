@@ -373,6 +373,31 @@ jobs:
           # 全部容器（含 pgvector），不 up 就会被永久停掉。数据在 named volume 中，安全。
           ${COMPOSE} up -d --no-build chromadb pgvector
 
+          echo "=== Assert pgvector survived the down/up cycle (D1b guard) ==="
+          if [ "$(docker inspect -f '{{.State.Running}}' looma-pgvector 2>/dev/null)" != "true" ]; then
+            echo "FATAL: looma-pgvector 不在运行 —— up 列表漏了 pgvector？数据在 named volume 中安全，但服务已停摆"
+            ${COMPOSE} logs --tail 30 pgvector 2>/dev/null || true
+            exit 1
+          fi
+          READY=0
+          for i in $(seq 1 20); do
+            if docker exec looma-pgvector pg_isready -U looma -d genzltd >/dev/null 2>&1; then
+              READY=1; echo "pgvector ready after ${i}s"; break
+            fi
+            sleep 1
+          done
+          if [ "$READY" != "1" ]; then
+            echo "FATAL: pgvector 20s 内未就绪"
+            ${COMPOSE} logs --tail 40 pgvector 2>/dev/null || true
+            exit 1
+          fi
+          TABLES=$(docker exec looma-pgvector psql -U looma -d genzltd -tAc "select count(*) from pg_tables where schemaname='public'")
+          echo "=== genzltd tables=${TABLES} (expect >= 55) ==="
+          if [ "${TABLES:-0}" -lt 55 ]; then
+            echo "FATAL: genzltd 表数异常（< 55）—— 卷 pgdata 是否丢失？立即人工介入，勿继续部署"
+            exit 1
+          fi
+
           echo "=== Wait for backend health ==="
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:5200/health >/dev/null 2>&1; then
