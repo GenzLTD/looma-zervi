@@ -105,6 +105,14 @@ services:
     image: pgvector/pgvector:pg17
     container_name: looma-pgvector
     restart: unless-stopped
+    # 停机要给 PG 足够时间做 clean shutdown（默认 10s 后 SIGKILL，DB 风险高）
+    stop_grace_period: 60s
+    # 日志轮转：DB 容器长期运行，不限制会吃掉整个磁盘
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "127.0.0.1:5433:5432"
     environment:
