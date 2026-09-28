@@ -1,10 +1,13 @@
 # 生产 PG 重建与 `genzltd` 落地方案（腾讯云 1.14.202.161）
 
-> **版本：** v1.1 · **日期：** 2026-09-28 · **状态：** ✅ **已执行完成**（阶段 1–6 全部落地，证据见 §5.2）
-> **已改动：** `docker/docker-compose.yml`(D1) · `.github/workflows/deploy.yml`(D1b/D4) · 生产 `docker/.env`(D2) ·
-> 生产容器与卷（孤儿已删 → 新 `looma-pgvector` + `looma-zervi_pgdata`）· PG 库 `genzltd`（55 表 / 58,392 行 + P1 骨架）。
+> **版本：** v1.2 · **日期：** 2026-09-28 · **状态：** ✅ **已执行完成**（阶段 1–6 全部落地，证据见 §5.2/§5.3）
+> **已改动：** `docker/docker-compose.yml`(D1 + 优雅停机/日志轮转) · `.github/workflows/deploy.yml`(D1b/D1b+/D4) ·
+> 生产 `docker/.env`(D2) · 生产容器与卷（孤儿已删 → 新 `looma-pgvector` + `looma-zervi_pgdata`）·
+> PG 库 `genzltd`（55 表 / 58,392 行 + P1 骨架）。
 > **未改动：** backend 的 `DATABASE_PATH` / `manager.py` / 任何 PG 驱动 → PG 仍是**旁挂数据面**，回滚零成本（§7）。
-> **剩余待办：** D3 安全组收窄（控制台手动，见 §4-D3；容器侧已只绑 `127.0.0.1`，公网 5433 已 **REFUSED**）。
+> **D1b 已验证：** 同命令复演实测「`down` 删掉 PG → `up` 列表把它拉回，数据零丢失」（§5.3②）。
+> **剩余待办：** ① D3 安全组收窄（控制台手动，见 §4-D3；容器侧只绑 `127.0.0.1`，公网 5433 已 **REFUSED** ⇒ 清冗余规则）；
+> ② CI 平台阻断（当日 5 连 `steps=0` 秒败，既存于 09-23，需人工处理 Actions 面；§5.3①）。
 > **关联：** [TENANT_FEDERATION_ARCHITECTURE.md](./TENANT_FEDERATION_ARCHITECTURE.md) §1/§3/§9-1 · `backend/scripts/migrate_tenants_pg.py`
 
 ---
@@ -263,6 +266,9 @@ python3 backend/scripts/export_sqlite_to_pg.py --sqlite backend/data/looma.db --
 | **9** 联邦骨架（阶段 6） | `migrate_tenants_pg.py`（**不带 `--seed`**） | dry-run **rc=0** → APPLY **rc=0** → **复跑 rc=0 全「已存在，跳过」（幂等 ✅）**；产出 `tenants` / `tenant_shelf_items` / `v_catalog_tenants` + `driver_profiles.handle,status` + `uq_driver_profiles_handle`；总 **57 表 + 1 视图**；原数据抽查 `poems=58,059 · users=10 · driver_profiles=1` 未变 |
 | **10** 对外面 | 本机公网 `nc -z -w4 1.14.202.161 5433` | **REFUSED**（容器绑定收口已生效）⇒ 即使安全组仍放行 `0.0.0.0/0`，也**连不进来** |
 | **11** 收口 | 三处仓库 diff + 两个脚本 + 两份文档 | 已提交到 `main`（6 files / +1608）—— D1 · D1b · D4 · `export_sqlite_to_pg.py` · `migrate_tenants_pg.py` · 本文档 + 架构文档 |
+| **12** 推送上云 | `git push origin main`（先 rebase 到远端 `a51ff19`） | rc=0：`a51ff19..d522301`；后续追加 `2193b24`（D1b+ 守卫）、`3bb0c35`（优雅停机 + 日志轮转）。**CI 当日 5 连秒败**（§5.3①）⇒ 部署未跑，生产容器 id 与「部署前留证」**逐字一致**（未被误改） |
+| **13** D1b 复演 | 在 prod 逐字执行 `deploy.yml` 的 down/up 序列（含新守卫） | **PG 被删 → 被拉回，数据零丢失**：容器 `436db82e…`→`d76ed630…`、卷 `CreatedAt` 未变、`57 表/1 视图/58,392 行` 逐项一致（§5.3②） |
+| **14** 对外面复测 | 本机 9 端口扫描 + prod 宿主 `ss -lntp` | 公网仅 `22/80/443` 通；`5200/5433/5432/6379/8000/3306` 全 REFUSED；Redis 无认证（§5.3④） |
 
 > **宿主无 `psql(1)` 的解法**：阶段 9 用一次性垫片 `/tmp/psql-shim.py`（剥掉 `-h/-p/-U/-d` 后透传
 > `docker exec -i looma-pgvector psql`），使 `migrate_tenants_pg.py --psql <shim>` **原样工作、脚本零改动**；
@@ -274,6 +280,63 @@ python3 backend/scripts/export_sqlite_to_pg.py --sqlite backend/data/looma.db --
 > **`driver_profiles` 既有 1 行的回填行为**（实测）：`status` 因 `NOT NULL DEFAULT 'active'` 取到 `active` ；
 > `handle` 保持 **NULL**（可空 + 局部唯一索引 `WHERE handle IS NOT NULL`，故不冲突）——**该行要进橱窗须先补 handle**（属 P1 CLI 的活）。
 > **未执行 `--seed`**（首批 `t-official` / `t-szbolent-cn` 登记）：需要时同命令去掉 `--dry-run` 并加 `--seed`（幂等 upsert）。
+
+---
+
+### 5.3 D1b 实测与 CI 阻断（2026-09-28 推流执行）
+
+#### ① `git push` 成功，但当日 CI 无法完成部署
+
+| 观察 | 值 |
+|---|---|
+| 推送 | rebase 后 `a51ff19..d522301`；再追加 `2193b24`（D1b+ 守卫）、`3bb0c35`（优雅停机 + 日志轮转）。`HEAD == origin/main`，工作树干净 |
+| 触发的 run | `36394130298` / `36394648004` / `36394649230` / `36394785769` → **全部 `steps=0` 秒级失败**（"Build Frontend"/"Backend Tests" 3 秒内起止、**零步骤**、`runner_name` 为空；两个 Deploy 作业被 `needs` 跳过） |
+| 是否我们引起 | **否**：同签名（`steps=0`）在 **09-23 的 3 次运行**（`35812461464`/`35860156322`/`35874564562`）已出现；09-24 唯一的成功 run `36066075150` 是 **attempt=3**（attempt 1/2 同为 `steps=0` 失败）⇒ 该 workflow 长期靠「重试到成功」 |
+| 重试通道 | `gh run rerun` 与 `workflow_dispatch` 对 Actions **写**端点均 **HTTP 404**（读端点正常）；空提交 push **不触发**（`paths-ignore` 下零文件变更不算命中） ⇒ 只能等人工修复后重跑 |
+| 影响面 | 生产 backend 仍是 `git_commit a51ff19`（容器未重建）；**PG 侧变更已实际生效**（新版 compose 已同步 prod 并 recreate 过） |
+| 待办 | 属账号/Actions 面问题（配额/权限），**需人工处理**；修好后重跑，D1b+ 守卫会在真实部署路径上再验一次 |
+
+#### ② D1b 同命令复演（部署序列**逐字**执行，替代被阻断的 CI 部署）
+
+前置：`scp docker/docker-compose.yml → prod`（等价于 `rsync` 的效果；旧文件备份 `/tmp/docker-compose.yml.pre-d1b`）。
+脚本 `/tmp/rehearse_d1b.sh` 与 `deploy.yml`：「`compose down -p looma-zervi --remove-orphans`」→「`up -d --remove-orphans --force-recreate --no-build backend`」→「`up -d --no-build chromadb pgvector`」**逐字一致**。
+
+| 观察点 | PRE | POST | 结论 |
+|---|---|---|---|
+| `down` 输出 | — | `Container looma-pgvector Stopping/Stopped/Removing/**Removed**` + `Network looma-zervi_looma-net Removed` | **耦合确凿**：`down` 真会删掉 PG |
+| 全状态容器数（`--filter name=looma-pgvector`） | 1 | **0** | 删净后，才能证明是 `up` 列表把它救回来的 |
+| `up` 输出 | — | `up -d --no-build chromadb **pgvector**` → `Container looma-pgvector Created/Started` | **D1b 有效** |
+| 容器 id | `436db82ee29d…` | `d76ed630eaec…` | **确实重建**（非复用旧容器） |
+| `State.StartedAt` | `06:51:32Z` | `08:01:57Z` | 同上 |
+| 卷 `looma-zervi_pgdata.CreatedAt` | `2026-09-28T14:51:32+08:00` | **同值（未变）** | 数据面**不在容器里**，重建无损 |
+| `tables / views / rows` | `57 / 1 / 58392` | **`57 / 1 / 58392`** | 逐项一致 |
+| 业务数据抽查 | `poems=58059`、`poems_id_seq=78644/true` | 同值 | 未丢未变 |
+| 新守卫（D1b+） | — | `pgvector ready after 2s` → `tables=57 (expect >=55)` → **`GUARD_PASSED`** | 断言可跑通 |
+| 依赖链旁证 | — | `looma-redis` 同被 `down` 删除，但 `up -d … backend` 时由 `depends_on: [redis]` **自动拉起** | 印证 D1b 注中「为何 redis 没死」 |
+| backend | `healthy` | `healthy`（1s 内恢复；`/health` 仍 `a51ff19` —— 复演不写 marker，符合预期） | 业务零感知 |
+
+#### ③ 运维配置实测（engine `29.1.3` 的坑）
+
+- `logging`：容器 `LogConfig=json-file map[max-size:10m max-file:3]` **已生效** ✅
+- `stop_grace_period: 60s`：**`docker inspect` 里查不到 `StopTimeout` 字段**。这**不是没生效**，而是 **engine 29.1.3 不输出该字段**：
+  - 对照 A：`docker run --stop-timeout 60` 的临时容器 → inspect **同样无该键**（`key_present=False`）
+  - 对照 B（行为学，决定性）：忽略 `SIGTERM` 的容器 + `--stop-timeout 25` → `docker stop` 实测 **25s**；compose 版 `stop_grace_period: 20s` → `docker compose stop` 实测 **20s** ✅
+  - ⇒ **以行为为准，不以 inspect 字段为准**；prod 的 60s 确已写入容器配置。
+
+#### ④ 端口面审计（公网实测 + 宿主监听面对照）
+
+| 端口 | 公网（本机 `nc -z`） | 宿主绑定（`ss -lntp`） | 判定 |
+|---|---|---|---|
+| 22 / 80 / 443 | **OPEN** | `0.0.0.0` | 预期开放 |
+| 5200 backend | REFUSED | `0.0.0.0:5200` | **仅靠安全组挡** |
+| 6379 redis | REFUSED | `0.0.0.0:6379` | **仅靠安全组挡**，且实测 **`requirepass` 为空 + `protected-mode no`** ⇒ 安全组一旦被放开即裸奔 |
+| 8000 chromadb | REFUSED | `0.0.0.0:8000` | **仅靠安全组挡** |
+| 5433 pg | REFUSED | **`127.0.0.1:5433`** | 双保险：宿主只在回环监听，**安全组即使误放行也连不上** ⇒ D3 属「清冗余规则」，非止血 |
+| 5432 / 3306 | REFUSED | 未监听 | 正常 |
+
+> **建议（未执行，待你定）**：① 把 `docker-compose.yml` 里 `5200/6379/8000` 的映射一并收窄为 `127.0.0.1:…`
+> （compose 内部互通走 `looma-net`，宿主回环足够；**改前先确认 nginx upstream 指向的是 `127.0.0.1:5200` 而非公网 IP**）；
+> ② 给 Redis 加 `requirepass`（需同步 backend 的 Redis 配置）。两者都是「安全组之外的第二道锁」。
 
 ---
 
@@ -377,8 +440,11 @@ backend 容器**既无 psycopg 也无 psql**（实测 `docker exec looma-backend
 - [x] `docker volume inspect looma-zervi_pgdata` 存在（容器 PGDATA 落于此，不再在仓库树内）
 - [x] **仓库树内已无 `data/pgdata`**（实测 `ls -ld /home/ubuntu/looma-zervi/data/pgdata` → `No such file or directory`）⇒ R1/R3 彻底消除
 - [x] backend 业务回归：`curl -s http://127.0.0.1:5200/health` → `status: ok`（`git_commit a51ff19`），业务零感知
-- [ ] 下次 `push main` 部署后 PG 容器**仍在**且数据未丢 —— 已由 **D1b** 保证（`up` 列表含 `pgvector`），待下次部署实测确认
-- [ ] D3：腾讯云控制台把 `5433` 入站规则从 `0.0.0.0/0` 收窄到管理网段/删除（**唯一剩余待办**）
+- [x] 部署后 PG 容器**仍在**且数据未丢 —— **已用同命令复演实测**（§5.3②：容器 `436db82e…`→`d76ed630…` 重建、卷 `CreatedAt` 未变、`57 表/1 视图/58,392 行` 逐项一致）；CI 真实部署路径因平台阻断未执行（§5.3①），修复后重跑即可自动复验
+- [x] 新增 **D1b+ 守卫**实测可跑通（输出 `GUARD_PASSED`）——真实部署时会在 `up` 之后自动断言「PG 在跑 + `pg_isready` 就绪 + `genzltd` 表数 ≥ 55」，任一不满足即部署失败
+- [ ] D3：腾讯云控制台把 `5433` 入站规则从 `0.0.0.0/0` 收窄到管理网段/删除（**唯一剩余人工项**；实测公网 5433 已 REFUSED，该规则当前**无实际暴露**，删除属清冗余）
+- [ ] 建议（非本方案范围，见 §5.3④）：`5200/6379/8000` 宿主映射收窄至 `127.0.0.1` + 给 Redis 加 `requirepass`
+- [ ] 待人工：修复 CI（Actions 写端点 404 / 作业 `steps=0` 秒败），重跑 Deploy 以在真实路径上复验 D1b+（§5.3①）
 - [ ] 可选：`docker exec looma-pgvector psql -U looma -d genzltd -c 'CREATE EXTENSION IF NOT EXISTS vector'`（镜像已带，本次未启用）
 
 ---
@@ -387,6 +453,7 @@ backend 容器**既无 psycopg 也无 psql**（实测 `docker exec looma-backend
 
 | 日期 | 版本 | 变更 |
 |------|------|------|
+| 2026-09-28 | 1.2 | **D1b 实测 + 推流**：`push main` 完成（`d522301`/`2193b24`/`3bb0c35`），因当日 CI 被平台阻断（5 连 `steps=0` 秒败，同签名既存于 09-23）改用**同命令复演**实测 D1b：`compose down -p looma-zervi` 真删 `looma-pgvector`（全状态计数 1→0），`up` 列表把它拉回 ⇒ 容器 id 变更而卷 `CreatedAt` 未变、`57 表/1 视图/58,392 行` 逐项一致。新增 **D1b+ 守卫**（`deploy.yml` 部署后断言 PG 存活 + `pg_isready` + 表数 ≥ 55）与 **pgvector 优雅停机 60s / 日志轮转**；实测 engine 29.1.3 的 `docker inspect` **不输出** `StopTimeout`，改用行为学验证 compose 配置真实生效（`--stop-timeout 25` → `stop` 实测 25s；compose `20s` → 实测 20s）。补记端口面审计：公网仅 `22/80/443`，`5200/6379/8000` 仅靠安全组挡且 Redis 无认证（§5.3） |
 | 2026-09-28 | 1.1 | **执行完成**：D1/D1b/D2/D4 落地并生产实跑（§5.2）。新增 **D1b**（执行中发现：`deploy.yml` 的 `compose down -p looma-zervi` 会删掉项目内全部容器，`up` 列表不含 `pgvector` 就会"部署一次死一次"）。`genzltd` 迁入 **55 表 / 58,392 行**（55/55 对拍一致 · 172 索引 · 55 外键 · 17 identity 对齐），P1 联邦骨架 APPLY 且幂等复跑通过；公网 5433 已 REFUSED。仅余 D3 安全组（控制台） |
 | 2026-09-28 | 1.0 | 首版：现场取证（§1）、根因 R1–R5（§2）、目标态（§3）、D1–D4 diff（§4）、执行步骤（§5）、搬运设计（§6）、回滚（§7）、风险（§8）、P2 前置决策（§9）、验收（§10）；**阶段 0 已实测通过**（§5.1） |
 
