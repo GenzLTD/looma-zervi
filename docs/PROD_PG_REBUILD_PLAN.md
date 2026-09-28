@@ -322,6 +322,8 @@ python3 backend/scripts/export_sqlite_to_pg.py --sqlite backend/data/looma.db --
   - 对照 A：`docker run --stop-timeout 60` 的临时容器 → inspect **同样无该键**（`key_present=False`）
   - 对照 B（行为学，决定性）：忽略 `SIGTERM` 的容器 + `--stop-timeout 25` → `docker stop` 实测 **25s**；compose 版 `stop_grace_period: 20s` → `docker compose stop` 实测 **20s** ✅
   - ⇒ **以行为为准，不以 inspect 字段为准**；prod 的 60s 确已写入容器配置。
+  - 附带：为验证 compose 传参，对**真实** `looma-pgvector` 做过一次 `up -d --no-build --force-recreate pgvector`（仅重建容器、不删卷）
+    → 新 id `452a09ca…`，数据同样无损（§5.3② 表内 POST id `d76ed630…` 是复演当场值；截至本文档定稿，线上为 `452a09ca…`，`healthy`）。
 
 #### ④ 端口面审计（公网实测 + 宿主监听面对照）
 
@@ -425,6 +427,11 @@ backend 容器**既无 psycopg 也无 psql**（实测 `docker exec looma-backend
 > 的成员（IP `172.18.0.5`，DNS 别名 **`pgvector`** 与 backend **同网**）⇒ 若选 **i**，DSN 直接用
 > `postgresql://looma:<新密码>@pgvector:5432/genzltd`，**无需改 compose、无需暴露宿主端口**，
 > 代价只剩"加依赖 + rebuild 镜像"这一项。backend 容器内仍**无 psycopg 也无 psql**（实测），此结论未变。
+>
+> **通路已实测（2026-09-28 终验）**：在 `looma-backend` 容器内执行
+> `socket.create_connection(('pgvector', 5432), 3)` → **`DNS+TCP OK -> ('172.18.0.5', 5432)`**
+> ⇒ **网络/DNS 面已通**（不依赖任何新依赖即可验证）。选 **i** 后只剩两件事：① `requirements.txt` 加驱动并 rebuild；
+> ② 把凭据注入 backend（`PG_*` 或 DSN），**勿复用 PG 容器 env 里那份明文**。
 
 ---
 
