@@ -7,7 +7,7 @@
 > **未改动：** backend 的 `DATABASE_PATH` / `manager.py` / 任何 PG 驱动 → PG 仍是**旁挂数据面**，回滚零成本（§7）。
 > **D1b 已验证：** 同命令复演实测「`down` 删掉 PG → `up` 列表把它拉回，数据零丢失」（§5.3②）。
 > **剩余待办：** ① D3 安全组收窄（控制台手动，见 §4-D3；容器侧只绑 `127.0.0.1`，公网 5433 已 **REFUSED** ⇒ 清冗余规则）；
-> ② CI 平台阻断（当日 5 连 `steps=0` 秒败，既存于 09-23，需人工处理 Actions 面；§5.3①）。
+> ② **GitHub Actions 组织计费阻断**：私仓作业 `steps=0` 秒败（注解原文见 §5.3①），**09-23 起即存在**、同注解亦见于 `jobfirst-claw`，需组织管理员在 Billing & plans 处理；public 仓（如 `variety`）不受影响。
 > **关联：** [TENANT_FEDERATION_ARCHITECTURE.md](./TENANT_FEDERATION_ARCHITECTURE.md) §1/§3/§9-1 · `backend/scripts/migrate_tenants_pg.py`
 
 ---
@@ -266,7 +266,7 @@ python3 backend/scripts/export_sqlite_to_pg.py --sqlite backend/data/looma.db --
 | **9** 联邦骨架（阶段 6） | `migrate_tenants_pg.py`（**不带 `--seed`**） | dry-run **rc=0** → APPLY **rc=0** → **复跑 rc=0 全「已存在，跳过」（幂等 ✅）**；产出 `tenants` / `tenant_shelf_items` / `v_catalog_tenants` + `driver_profiles.handle,status` + `uq_driver_profiles_handle`；总 **57 表 + 1 视图**；原数据抽查 `poems=58,059 · users=10 · driver_profiles=1` 未变 |
 | **10** 对外面 | 本机公网 `nc -z -w4 1.14.202.161 5433` | **REFUSED**（容器绑定收口已生效）⇒ 即使安全组仍放行 `0.0.0.0/0`，也**连不进来** |
 | **11** 收口 | 三处仓库 diff + 两个脚本 + 两份文档 | 已提交到 `main`（6 files / +1608）—— D1 · D1b · D4 · `export_sqlite_to_pg.py` · `migrate_tenants_pg.py` · 本文档 + 架构文档 |
-| **12** 推送上云 | `git push origin main`（先 rebase 到远端 `a51ff19`） | rc=0：`a51ff19..d522301`；后续追加 `2193b24`（D1b+ 守卫）、`3bb0c35`（优雅停机 + 日志轮转）。**CI 当日 5 连秒败**（§5.3①）⇒ 部署未跑，生产容器 id 与「部署前留证」**逐字一致**（未被误改） |
+| **12** 推送上云 | `git push origin main`（先 rebase 到远端 `a51ff19`） | rc=0：`a51ff19..d522301`；后续追加 `2193b24`（D1b+ 守卫）、`3bb0c35`（优雅停机 + 日志轮转）。**CI 当日 4 个 run 全部秒败**（组织计费阻断，§5.3①）⇒ 部署未跑，生产容器 id 与「部署前留证」**逐字一致**（未被误改） |
 | **13** D1b 复演 | 在 prod 逐字执行 `deploy.yml` 的 down/up 序列（含新守卫） | **PG 被删 → 被拉回，数据零丢失**：容器 `436db82e…`→`d76ed630…`、卷 `CreatedAt` 未变、`57 表/1 视图/58,392 行` 逐项一致（§5.3②） |
 | **14** 对外面复测 | 本机 9 端口扫描 + prod 宿主 `ss -lntp` | 公网仅 `22/80/443` 通；`5200/5433/5432/6379/8000/3306` 全 REFUSED；Redis 无认证（§5.3④） |
 
@@ -285,16 +285,21 @@ python3 backend/scripts/export_sqlite_to_pg.py --sqlite backend/data/looma.db --
 
 ### 5.3 D1b 实测与 CI 阻断（2026-09-28 推流执行）
 
-#### ① `git push` 成功，但当日 CI 无法完成部署
+#### ① `git push` 成功，但当日 CI 被**组织计费**拦住
 
 | 观察 | 值 |
 |---|---|
 | 推送 | rebase 后 `a51ff19..d522301`；再追加 `2193b24`（D1b+ 守卫）、`3bb0c35`（优雅停机 + 日志轮转）。`HEAD == origin/main`，工作树干净 |
-| 触发的 run | `36394130298` / `36394648004` / `36394649230` / `36394785769` → **全部 `steps=0` 秒级失败**（"Build Frontend"/"Backend Tests" 3 秒内起止、**零步骤**、`runner_name` 为空；两个 Deploy 作业被 `needs` 跳过） |
-| 是否我们引起 | **否**：同签名（`steps=0`）在 **09-23 的 3 次运行**（`35812461464`/`35860156322`/`35874564562`）已出现；09-24 唯一的成功 run `36066075150` 是 **attempt=3**（attempt 1/2 同为 `steps=0` 失败）⇒ 该 workflow 长期靠「重试到成功」 |
-| 重试通道 | `gh run rerun` 与 `workflow_dispatch` 对 Actions **写**端点均 **HTTP 404**（读端点正常）；空提交 push **不触发**（`paths-ignore` 下零文件变更不算命中） ⇒ 只能等人工修复后重跑 |
-| 影响面 | 生产 backend 仍是 `git_commit a51ff19`（容器未重建）；**PG 侧变更已实际生效**（新版 compose 已同步 prod 并 recreate 过） |
-| 待办 | 属账号/Actions 面问题（配额/权限），**需人工处理**；修好后重跑，D1b+ 守卫会在真实部署路径上再验一次 |
+| 当日 run | **恰 4 个，全为 Deploy**：`#131`(d522301，id `36394130298`) · `#132`/`#133`(2193b24，同 SHA 两次尝试) · `#134`(3bb0c35)；均 07:53–08:00Z 创建、**3 秒内结束**（`--created=2026-09-28` 核验，无其它 workflow 运行） |
+| 失败形态 | `Build Frontend` 与 `Backend Tests` 两作业 `conclusion=failure`、**`steps=0`、`runner_name` 为空**；两个 Deploy 作业被 `needs` **skipped** ⇒ **部署根本没开始**（生产 `git_commit` 仍 `a51ff19`，与「部署前留证」逐字一致） |
+| **真因（注解原文）** | `The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings`（来源：`GET /repos/GenzLTD/looma-zervi/check-runs/{id}/annotations`，`annotation_level=failure`） |
+| 是否我们引起 | **否**，三条独立反证：① **09-23 的 `#127`/`#128`/`#129` 注解逐字相同**（`35812461464`/`35860156322`/`35874564562`，早于我们的提交）；② 同组织私仓 **`jobfirst-claw` 今日 05:56Z** 的 `Quality Gate`/`Code Analysis` 失败**也是同一条注解** ⇒ 组织级私仓计费面，非本仓专属；③ `#130`（09-24 唯一 success）**`run_attempt=3`** ⇒ 前两次同样被拦，靠重试撞上放行窗口 |
+| 为何 `variety #18` 却是绿的 | 该仓 **public**（GitHub-hosted 分钟对 public 仓免费不限量），私仓额度限制**不影响它**；且它跑在 09-28 **00:51Z**、commit `c255c7a`（"Deploy portal to Aliyun"），**与本仓 Deploy 不是同一条流水线** ⇒ 不能互相证明 |
+| 重试通道 | 本机 token 调 `gh run rerun` / `gh workflow run Deploy` 均 **HTTP 404**；已核验 `deploy.yml` **确有** `workflow_dispatch:` ⇒ 不是"没触发器"，而是 token 缺 Actions 写权限 + 计费阻断态 ⇒ **请在网页 UI 点 `Re-run all jobs`**（UI 不受 token 限制），或修好计费后 push 一个非 `paths-ignore` 路径的变更（`**.md`/`docs/**` 的提交不会触发，实测今天文档提交零 run） |
+| 解除方式（组织管理员） | github.com → 组织 `GenzLTD` → **Settings → Billing and plans**：修复失败的付款方式或调整/提高 Actions spending limit。计费读数本机查不到（`/orgs/GenzLTD/settings/billing/actions` → 404 需 `admin:org`；`gh auth refresh -h github.com -s admin:org`） |
+| 最省事的重跑对象 | **对 Deploy `#134`（`3bb0c35`）点 `Re-run all jobs`** 即可 —— 其后的 `8be433c`/`14d7301` 均为**纯文档**提交（`**.md`/`docs/**` 在 `paths-ignore` 内），**代码面与 HEAD 完全等价** ⇒ 重跑它 = 部署当前代码状态，并自动跑 D1b+ 守卫 |
+| 解封后的自验 | 重跑或新 push 会走**真实部署路径**：`rsync` 新版 `docker-compose.yml` + `deploy.yml` → `compose down -p looma-zervi` → `up`（含 `pgvector`）→ **D1b+ 守卫自动断言**「PG 在跑 + `pg_isready` + `genzltd` 表数 ≥ 55」，并把 `git_commit.txt`/`/health.git_commit` 推进到新 SHA |
+| 影响面 | 生产 backend 仍是 `git_commit a51ff19`（容器未重建）；**PG 侧变更已实际生效**（新版 compose 已同步 prod 并 recreate 过，见 ③） |
 
 #### ② D1b 同命令复演（部署序列**逐字**执行，替代被阻断的 CI 部署）
 
@@ -451,7 +456,7 @@ backend 容器**既无 psycopg 也无 psql**（实测 `docker exec looma-backend
 - [x] 新增 **D1b+ 守卫**实测可跑通（输出 `GUARD_PASSED`）——真实部署时会在 `up` 之后自动断言「PG 在跑 + `pg_isready` 就绪 + `genzltd` 表数 ≥ 55」，任一不满足即部署失败
 - [ ] D3：腾讯云控制台把 `5433` 入站规则从 `0.0.0.0/0` 收窄到管理网段/删除（**唯一剩余人工项**；实测公网 5433 已 REFUSED，该规则当前**无实际暴露**，删除属清冗余）
 - [ ] 建议（非本方案范围，见 §5.3④）：`5200/6379/8000` 宿主映射收窄至 `127.0.0.1` + 给 Redis 加 `requirepass`
-- [ ] 待人工：修复 CI（Actions 写端点 404 / 作业 `steps=0` 秒败），重跑 Deploy 以在真实路径上复验 D1b+（§5.3①）
+- [ ] 待人工：**修复组织计费**（`GenzLTD` → Settings → **Billing and plans**：付款失败 / Actions spending limit），随后在 UI 重跑或新 push，让 Deploy 在真实路径上复验 D1b+（§5.3①）
 - [ ] 可选：`docker exec looma-pgvector psql -U looma -d genzltd -c 'CREATE EXTENSION IF NOT EXISTS vector'`（镜像已带，本次未启用）
 
 ---
@@ -460,7 +465,7 @@ backend 容器**既无 psycopg 也无 psql**（实测 `docker exec looma-backend
 
 | 日期 | 版本 | 变更 |
 |------|------|------|
-| 2026-09-28 | 1.2 | **D1b 实测 + 推流**：`push main` 完成（`d522301`/`2193b24`/`3bb0c35`），因当日 CI 被平台阻断（5 连 `steps=0` 秒败，同签名既存于 09-23）改用**同命令复演**实测 D1b：`compose down -p looma-zervi` 真删 `looma-pgvector`（全状态计数 1→0），`up` 列表把它拉回 ⇒ 容器 id 变更而卷 `CreatedAt` 未变、`57 表/1 视图/58,392 行` 逐项一致。新增 **D1b+ 守卫**（`deploy.yml` 部署后断言 PG 存活 + `pg_isready` + 表数 ≥ 55）与 **pgvector 优雅停机 60s / 日志轮转**；实测 engine 29.1.3 的 `docker inspect` **不输出** `StopTimeout`，改用行为学验证 compose 配置真实生效（`--stop-timeout 25` → `stop` 实测 25s；compose `20s` → 实测 20s）。补记端口面审计：公网仅 `22/80/443`，`5200/6379/8000` 仅靠安全组挡且 Redis 无认证（§5.3） |
+| 2026-09-28 | 1.2 | **D1b 实测 + 推流**：`push main` 完成（`d522301`/`2193b24`/`3bb0c35`），因当日 **4 个 CI run 被组织计费阻断**（作业 `steps=0`、无 runner；注解原文 "The job was not started because recent account payments have failed or your spending limit needs to be increased"，**09-23 起即存在**、同注解亦见于 `jobfirst-claw`，public 仓不受限）改用**同命令复演**实测 D1b：`compose down -p looma-zervi` 真删 `looma-pgvector`（全状态计数 1→0），`up` 列表把它拉回 ⇒ 容器 id 变更而卷 `CreatedAt` 未变、`57 表/1 视图/58,392 行` 逐项一致。新增 **D1b+ 守卫**（`deploy.yml` 部署后断言 PG 存活 + `pg_isready` + 表数 ≥ 55）与 **pgvector 优雅停机 60s / 日志轮转**；实测 engine 29.1.3 的 `docker inspect` **不输出** `StopTimeout`，改用行为学验证 compose 配置真实生效（`--stop-timeout 25` → `stop` 实测 25s；compose `20s` → 实测 20s）。补记端口面审计：公网仅 `22/80/443`，`5200/6379/8000` 仅靠安全组挡且 Redis 无认证（§5.3） |
 | 2026-09-28 | 1.1 | **执行完成**：D1/D1b/D2/D4 落地并生产实跑（§5.2）。新增 **D1b**（执行中发现：`deploy.yml` 的 `compose down -p looma-zervi` 会删掉项目内全部容器，`up` 列表不含 `pgvector` 就会"部署一次死一次"）。`genzltd` 迁入 **55 表 / 58,392 行**（55/55 对拍一致 · 172 索引 · 55 外键 · 17 identity 对齐），P1 联邦骨架 APPLY 且幂等复跑通过；公网 5433 已 REFUSED。仅余 D3 安全组（控制台） |
 | 2026-09-28 | 1.0 | 首版：现场取证（§1）、根因 R1–R5（§2）、目标态（§3）、D1–D4 diff（§4）、执行步骤（§5）、搬运设计（§6）、回滚（§7）、风险（§8）、P2 前置决策（§9）、验收（§10）；**阶段 0 已实测通过**（§5.1） |
 
