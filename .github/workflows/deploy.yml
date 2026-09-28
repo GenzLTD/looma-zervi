@@ -234,6 +234,7 @@ jobs:
             --exclude='backend/venv' \
             --exclude='backend/data' \
             --exclude='data/poetry_full' \
+            --exclude='data/pgdata' \
             --exclude='.env' \
             --exclude='backend/.env' \
             --exclude='frontend/' \
@@ -368,7 +369,9 @@ jobs:
 
           echo "=== Start / recreate containers ==="
           ${COMPOSE} up -d --remove-orphans --force-recreate --no-build backend
-          ${COMPOSE} up -d --no-build chromadb
+          # pgvector 必须在此列出：上面 `compose down -p looma-zervi` 已删除该项目
+          # 全部容器（含 pgvector），不 up 就会被永久停掉。数据在 named volume 中，安全。
+          ${COMPOSE} up -d --no-build chromadb pgvector
 
           echo "=== Wait for backend health ==="
           for i in $(seq 1 30); do

@@ -90,10 +90,43 @@ services:
     networks:
       - looma-net
 
+  # ============================================
+  # PostgreSQL 17 + pgvector（联邦登记 / 目录真源）
+  # 2026-09-28 重建，取代 2026-07-02 手工 docker run 的孤儿容器。
+  # 三条硬约束（对应 PROD_PG_REBUILD_PLAN.md §2 根因，改之前先读）：
+  #   1) PGDATA 用 named volume —— 绝不能落仓库树内（deploy.yml 的 rsync --delete
+  #      会删掉 data/pgdata，这正是上次死亡原因 R1）
+  #   2) ports 只绑 127.0.0.1 —— 消除 0.0.0.0:5433 公网暴露（R4）
+  #   3) 密码只从 docker/.env 取（env_file），不入 git；.env 已被 rsync 排除
+  # 注意：deploy.yml 的 `compose down -p looma-zervi` 会重建本容器，数据在
+  # named volume 里不受影响；故 up 列表（deploy.yml:371）必须含 pgvector。
+  # ============================================
+  pgvector:
+    image: pgvector/pgvector:pg17
+    container_name: looma-pgvector
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      - POSTGRES_USER=looma
+      - POSTGRES_DB=genzltd
+    env_file:
+      - ./.env          # docker/.env：提供 POSTGRES_PASSWORD（缺文件 → compose 报错，快速失败）
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U looma -d genzltd"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - looma-net
+
 volumes:
   backend-data:
   chroma-data:
   redis-data:
+  pgdata:
 
 networks:
   looma-net:
