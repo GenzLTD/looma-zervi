@@ -148,3 +148,34 @@ export interface ProvidersResponse {
   providers: PaymentProvider[];
   stub_mode: boolean;
 }
+
+/**
+ * ============ Apple IAP（payment.v1.json v1.2.0 apple_iap 段）============
+ *
+ * App 内 StoreKit 2 通道，服务端为 zervi-rust payment-service（:3009）。
+ * 与 huawei_iap 同理**不属于** `PaymentProvider` union —— 那是 web checkout
+ * 通道（stripe/paypal/...），Apple IAP 不出现在 web 结账页。
+ * 服务端实现：zervi-rust feat/apple-iap 分支 payment-service/src/routes.rs。
+ */
+
+/** POST /v1/payment/apple/verify 请求（App 内购买完成后主动查证，激活主路径） */
+export interface AppleVerifyRequest {
+  /** StoreKit 2 交易返回的 transaction.id（每次续期不同） */
+  transactionId: string;
+}
+
+/** POST /v1/payment/apple/restore 请求（跨设备恢复，重新绑定当前账号） */
+export interface AppleRestoreRequest {
+  originalTransactionId: string;
+}
+
+/** POST /v1/payment/apple/verify | restore 响应 */
+export interface AppleIapStatus {
+  tier: Tier;
+  /** 订阅当前是否有效（expiresDate 在未来） */
+  active: boolean;
+  /** RFC3339 */
+  expiresAt: string;
+  environment: "Sandbox" | "Production";
+  originalTransactionId: string;
+}

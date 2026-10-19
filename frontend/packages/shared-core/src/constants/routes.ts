@@ -103,6 +103,10 @@ export const API_ROUTES = {
   PAYMENT_CHECKOUT: "/v1/payment/checkout",
   PAYMENT_WECHAT_ORDER: "/v1/payment/wechat/order",
   PAYMENT_WECHAT_NOTIFY: "/v1/payment/wechat/notify",
+  // Apple IAP（payment.v1.json v1.2.0；服务端 zervi-rust payment-service）。
+  // webhook 是 Apple→服务端回调，App/前端不调用，故不注册。
+  PAYMENT_APPLE_VERIFY: "/v1/payment/apple/verify",
+  PAYMENT_APPLE_RESTORE: "/v1/payment/apple/restore",
 
   // Credit (company evaluation — tripod leg 3: Resume → Job → Company)
   // ⭐ Powered by QCC (企查查) official data source
