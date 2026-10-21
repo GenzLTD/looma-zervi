@@ -16,8 +16,10 @@
     python3 export_sqlite_to_pg.py --sqlite backend/data/looma.db --out /tmp/genzltd
     python3 export_sqlite_to_pg.py --sqlite … --out … --schema-only
     python3 export_sqlite_to_pg.py --sqlite … --out … --data-only --tables users,tenants
+    python3 export_sqlite_to_pg.py --sqlite … --out … --recreate        # 显式允许 DROP（危险）
+    python3 export_sqlite_to_pg.py --sqlite … --out … --strict-source   # 疑似测试库直接拒绝
 
-不变量（评审时按这四条查）：
+不变量（评审时按这五条查）：
   1) **只读源库**：连上即 `PRAGMA query_only=ON`（任何写操作立刻报错），绝不写 `looma.db`。
      刻意**不用** `mode=ro` URI —— WAL 模式下它要建 `-shm`，会以
      `sqlite3.OperationalError: unable to open database file` 失败（本机 py3.9 实测）。
@@ -25,7 +27,13 @@
   2) **类型保真映射**，不做语义升级 —— SQLite 里时间戳存的是 TEXT ISO 串，
      就映射成 `text`（不擅自改 `timestamptz`，避免与 `manager.py` 读写语义分叉）
   3) 不依赖 psql / psycopg（宿主无 psql 也能生成）
-  4) 幂等可重放：schema.sql 默认先 `DROP TABLE IF EXISTS … CASCADE`（`--no-drop` 关闭）
+  4) **默认不清表（安全默认）**：schema.sql 走 `CREATE TABLE IF NOT EXISTS`，天然幂等；
+     只有显式 `--recreate` 才生成 `DROP TABLE IF EXISTS … CASCADE`。
+     （2026-10-21 评审结论：原默认 drop=True 是唯一 footgun —— 目标库是生产 `genzltd`，
+     误 apply 会先清表。安全路径必须才是默认。）
+  5) **源库身份自检**：脚本保护【源文件】不被写坏，但防不住【人把源选错】。
+     导出前对 `users` 做伪域名占比抽检，>50% 即 stderr 告警；`--strict-source` 下直接拒绝
+     （`--force` 可覆盖）。产出里的 report.md 会留痕，供二次评审。
 
 对应文档：docs/PROD_PG_REBUILD_PLAN.md §5 阶段 0/4/5、§6
 """
@@ -226,9 +234,12 @@ def gen_schema(tables: list[Table], warnings: list[str], drop: bool) -> str:
         "",
     ]
     if drop:
-        out.append("-- 幂等：先清空同名对象（--no-drop 可关闭）")
+        out.append("-- ⚠️ 破坏性段：由 --recreate 显式开启（默认不生成），apply 会先清空同名表")
+        out.append("-- 复核清单：目标库是否为 genzltd？是否已备份？是否误指向生产？")
         for t in tables:
             out.append(f'DROP TABLE IF EXISTS {q(t.name)} CASCADE;')
+    else:
+        out.append("-- 安全默认：CREATE TABLE IF NOT EXISTS，重复 apply 不丢数据")
         out.append("")
 
     for t in tables:
@@ -365,7 +376,7 @@ def gen_constraints(conn: sqlite3.Connection, warnings: list[str], skipped: list
 # report.md / verify.sql
 # ============================================================
 def gen_report(src: Path, tables: list[Table], skipped: list[dict], warnings: list[str],
-               stats: dict, snap_warn: bool) -> str:
+               stats: dict, snap_warn: bool, sanity: dict | None = None) -> str:
     total = sum(t.rows for t in tables)
     lines = [
         "# SQLite → PostgreSQL 导出报告",
@@ -376,6 +387,16 @@ def gen_report(src: Path, tables: list[Table], skipped: list[dict], warnings: li
         f"- schema.sql：{stats['schema']:,} B · data.sql：{stats['data']:,} B",
         "",
     ]
+    if sanity and sanity.get("checked"):
+        verdict = "⚠️ 疑似测试/种子库" if sanity["ratio"] > 0.5 else "✅ 通过"
+        lines += [
+            "## 源库身份自检（先看这个，再看行数）",
+            "",
+            f"- 结论：**{verdict}** · users={sanity['total']:,} 行 · {sanity['details'] or '无邮箱列可判'}",
+            f"- users 列：`{sanity['cols']}`",
+            "- 阈值：伪域名邮箱占比 > 50% 判定为测试/种子向，不应作为单源迁移的**事实源**",
+            "",
+        ]
     if snap_warn:
         lines += [
             "> ⚠️ **检测到 `-wal` 文件**：源库处于活动状态。导出连接为 `PRAGMA query_only=ON`（只读），",
@@ -410,6 +431,48 @@ def gen_verify(tables: list[Table]) -> str:
 
 
 # ============================================================
+# 源库身份自检（第 5 条不变量）
+# ============================================================
+# 脚本能保护【源文件不被写坏】，但防不住【人把源选错】。
+# 2026-10-21 双机对账实测：Mac 侧 looma.db / genzltd 与 Win 侧 Vultr 副本是两套
+# 不同源的实例（Mac 43 users vs Vultr 206 users），且两边都以伪域名测试账号为主。
+# ⇒ 导出前必须先回答"这份是不是权威源"，而不是"脚本有没有跑成功"。
+TEST_DOMAIN_MARKERS = (
+    "test.local", "example.com", "example.org", "example.net",
+    "looma.local", "genz.local", "thomas.local",
+    "localhost", "test.com", "testdata", "seed.",
+)
+
+
+def source_sanity(conn: sqlite3.Connection) -> dict:
+    """对 users 表做只读抽检，返回 {checked, total, badge, ratio, details}。"""
+    res = {"checked": False, "total": 0, "badge": 0, "ratio": 0.0, "details": "", "cols": ""}
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+    except sqlite3.Error:
+        return res
+    if not cols:
+        return res
+    # 找一个最像邮箱的列；没有就用主键列做占位统计（不误报）
+    email_col = next((c for c in cols if c.lower() in ("email", "mail", "account")), None)
+    res["cols"] = ",".join(cols)
+    res["total"] = conn.execute("SELECT count(*) FROM users").fetchone()[0]
+    res["checked"] = True
+    if not email_col or res["total"] == 0:
+        return res
+    rows = conn.execute(f"SELECT {q(email_col)} FROM users").fetchall()  # noqa: S608
+    bad = 0
+    for (val,) in rows:
+        s = (val or "").strip().lower()
+        if "@" in s and any(m in s for m in TEST_DOMAIN_MARKERS):
+            bad += 1
+    res["badge"] = bad
+    res["ratio"] = bad / max(len(rows), 1)
+    res["details"] = f"伪域名占比 {res['ratio']:.1%}（{bad}/{len(rows)}，列 `{email_col}`）"
+    return res
+
+
+# ============================================================
 # main
 # ============================================================
 def main(argv: list[str] | None = None) -> int:
@@ -418,7 +481,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="/tmp/genzltd", help="输出目录")
     ap.add_argument("--tables", default="", help="仅导出这些表（逗号分隔），默认全部")
     ap.add_argument("--batch", type=int, default=200, help="INSERT 每语句行数（默认 200）")
-    ap.add_argument("--no-drop", action="store_true", help="schema.sql 不生成 DROP TABLE")
+    ap.add_argument("--no-drop", action="store_true",
+                    help="[已废弃] 现已是默认行为；保留仅为兼容旧 CI 调用")
+    ap.add_argument("--recreate", action="store_true",
+                    help="危险：schema.sql 生成 DROP TABLE IF EXISTS … CASCADE（默认不生成）")
+    ap.add_argument("--strict-source", action="store_true",
+                    help="源库疑似测试/种子库（伪域名邮箱 >50%%）时直接拒绝")
+    ap.add_argument("--force", action="store_true", help="配合 --strict-source：确认后继续")
     ap.add_argument("--immutable", action="store_true",
                     help="按 immutable=1 打开（仅用于静态快照；活动库禁用）")
     ap.add_argument("--schema-only", action="store_true")
@@ -442,6 +511,23 @@ def main(argv: list[str] | None = None) -> int:
     # 说明：不主动做 wal_checkpoint —— 读连接无需 checkpoint，且 query_only 下也不允许写。
     #       若源库带 -wal，SQLite 会自动读 WAL 内容；快照策略见 report.md 的提示。
     try:
+        # ── 第 5 条不变量：跑之前先问"这份是不是权威源" ──
+        sanity = source_sanity(conn)
+        if sanity["checked"] and sanity["total"] and sanity["ratio"] > 0.5:
+            msg = (
+                f"[GUARD] 源库疑似测试/种子库：users 共 {sanity['total']:,} 行，{sanity['details']}\n"
+                f"[GUARD] 单源迁移要求 --sqlite 指向**实时权威源**；继续前请确认这份 SQL 的出处。\n"
+                f"[GUARD] 确认无误请加 --force（或去掉 --strict-source 仅告警）。"
+            )
+            if args.strict_source and not args.force:
+                print(msg, file=sys.stderr)
+                print(f"[FATAL] --strict-source 拒绝导出：{src}", file=sys.stderr)
+                return 3
+            print(msg, file=sys.stderr)
+            warnings.append("源库身份自检未通过：" + sanity["details"] + "（疑似测试/种子库）")
+        elif sanity["checked"]:
+            warnings.append(f"源库身份自检：users {sanity['total']:,} 行，{sanity['details'] or '无邮箱列可判'}")
+
         tables, skipped = introspect(conn, warnings)
         if args.tables:
             want = {s.strip() for s in args.tables.split(",") if s.strip()}
@@ -452,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
         stats = {"schema": 0, "data": 0}
         tables.sort(key=lambda t: t.name)
         if not args.data_only:
-            text = gen_schema(tables, warnings, drop=not args.no_drop)
+            text = gen_schema(tables, warnings, drop=args.recreate)
             p = out_dir / "schema.sql"
             p.write_text(text, encoding="utf-8")
             stats["schema"] = len(text.encode())
@@ -469,7 +555,8 @@ def main(argv: list[str] | None = None) -> int:
         p.write_text(gen_verify(tables), encoding="utf-8")
         print(f"[OK] {p}")
         p = out_dir / "report.md"
-        p.write_text(gen_report(src, tables, skipped, warnings, stats, snap_warn), encoding="utf-8")
+        p.write_text(gen_report(src, tables, skipped, warnings, stats, snap_warn, sanity),
+                     encoding="utf-8")
         print(f"[OK] {p}  （告警 {len(warnings)} 条）")
     finally:
         conn.close()
