@@ -86,11 +86,7 @@ export default function MatchScreen() {
 
   async function onConfirm() {
     if (completing || !result) return
-    const ui = deriveMatchUiState(result)
-    // v0：后端 can_complete_mission 优先；缺省时匹配成功即可确认
-    const canComplete =
-      result.can_complete_mission === true ||
-      (result.can_complete_mission !== false && (ui.canComplete || result.matched === true))
+    const canComplete = result.can_complete_mission === true
     if (!canComplete) {
       setToast('契合度未达解锁阈值，可邀请更多舰员后再试')
       return
@@ -101,8 +97,8 @@ export default function MatchScreen() {
         const ok = await completeMission('match')
         if (!ok) return
         setAchievement({
-          title: '🎯 首次星际匹配！',
-          desc: '你已与另一位星际公民完成匹配 · 匹配星图已解锁',
+          title: '🎯 验证组队成功！',
+          desc: '共识共振已达成 · 匹配星图已解锁',
         })
       }
       // 闭环下一动机：凭证出口（信任档案）优先于空 Hub
@@ -155,11 +151,7 @@ export default function MatchScreen() {
   }
 
   const uiState = result ? deriveMatchUiState(result) : null
-  const canComplete =
-    !!result &&
-    (result.can_complete_mission === true ||
-      (result.can_complete_mission !== false &&
-        (!!uiState?.canComplete || result.matched === true)))
+  const canComplete = !!result && result.can_complete_mission === true
 
   return (
     <div>
@@ -446,7 +438,11 @@ function SpreadPanel({
       {hint.spread_target > 0 && (
         <div style={{ fontSize: 11, color: 'var(--px-color-text-muted)', marginBottom: 12 }}>
           传播进度 {hint.spread_count}/{hint.spread_target}
-          {remaining > 0 ? ` · 再邀请 ${remaining} 人` : ''}
+          {hint.wide_scan_unlocked
+            ? ' · 广域扫描已解锁'
+            : remaining > 0
+              ? ` · 再邀请 ${remaining} 人解锁广域扫描`
+              : ''}
         </div>
       )}
       <button

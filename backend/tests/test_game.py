@@ -615,13 +615,18 @@ def test_match_creates_consensus_and_acknowledge(authed_client, second_authed_cl
 
     match = authed_client.post("/v1/game/match", json={}).get_json()
     assert match["matched"] is True
-    assert match["can_complete_mission"] is True
+    assert match["consensus_passed"] is True
+    assert match["consensus_status"] == "consensus_passed"
+    assert match["can_complete_mission"] is False
+    assert match["spread_hint"]["spread_target"] == 5
     assert match.get("pending_consensus_id")
-    assert match.get("consensus_status") in (
-        "consensus_passed",
-        "consensus_verified",
-        "consensus_weak",
+
+    blocked = authed_client.post(
+        "/v1/game/mission-complete",
+        json={"mission_id": "match", "xp_reward": 40},
     )
+    assert blocked.status_code == 403
+    assert blocked.get_json()["error"] == "consensus_required"
 
     cid = match["pending_consensus_id"]
     ack = second_authed_client.post(
@@ -637,6 +642,13 @@ def test_match_creates_consensus_and_acknowledge(authed_client, second_authed_cl
     assert listing.status_code == 200
     verified = listing.get_json()["verified"]
     assert any(v["id"] == cid for v in verified)
+
+    done = authed_client.post(
+        "/v1/game/mission-complete",
+        json={"mission_id": "match", "xp_reward": 40},
+    )
+    assert done.status_code == 200
+    assert done.get_json()["mission_id"] == "match"
 
 
 def test_profile_includes_spread_count(authed_client, second_authed_client, client):
@@ -677,3 +689,78 @@ def test_social_degrees_has_no_trust_score(authed_client, second_authed_client):
     conn = authed_client.get(f"/v1/social/connection/{second_authed_client.user_id}")
     assert conn.status_code == 200
     assert "trust_score" not in conn.get_json()
+
+
+def _spread_user(client, email: str):
+    resp = client.post("/v1/auth/register", json={
+        "email": email,
+        "password": "password123",
+        "name": email.split("@")[0],
+    })
+    assert resp.status_code in (200, 201), resp.get_json()
+    data = resp.get_json()
+
+    class Authed:
+        def __init__(self, test_client, token):
+            self._client = test_client
+            self.headers = {"Authorization": f"Bearer {token}"}
+
+        def post(self, url, json=None):
+            return self._client.post(url, headers=self.headers, json=json)
+
+        def get(self, url):
+            return self._client.get(url, headers=self.headers)
+
+    return Authed(client, data["access_token"])
+
+
+def _complete_personality(user, personality_type="星云艺术家"):
+    synced = user.post("/v1/game/profile-sync", json={"personality_type": personality_type})
+    assert synced.status_code in (200, 201), synced.get_json()
+    done = user.post(
+        "/v1/game/mission-complete",
+        json={"mission_id": "personality", "xp_reward": 50},
+    )
+    assert done.status_code == 200, done.get_json()
+
+
+def test_reusable_referral_unlocks_wide_scan_without_tier_change(client, authed_client):
+    """一张免费 ref 可被多人核销；满 5 人解锁广域扫描并发放传播 XP，不升付费档。"""
+    created = authed_client.post("/v1/referral/create", json={"purpose": "referral"})
+    assert created.status_code in (200, 201)
+    code = created.get_json()["code"]
+    assert created.get_json().get("tier_grant", "free") == "free"
+
+    fleet = authed_client.post("/v1/game/fleet/create", json={"name": "单人舰队"})
+    assert fleet.status_code in (200, 201), fleet.get_json()
+    _complete_personality(authed_client, "黑洞程序员")
+
+    blocked = authed_client.post("/v1/game/match", json={})
+    assert blocked.status_code == 400
+    assert blocked.get_json()["error"] == "fleet_too_small"
+
+    invitees = []
+    for i in range(5):
+        user = _spread_user(client, f"spread-wide-{i}@test.com")
+        used = user.post("/v1/referral/use", json={"code": code})
+        assert used.status_code == 200, used.get_json()
+        assert used.get_json()["tier_granted"] == "free"
+        assert "access_token" not in used.get_json()
+        _complete_personality(user, "星云艺术家")
+        invitees.append(user)
+
+    again = invitees[0].post("/v1/referral/use", json={"code": code})
+    assert again.status_code == 200
+
+    profile = authed_client.get("/v1/game/profile").get_json()
+    assert profile["spread_count"] == 5
+    # 邀请人自己的人格任务 50 XP，加上 5 名被邀请人各 +5
+    assert profile["xp"] == 50 + 5 * 5
+
+    opened = authed_client.post("/v1/game/match", json={})
+    assert opened.status_code == 200, opened.get_json()
+    body = opened.get_json()
+    assert body["spread_hint"]["wide_scan_unlocked"] is True
+    assert body["spread_hint"]["spread_count"] == 5
+    assert body["spread_hint"]["spread_target"] == 5
+    assert body["candidates_considered"] >= 1

@@ -97,10 +97,7 @@ Page({
     if (this.data.completing || !this.data.result) return
     const result = this.data.result
     const ui = this.data.uiState
-    const canComplete =
-      result.can_complete_mission === true ||
-      (result.can_complete_mission !== false &&
-        (!!ui?.canComplete || result.matched === true))
+    const canComplete = result.can_complete_mission === true
     if (!canComplete) {
       wx.showToast({ title: '契合度未达解锁阈值，可邀请更多舰员后再试', icon: 'none' })
       return

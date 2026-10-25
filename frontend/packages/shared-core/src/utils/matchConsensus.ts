@@ -23,7 +23,8 @@ function defaultSpreadHint(view: MatchResultView, canComplete: boolean): MatchSp
           ? "接近共振但未验证，分享信号拉更多人入舰队"
           : null,
     spread_count: 0,
-    spread_target: 3,
+    spread_target: 5,
+    wide_scan_unlocked: false,
   };
 }
 

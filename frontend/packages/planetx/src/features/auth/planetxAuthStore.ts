@@ -57,6 +57,37 @@ const MISSION_XP: Record<MissionId, number> = {
   match: 40,
 }
 
+const PENDING_REF_KEY = 'planetx_pending_ref'
+
+function rememberReferralCode(): string {
+  if (typeof window === 'undefined') return ''
+  const fromUrl = (new URLSearchParams(window.location.search).get('ref') || '').trim()
+  try {
+    if (fromUrl) sessionStorage.setItem(PENDING_REF_KEY, fromUrl)
+    return fromUrl || (sessionStorage.getItem(PENDING_REF_KEY) || '').trim()
+  } catch {
+    return fromUrl
+  }
+}
+
+function clearReferralCode(): void {
+  try {
+    sessionStorage.removeItem(PENDING_REF_KEY)
+  } catch {
+    /* private mode */
+  }
+  const url = new URL(window.location.href)
+  url.searchParams.delete('ref')
+  window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+}
+
+function billingRegionFromLocation(): 'CN' | 'US' | '' {
+  const raw = (new URLSearchParams(window.location.search).get('region') || '').trim().toUpperCase()
+  if (raw === 'CN' || raw === 'US') return raw
+  if (raw === 'SG') return 'US'
+  return ''
+}
+
 const VALID_IDENTITIES: Identity[] = ['explorer', 'captain', 'wanderer']
 
 /** 老用户：有人格/任务进度则直达 Hub，避免重复 onboarding */
@@ -159,6 +190,8 @@ interface PlanetXState {
   checkSession: () => Promise<void>
   /** 消费 URL ?join=CODE 自动加入舰队 */
   consumeJoinInviteFromUrl: () => Promise<void>
+  /** 消费 URL ?ref=CODE。未登录时先记住，登录后核销，计入对方的传播进度 */
+  consumeReferralFromUrl: () => Promise<void>
 
   // Profile (Looma API)
   loadProfile: () => Promise<void>
@@ -355,6 +388,7 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
       const s = get()
       get().setScreen(resolvePostAuthScreen(s))
       await get().consumeJoinInviteFromUrl()
+      await get().consumeReferralFromUrl()
       return true
     } catch (e) {
       const err = e as { body?: { message?: string }; message?: string }
@@ -402,6 +436,10 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
       }
       get().setToast('注册成功！欢迎加入 PlanetX 🚀')
       get().setScreen('onboarding')
+      if (get().token) {
+        await get().consumeJoinInviteFromUrl()
+        await get().consumeReferralFromUrl()
+      }
       return true
     } catch (e) {
       const err = e as { body?: { message?: string }; message?: string }
@@ -425,6 +463,7 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
       const s = get()
       get().setScreen(resolvePostAuthScreen(s))
       await get().consumeJoinInviteFromUrl()
+      await get().consumeReferralFromUrl()
       return true
     } catch (e) {
       const msg = (e as { body?: { message?: string }; response?: { data?: { message?: string } }; message?: string })
@@ -463,6 +502,7 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
       }
     }
     if (!token) {
+      await get().consumeReferralFromUrl()
       setTimeout(() => set({ screen: 'auth' }), 2000)
       return
     }
@@ -475,6 +515,7 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
       const s = get()
       setTimeout(() => set({ screen: resolvePostAuthScreen(s) }), 1500)
       await get().consumeJoinInviteFromUrl()
+      await get().consumeReferralFromUrl()
     } catch {
       get().logout()
     }
@@ -494,6 +535,19 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
     } catch {
       /* joinFleet 已 toast */
     }
+  },
+
+  consumeReferralFromUrl: async () => {
+    const code = rememberReferralCode()
+    if (!code || !get().token) return
+    try {
+      await createReferralApi(getApiClient()).use(code)
+      get().setToast('邀请已计入。完成人格测试后，对方的传播进度会增加')
+    } catch (err: unknown) {
+      const status = (err as { status?: number }).status
+      if (status !== 400 && status !== 404) return
+    }
+    clearReferralCode()
   },
 
   // ======= Profile (Looma API) =======
@@ -666,7 +720,12 @@ export const usePlanetXStore = create<PlanetXState>((set, get) => ({
   getInviteUrl: () => {
     const { refCode } = get()
     const base = window.location.origin + window.location.pathname
-    return refCode ? `${base}?ref=${refCode}` : base
+    const params = new URLSearchParams()
+    if (refCode) params.set('ref', refCode)
+    const region = billingRegionFromLocation()
+    if (region) params.set('region', region)
+    const query = params.toString()
+    return query ? `${base}?${query}` : base
   },
 
   getHrShareUrl: () => {
