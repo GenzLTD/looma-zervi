@@ -321,11 +321,13 @@ class Act1StateMachine:
         # ── Step-specific responses ──
 
         if state.step == 1:
-            # Signal flash
-            line = NAVIGATOR_LINES["signal_flash"]
-            resp["navigator_line"] = line["line"]
-            resp["navigator_confidence"] = line["confidence"]
+            # Greeting carries the visible 0.3 uncertainty. The signal line stays in the narrative.
+            greet = NAVIGATOR_LINES["greeting"]
+            signal = NAVIGATOR_LINES["signal_flash"]
+            resp["navigator_line"] = greet["line"]
+            resp["navigator_confidence"] = greet["confidence"]
             resp["narrative"] = (
+                f"{signal['line']}\n\n"
                 f"Navigator 的声音在你周围回荡。\n\n"
                 f"六域同时亮起。你选择了 {domain_data.get('icon', '')} {state.domain}。"
             )

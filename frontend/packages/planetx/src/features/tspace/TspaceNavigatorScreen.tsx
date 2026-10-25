@@ -35,6 +35,7 @@ interface DomainDef {
   emotion: string
   hint: string
   isMVP?: boolean
+  inDevelopment?: boolean
 }
 
 const DOMAINS: readonly DomainDef[] = [
@@ -42,7 +43,7 @@ const DOMAINS: readonly DomainDef[] = [
   { key: '身份域', icon: '🪪', name: '身份域', color: 'var(--px-color-domain-identity)', emotion: '回顾→重构', hint: '过去的自己走了出来' },
   { key: '诗域',   icon: '📜', name: '诗域',   color: 'var(--px-color-yellow)', emotion: '孤独→共鸣', hint: '墙上半首被擦掉的诗' },
   { key: '信任域', icon: '⚖️', name: '信任域', color: 'var(--px-color-lavender)', emotion: '怀疑→确认', hint: '审判庭上你认识被告' },
-  { key: '自我域', icon: '🪞', name: '自我域', color: 'var(--px-color-domain-self)', emotion: '困惑→认知', hint: '镜子给你没选的标签' },
+  { key: '自我域', icon: '🪞', name: '自我域', color: 'var(--px-color-domain-self)', emotion: '困惑→认知', hint: '镜子给你没选的标签', inDevelopment: true },
   { key: '迷雾域', icon: '🌫️', name: '迷雾域', color: 'var(--px-color-domain-mist)', emotion: '迷失→探索', hint: '非Navigator的声音在等你' },
 ]
 
@@ -101,7 +102,8 @@ export default function TspaceNavigatorScreen() {
   const [navigatorLine, setNavigatorLine] = useState('')
   const [choices, setChoices] = useState<Array<{ index: number; label: string }>>([])
   const [convergenceTexture, setConvergenceTexture] = useState<ConvergenceTexture | null>(null)
-  const [imprintName, setImprintName] = useState('')
+  const [navigatorConfidence, setNavigatorConfidence] = useState<number | null>(null)
+  const [endHook, setEndHook] = useState('')
   const [echoTriggered, setEchoTriggered] = useState(false)
   const [loading, setLoading] = useState(false)
   const [visitedDomains, setVisitedDomains] = useState<Set<string>>(new Set())
@@ -109,6 +111,7 @@ export default function TspaceNavigatorScreen() {
   const [showVerdict, setShowVerdict] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [careerCompleted, setCareerCompleted] = useState(false)
+  const [shelvedDomain, setShelvedDomain] = useState<string | null>(null)
   const [comparisonData, setComparisonData] = useState<ConvergenceTexture[]>([])
 
   const apiBase = useRef(import.meta.env.VITE_API_BASE ?? '')
@@ -135,6 +138,11 @@ export default function TspaceNavigatorScreen() {
   // ── Select domain ──
 
   const handleSelectDomain = useCallback(async (domainKey: string) => {
+    if (DOMAINS.find(d => d.key === domainKey)?.inDevelopment) {
+      setShelvedDomain(domainKey)
+      return
+    }
+    setShelvedDomain(null)
     setLoading(true)
     setChosenOption(null)
     setCrossChosen(null)
@@ -142,7 +150,8 @@ export default function TspaceNavigatorScreen() {
     setNavigatorLine('')
     setChoices([])
     setConvergenceTexture(null)
-    setImprintName('')
+    setNavigatorConfidence(null)
+    setEndHook('')
     setEchoTriggered(false)
     setShowComparison(false)
     setShowVerdict(false)
@@ -164,7 +173,10 @@ export default function TspaceNavigatorScreen() {
       // Auto-advance to step 1 (signal)
       const r1 = await apiPost('/v1/narrative/engine/act1/advance', { session_id: sid }) as Act1AdvanceResponse
       setStep(r1.step)
-      if (r1.navigator_line) setNavigatorLine(r1.navigator_line)
+      if (r1.navigator_line) {
+        setNavigatorLine(r1.navigator_line)
+        setNavigatorConfidence(r1.navigator_confidence)
+      }
       if (r1.narrative) setNarrative(r1.narrative)
     } catch (e: any) {
       console.error('Domain select failed:', e)
@@ -181,12 +193,15 @@ export default function TspaceNavigatorScreen() {
     try {
       const r = await apiPost('/v1/narrative/engine/act1/advance', { session_id: sessionId }) as Act1AdvanceResponse
       setStep(r.step)
-      if (r.navigator_line) setNavigatorLine(r.navigator_line)
+      if (r.navigator_line) {
+        setNavigatorLine(r.navigator_line)
+        setNavigatorConfidence(r.navigator_confidence)
+      }
       if (r.narrative) setNarrative(r.narrative)
       if (r.choices) setChoices(r.choices)
       if (r.convergence_texture) setConvergenceTexture(r.convergence_texture)
-      if (r.imprint_name) setImprintName(r.imprint_name)
       if (r.echo_triggered) setEchoTriggered(true)
+      if (r.end_hook) setEndHook(r.end_hook)
 
       // Track completion and show feedback
       if (r.step >= finalStep) {
@@ -226,7 +241,6 @@ export default function TspaceNavigatorScreen() {
       }
 
       setStep(r.step)
-      setImprintName(r.imprint_name)
       if (r.consequence) setNarrative(r.consequence)
       setChoices([])
     } catch (e: any) {
@@ -255,7 +269,8 @@ export default function TspaceNavigatorScreen() {
       setNavigatorLine('')
       setChoices([])
       setConvergenceTexture(null)
-      setImprintName('')
+      setNavigatorConfidence(null)
+    setEndHook('')
       setEchoTriggered(false)
       setShowComparison(false)
       setShowVerdict(false)
@@ -309,8 +324,34 @@ export default function TspaceNavigatorScreen() {
           </p>
         </div>
 
+        {isDomainSelection && shelvedDomain && (
+          <div style={CSS.panel}>
+            <div style={CSS.sectionTitle}>🪞 {shelvedDomain}</div>
+            <div style={{
+              padding: '28px 16px', borderRadius: '8px', textAlign: 'center' as const,
+              background: 'var(--px-color-bg-surface-alt)',
+              border: '1px dashed var(--px-color-border-solid)',
+            }}>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--px-color-text-on-primary)', margin: 0 }}>开发中</h2>
+              <p style={{ fontSize: '0.78rem', color: 'var(--px-color-text-muted)', lineHeight: 1.6, margin: '10px 0 0' }}>
+                这一域和 SaaS 的对接还没定，先不进入。
+              </p>
+            </div>
+            <button
+              onClick={() => setShelvedDomain(null)}
+              style={{
+                marginTop: '12px', width: '100%', padding: '10px 16px', borderRadius: '8px',
+                border: '1px solid var(--px-color-border-solid)', background: 'var(--px-color-bg-surface-alt)',
+                color: 'var(--px-color-text-soft)', fontSize: '0.82rem', cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              返回六域
+            </button>
+          </div>
+        )}
+
         {/* Domain Selector */}
-        {isDomainSelection && (
+        {isDomainSelection && !shelvedDomain && (
           <div style={CSS.panel}>
             <div style={CSS.sectionTitle}>🎯 选择一个域进入</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -346,6 +387,15 @@ export default function TspaceNavigatorScreen() {
                       padding: '1px 5px', borderRadius: '4px',
                       border: '1px solid rgba(85,239,196,0.25)',
                     }}>MVP</span>
+                  )}
+                  {d.inDevelopment && (
+                    <span style={{
+                      position: 'absolute' as const, top: '4px', right: '6px',
+                      fontSize: '0.58rem', color: 'var(--px-color-amber)',
+                      background: 'rgba(253, 203, 110, 0.12)',
+                      padding: '1px 5px', borderRadius: '4px',
+                      border: '1px solid rgba(253, 203, 110, 0.35)',
+                    }}>开发中</span>
                   )}
                   <div style={{ fontSize: '1.3rem', marginBottom: '2px' }}>{d.icon}</div>
                   <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--px-color-text-on-primary)' }}>{d.name}</div>
@@ -432,6 +482,15 @@ export default function TspaceNavigatorScreen() {
                 fontStyle: 'italic', color: 'var(--px-color-text-purple-tint)', fontSize: '0.88rem',
                 lineHeight: 1.7,
               }}>
+                {navigatorConfidence !== null && navigatorConfidence < 0.4 && (
+                  <div style={{ fontSize: '0.72rem', fontStyle: 'normal', marginBottom: '6px', color: 'var(--px-color-text-tertiary)' }}>
+                    <span style={{
+                      display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                      marginRight: 6, background: 'var(--px-color-text-tertiary)', opacity: 0.35,
+                    }} />
+                    {navigatorConfidence.toFixed(1)} 的确定 · 我不太确定
+                  </div>
+                )}
                 {navigatorLine}
               </div>
             )}
@@ -475,16 +534,10 @@ export default function TspaceNavigatorScreen() {
               </div>
             )}
 
-            {/* Imprint feedback */}
-            {imprintName && (
-              <div style={{
-                marginTop: '10px', padding: '6px 12px',
-                background: 'rgba(124,111,247,0.08)', borderRadius: '6px',
-                fontSize: '0.78rem', color: 'var(--px-color-lavender)',
-                border: '1px solid rgba(124,111,247,0.2)',
-              }}>
-                你获得了价值印记：<strong>{imprintName}</strong>
-              </div>
+            {endHook && (
+              <p style={{ marginTop: '12px', fontSize: '0.88rem', lineHeight: 1.7, color: 'var(--px-color-text-soft)' }}>
+                {endHook}
+              </p>
             )}
           </div>
         )}
@@ -591,9 +644,9 @@ export default function TspaceNavigatorScreen() {
 
         {careerCompleted && (
           <div style={CSS.panel}>
-            <div style={CSS.sectionTitle}>职业域 · 完整解读</div>
+            <div style={CSS.sectionTitle}>职业域 · 旁边的一扇门</div>
             <p style={{ fontSize: '0.78rem', color: 'var(--px-color-text-muted)', lineHeight: 1.6, margin: '0 0 12px' }}>
-              这一域的叙事已经走完。完整职业解读在 T-space 试用里。这次跳转不改变星际等级，也不计入传播人数。
+              这一幕先停在上面的钩子。若要看这一域的完整职业解读，可以从这里去试用。这次跳转不改变星际等级，也不计入传播人数。
             </p>
             <a
               href={careerTrialPricingUrl(import.meta.env.VITE_SAAS_URL || 'http://localhost:5174')}

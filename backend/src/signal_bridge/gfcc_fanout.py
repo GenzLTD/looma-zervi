@@ -180,6 +180,70 @@ def post_gfcc_signal(envelope: dict, url: str, secret: str, max_retries: int = 3
     )
 
 
+VALUE_AXES = {"survival", "freedom", "belonging"}
+NAVIGATOR_DOMAINS = {"职业域", "身份域", "诗域", "信任域", "自我域", "迷雾域"}
+
+
+def to_gfcc_value_axis_envelope(email_hash, axis, imprint_name, domain, points, nonce, timestamp=None):
+    """Build a value_axis_choice envelope or return ``{"skip": reason}``.
+
+    The axis is the option's own axis. Job-match score fields are not accepted.
+    """
+    if not isinstance(email_hash, str) or not HASH_RE.fullmatch(email_hash):
+        return {"skip": "user_id_hash_not_64_hex"}
+    if not isinstance(nonce, str) or len(nonce) < 8:
+        return {"skip": "nonce_too_short"}
+    if axis not in VALUE_AXES:
+        return {"skip": "axis_invalid"}
+    if domain not in NAVIGATOR_DOMAINS:
+        return {"skip": "domain_invalid"}
+    name = (imprint_name or "").strip()
+    if not name:
+        return {"skip": "imprint_name_empty"}
+    if isinstance(points, bool) or not isinstance(points, int) or not 1 <= points <= 5:
+        return {"skip": "points_out_of_band"}
+
+    payload = {
+        "axis": axis,
+        "imprint_name": name,
+        "domain": domain,
+        "points": points,
+        "source": "planetx",
+    }
+    if timestamp:
+        payload["generated_at"] = timestamp
+    envelope = {
+        "signal_type": "value_axis_choice",
+        "user_id_hash": email_hash,
+        "nonce": nonce,
+        "payload": payload,
+    }
+    if timestamp:
+        envelope["timestamp"] = timestamp
+    return {"envelope": envelope}
+
+
+def send_gfcc_value_axis_choice(
+    email_hash,
+    axis,
+    imprint_name,
+    domain,
+    points,
+    nonce,
+    timestamp=None,
+    url="",
+    secret="",
+):
+    """POST value_axis_choice. Missing URL, secret, or an invalid payload skips. Never raises."""
+    mapped = to_gfcc_value_axis_envelope(
+        email_hash, axis, imprint_name, domain, points, nonce, timestamp,
+    )
+    if "skip" in mapped:
+        logger.info("gfcc-fanout skip value_axis_choice: %s", mapped["skip"])
+        return {"ok": False, "skipped": True, "reason": mapped["skip"]}
+    return post_gfcc_signal(mapped["envelope"], url, secret)
+
+
 def send_gfcc_personality_beacon(
     email_hash,
     personality_type,
