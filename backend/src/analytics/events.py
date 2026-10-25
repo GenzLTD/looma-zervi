@@ -17,6 +17,7 @@ EVENT_CANDIDATE_IMPORTED = "candidate_imported"
 EVENT_CANDIDATE_IMPORT_DUPLICATE = "candidate_import_duplicate"
 EVENT_TRIAL_STARTED = "trial_started"
 EVENT_TRIAL_FAILED = "trial_failed"
+EVENT_TIER_ACTIVATED = "tier_activated"
 
 FORBIDDEN_PROPERTY_KEYS = frozenset({
     "email", "user_email", "phone", "mobile", "user_phone", "name", "user_name",

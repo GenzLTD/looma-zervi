@@ -3,13 +3,14 @@
  * Owner: szbenyx
  */
 import { useState } from "react";
-import { useNavigate, Navigate, Link } from "react-router-dom";
+import { useNavigate, Navigate, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSaasAuthStore } from "./authStore";
 import { useBrand } from "../../brand/useBrand";
 import { LanguageSwitcher } from "../../components/LanguageSwitcher";
 import SaasButton from "../../brand/ui/SaasButton";
 import SaasInput from "../../brand/ui/SaasInput";
+import { pricingReturnPath } from "../pricing/planetxTrialQuery";
 
 export default function Login() {
   const { t } = useTranslation();
@@ -20,9 +21,11 @@ export default function Login() {
   const [errorMsg, setErrorMsg] = useState("");
   const { login, isAuthenticated } = useSaasAuthStore();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const afterAuth = pricingReturnPath(searchParams) ?? "/";
 
   if (isAuthenticated) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={afterAuth} replace />;
   }
 
   const handleLogin = async () => {
@@ -35,7 +38,7 @@ export default function Login() {
     setErrorMsg("");
     try {
       await login(email, password);
-      navigate("/", { replace: true });
+      navigate(afterAuth, { replace: true });
     } catch (err) {
       const msg = (err as { detail?: string })?.detail ?? t("auth.loginFailed");
       setErrorMsg(msg);
@@ -116,7 +119,7 @@ export default function Login() {
           <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
             {t("auth.noAccount")}{" "}
             <Link
-              to="/register"
+              to={searchParams.toString() ? `/register?${searchParams.toString()}` : "/register"}
               className="no-underline hover:underline"
               style={{ color: "var(--color-primary)" }}
             >

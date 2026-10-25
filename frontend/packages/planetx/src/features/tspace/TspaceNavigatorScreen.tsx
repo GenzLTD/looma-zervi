@@ -17,6 +17,7 @@
 import { useState, useCallback, useRef } from 'react'
 import StarBackground from '../../brand/components/StarBackground'
 import FeedbackSurvey from '../feedback/FeedbackSurvey'
+import { careerTrialPricingUrl } from './careerTrialHandoff'
 import type {
   Act1SessionState,
   Act1AdvanceResponse,
@@ -107,6 +108,7 @@ export default function TspaceNavigatorScreen() {
   const [showComparison, setShowComparison] = useState(false)
   const [showVerdict, setShowVerdict] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
+  const [careerCompleted, setCareerCompleted] = useState(false)
   const [comparisonData, setComparisonData] = useState<ConvergenceTexture[]>([])
 
   const apiBase = useRef(import.meta.env.VITE_API_BASE ?? '')
@@ -145,6 +147,7 @@ export default function TspaceNavigatorScreen() {
     setShowComparison(false)
     setShowVerdict(false)
     setShowFeedback(false)
+    setCareerCompleted(false)
 
     try {
       // Start narrative session
@@ -189,6 +192,7 @@ export default function TspaceNavigatorScreen() {
       if (r.step >= finalStep) {
         setVisitedDomains(prev => new Set([...prev, domain]))
         setShowFeedback(true)
+        if (domain === '职业域') setCareerCompleted(true)
       }
     } catch (e: any) {
       console.error('Advance failed:', e)
@@ -200,7 +204,8 @@ export default function TspaceNavigatorScreen() {
   // ── Make choice ──
 
   const handleChoice = useCallback(async (choiceIndex: number) => {
-    const isChoiceStep = (!hasCrossDomain && step === 3) || (hasCrossDomain && step === 7)
+    // 职业域同时有第 3 步本域选择和第 7 步诗域选择。两处都要记，否则引擎拒绝继续。
+    const isChoiceStep = step === 3 || (hasCrossDomain && step === 7)
     if (!sessionId || !isChoiceStep) return
 
     if (!hasCrossDomain || step === 3) {
@@ -255,6 +260,7 @@ export default function TspaceNavigatorScreen() {
       setShowComparison(false)
       setShowVerdict(false)
       setShowFeedback(false)
+      setCareerCompleted(false)
     } catch (e: any) {
       console.error('Reset failed:', e)
     }
@@ -281,8 +287,9 @@ export default function TspaceNavigatorScreen() {
 
   const isDomainSelection = step === -1
   const canAdvance = step >= 0 && step < finalStep && !loading
-  const isWaitingChoice = ((!hasCrossDomain && step === 3) || (hasCrossDomain && step === 7)) &&
-    chosenOption === null && crossChosen === null
+  const isWaitingChoice = (step === 3 && chosenOption === null)
+    || (hasCrossDomain && step === 7 && crossChosen === null)
+  const selectedChoice = hasCrossDomain && step === 7 ? crossChosen : chosenOption
   const domainInfo = DOMAINS.find(d => d.key === domain)
   const currentStepLabel = steps[Math.min(step, finalStep)]?.label || ''
 
@@ -490,14 +497,14 @@ export default function TspaceNavigatorScreen() {
               <button
                 key={c.index}
                 onClick={() => handleChoice(c.index)}
-                disabled={loading || chosenOption !== null}
+                disabled={loading || selectedChoice !== null}
                 style={{
                   display: 'block', width: '100%', padding: '10px 14px',
                   margin: '6px 0', borderRadius: '8px',
-                  border: chosenOption === c.index
+                  border: selectedChoice === c.index
                     ? '1px solid var(--px-color-primary-bright)'
                     : '1px solid var(--px-color-border-solid)',
-                  background: chosenOption === c.index
+                  background: selectedChoice === c.index
                     ? 'rgba(124, 111, 247, 0.15)'
                     : 'rgba(255,255,255,0.03)',
                   color: 'var(--px-color-text-soft)', fontSize: '0.82rem', cursor: 'pointer',
@@ -506,12 +513,12 @@ export default function TspaceNavigatorScreen() {
                   opacity: loading ? 0.5 : 1,
                 }}
                 onMouseEnter={e => {
-                  if (chosenOption !== null) return
+                  if (selectedChoice !== null) return
                   e.currentTarget.style.borderColor = 'var(--px-color-primary-bright)'
                   e.currentTarget.style.background = 'rgba(124, 111, 247, 0.1)'
                 }}
                 onMouseLeave={e => {
-                  if (chosenOption !== null) return
+                  if (selectedChoice !== null) return
                   e.currentTarget.style.borderColor = 'var(--px-color-border-solid)'
                   e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
                 }}
@@ -579,6 +586,25 @@ export default function TspaceNavigatorScreen() {
                 🔬 对比全部质感差异
               </button>
             </div>
+          </div>
+        )}
+
+        {careerCompleted && (
+          <div style={CSS.panel}>
+            <div style={CSS.sectionTitle}>职业域 · 完整解读</div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--px-color-text-muted)', lineHeight: 1.6, margin: '0 0 12px' }}>
+              这一域的叙事已经走完。完整职业解读在 T-space 试用里。这次跳转不改变星际等级，也不计入传播人数。
+            </p>
+            <a
+              href={careerTrialPricingUrl(import.meta.env.VITE_SAAS_URL || 'http://localhost:5174')}
+              style={{
+                display: 'block', textAlign: 'center', padding: '10px 16px', borderRadius: '8px',
+                background: 'var(--px-color-teal)', color: 'var(--px-color-text-on-primary)',
+                fontWeight: 600, fontSize: '0.82rem', textDecoration: 'none',
+              }}
+            >
+              看这一域的完整职业解读
+            </a>
           </div>
         )}
 

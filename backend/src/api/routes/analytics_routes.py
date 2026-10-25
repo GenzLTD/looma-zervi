@@ -31,6 +31,7 @@ VALID_EVENTS = frozenset({
     "trial_started",
     "trial_failed",
     "trial_clicked",
+    "tier_activated",
     "funnel_drop",
 })
 

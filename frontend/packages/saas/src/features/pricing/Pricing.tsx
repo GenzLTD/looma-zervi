@@ -1,8 +1,8 @@
 /**
  * Pricing Page — 套餐对比 + 支付（Stub / WeChat Pay）
  */
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   BRAND_SAAS,
   createAuthApi,
@@ -18,6 +18,7 @@ import { createSaasApiClient } from "../../api/saasApiClient";
 import { useSaasAuthStore } from "../auth/authStore";
 import SaasModal from "../../brand/ui/SaasModal";
 import { BILLING_REGION, IS_OVERSEAS } from "../../config/region";
+import { readPlanetxTrial, registerFromPricing } from "./planetxTrialQuery";
 
 interface PlanCard extends PaymentPlan {
   desc: string;
@@ -102,6 +103,9 @@ function formatPrice(plan: PaymentPlan): string {
 export default function Pricing() {
   const { isAuthenticated, token, applySessionToken, fetchProfile } = useSaasAuthStore();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const trial = useMemo(() => readPlanetxTrial(searchParams.toString()), [searchParams]);
+  const planRegion = trial.region || BILLING_REGION;
   const [plans, setPlans] = useState<PlanCard[]>([]);
   const [stubMode, setStubMode] = useState(false);
   const [loadingPlans, setLoadingPlans] = useState(true);
@@ -130,18 +134,18 @@ export default function Pricing() {
         const client = createSaasApiClient();
         const paymentApi = createPaymentApi(client);
         const [resp, providersResp] = await Promise.all([
-          paymentApi.plans(BILLING_REGION),
+          paymentApi.plans(planRegion),
           // stub_mode 的权威源是 /providers：后端刻意不让 /plans 外泄该字段
           // （见 backend/tests/test_payment_guard.py 公开面守卫）。providers
           // 单独失败不拦定价加载。
-          paymentApi.providers(BILLING_REGION).catch(() => null),
+          paymentApi.providers(planRegion).catch(() => null),
         ]);
         if (cancelled) return;
         const cards: PlanCard[] = resp.plans.map((plan) => ({
           ...plan,
           ...PLAN_META[plan.tier],
         }));
-        setPlans(IS_OVERSEAS ? cards : [...cards, ENTERPRISE_CARD]);
+        setPlans(planRegion === "US" ? cards : [...cards, ENTERPRISE_CARD]);
         // 拿不到 providers 响应时缺省 false：宁可让用户看到 Checkout 报错，
         // 也不误报 stub 挡住真实支付（此前 resp.stub_mode ?? true 曾令生产
         // 页面显示 Stub 横幅、点了 402 进不了 Stripe）。
@@ -159,23 +163,42 @@ export default function Pricing() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [planRegion]);
 
   const handleUpgrade = async (tier: "supporter" | "pro") => {
     if (!isAuthenticated || !token) {
-      navigate("/register?from=pricing");
+      navigate(registerFromPricing(trial));
       return;
     }
 
     setUpgradingTier(tier);
     setMessage(null);
-    trackEvent(CLOSED_LOOP_EVENTS.TRIAL_CLICKED);
+    trackEvent(CLOSED_LOOP_EVENTS.TRIAL_CLICKED, {
+      share_code: trial.campaign || undefined,
+      properties: {
+        src: trial.fromPlanetx ? trial.src : undefined,
+        domain: trial.fromPlanetx ? trial.domain : undefined,
+        region: planRegion,
+        campaign: trial.campaign || undefined,
+        from_planetx: trial.fromPlanetx,
+      },
+    });
 
     try {
       const client = createSaasApiClient();
 
       if (stubMode) {
-        const resp = await createPaymentApi(client).upgrade(tier);
+        const resp = await createPaymentApi(client).upgrade(
+          tier,
+          trial.fromPlanetx
+            ? {
+                src: trial.src,
+                domain: trial.domain,
+                campaign: trial.campaign,
+                region: planRegion,
+              }
+            : undefined,
+        );
         if (resp.access_token) {
           await applySessionToken(resp.access_token);
         } else {
@@ -197,7 +220,7 @@ export default function Pricing() {
           mode: "payment",
           // 账单区必须显式声明：省略时后端用 Accept-Language 推断，
           // zh 浏览器会落到 CN 套餐并把 ¥9.9 按 USD 扣掉。
-          region: BILLING_REGION,
+          region: planRegion,
           success_url: `${window.location.origin}/pricing?status=success`,
           cancel_url: `${window.location.origin}/pricing?status=cancel`,
         });

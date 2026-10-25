@@ -4,6 +4,7 @@
  * Owner: Jason
  */
 import { create } from 'zustand'
+import { rememberCareerCampaign } from '../tspace/careerTrialHandoff'
 import {
   createApiClient,
   createAuthApi,
@@ -64,8 +65,11 @@ function rememberReferralCode(): string {
   const fromUrl = (new URLSearchParams(window.location.search).get('ref') || '').trim()
   try {
     if (fromUrl) sessionStorage.setItem(PENDING_REF_KEY, fromUrl)
-    return fromUrl || (sessionStorage.getItem(PENDING_REF_KEY) || '').trim()
+    const code = fromUrl || (sessionStorage.getItem(PENDING_REF_KEY) || '').trim()
+    if (code) rememberCareerCampaign(code)
+    return code
   } catch {
+    if (fromUrl) rememberCareerCampaign(fromUrl)
     return fromUrl
   }
 }
