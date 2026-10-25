@@ -1,8 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Looma Payment Contract v1",
-  "version": "1.2.0",
-  "description": "Tier 全球统一；价格按 region 分叉，商品决定定价（不要求跨区一致）。双主体：CN=深伯乐（诗词 AI 辅助，微信收款）；US=YeDall（求职 SaaS 订阅，Stripe 收款）。真源：looma-zervi/backend/contracts/payment.v1.json",
+  "version": "1.3.0",
+  "protocol": "contracts/gfcc",
+  "description": "Tier 全球统一；价格按 region 分叉，商品决定定价。双主体目录：CN=深伯乐（微信、华为 IAP）；US=YeDall（Stripe）。协议真源 contracts/gfcc。商品到档位以本文件 huawei_iap.products 与 apple_iap.products 为准。",
   "tier_enum": ["free", "supporter", "pro", "enterprise"],
   "deprecated_tier_aliases": {
     "basic": "supporter"
@@ -24,7 +25,13 @@
     }
   },
   "huawei_iap": {
-    "description": "HarmonyOS 元服务 IAP；客户端验签上报后服务端 RSA 验签并发货",
+    "description": "HarmonyOS 元服务 IAP；客户端验签上报后服务端 RSA 验签并发货。未知 product_id 显式失败，不得默认成 supporter。",
+    "products": {
+      "premium_monthly": "supporter",
+      "pro_monthly": "pro",
+      "supporter": "supporter",
+      "pro": "pro"
+    },
     "endpoints": [
       {
         "method": "POST",
@@ -52,12 +59,11 @@
     ],
     "env": [
       "HUAWEI_IAP_PUBLIC_KEY",
-      "HUAWEI_IAP_SIGN_ALGORITHM",
-      "HUAWEI_IAP_TIER_MAP"
+      "HUAWEI_IAP_SIGN_ALGORITHM"
     ]
   },
   "apple_iap": {
-    "description": "App Store IAP（自研服务端：zervi-rust payment-service :3009，分支 feat/apple-iap）。仅海外 App Store 上架；App 内 StoreKit 2 交易，**非 web checkout 通道**——不进 regions.*.payment_providers，web 结账页不展示",
+    "description": "App Store IAP（自研服务端：zervi-rust payment-service :3009，分支 feat/apple-iap）。仅海外 App Store 上架；App 内 StoreKit 2 交易，非 web checkout 通道——不进 regions.*.payment_providers，web 结账页不展示",
     "trust_model": "Server Notification V2 + App Store Server API，全链 JWS 验签：pinned Apple Root CA-G3 指纹比对 + leaf←intermediate←root 链验证 + ES256；请求令牌 ES256(.p8) 注入 Bearer",
     "endpoints": [
       {
@@ -98,7 +104,8 @@
       "supporter_monthly": "supporter",
       "pro_monthly": "pro"
     },
-    "sandbox_rule": "environment=Sandbox 只写 iap_subscriptions（environment 列隔离），绝不触碰 users.tier；Production 退款/撤销/过期 UPDATE users SET tier 借每请求查库实时生效",
+    "sandbox_rule": "environment=Sandbox 只写 iap_subscriptions（environment 列隔离），绝不触碰 users.tier。",
+    "ledger_rule": "各轨只写自己的订阅行。users.tier 由账本按各轨仍有效的订阅重算，不由单条支付通知 UPDATE users SET tier。",
     "data_model": "iap_subscriptions（original_transaction_id 锚点，user_id 不唯一支持家庭共享）+ apple_iap_transactions（transaction_id/notification_uuid 双唯一，Apple 重试幂等挡板）",
     "env": [
       "APPLE_ISSUER_ID",

@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 
 from src.api.auth.decorators import require_auth
+from src.payment.plans import tier_for_product
 
 logger = logging.getLogger(__name__)
 
@@ -158,17 +159,10 @@ def _process_delivery(purchase_data: dict, user_id: str) -> tuple[bool, str]:
     if existing:
         return True, "Already delivered"
 
-    # --- 映射 productId → tier ---
-    TIER_MAP = current_app.config.get(
-        "HUAWEI_IAP_TIER_MAP",
-        {
-            "premium_monthly": "supporter",
-            "pro_monthly": "pro",
-            "supporter": "supporter",
-            "pro": "pro",
-        },
-    )
-    tier = TIER_MAP.get(product_id, "supporter")
+    # 商品到档位只读 payment.v1.json 的 huawei_iap.products。未知商品显式失败。
+    tier = tier_for_product("huawei_iap", product_id)
+    if tier is None:
+        return False, "unknown_product"
 
     # --- 写入订单 ---
     out_trade_no = f"LOOMA_HW_{order_id or purchase_token[:16]}"
@@ -270,11 +264,15 @@ def iap_notify():
             message="Order processed successfully",
             order_id=detail,
         ), 200
-    else:
+    if detail == "unknown_product":
         return jsonify(
-            result="FAIL",
-            message=detail,
-        ), 500
+            error="unknown_product",
+            message=f"product {purchase_data.get('productId', '')} not mapped to any tier",
+        ), 400
+    return jsonify(
+        result="FAIL",
+        message=detail,
+    ), 500
 
 
 @huawei_iap_bp.route("/verify", methods=["POST"])
