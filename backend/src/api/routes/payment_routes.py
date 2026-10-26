@@ -20,6 +20,7 @@ Pricing contract: backend/contracts/payment.v1.json
 For production, set PAYMENT_STUB_MODE=false and configure payment credentials.
 """
 from flask import Blueprint, jsonify, g, request, current_app
+import re
 
 from src.api.auth.decorators import require_auth
 from src.api.auth.jwt_handler import sign_token_for_user
@@ -28,6 +29,7 @@ from src.analytics.events import (
     platform_from_request,
     EVENT_TRIAL_STARTED,
     EVENT_TRIAL_FAILED,
+    EVENT_TIER_ACTIVATED,
 )
 from src.payment.plans import (
     billing_region_for_provider,
@@ -172,6 +174,27 @@ def payment_status():
     )
 
 
+_CAREER_DOMAIN = "职业域"
+
+
+def _career_trial_attribution(data: dict, region: str) -> dict | None:
+    """职业域试点归因。只记录，不改变档位规则。"""
+    src = str(data.get("src") or "").strip()
+    domain = str(data.get("domain") or "").strip()
+    if src != "planetx_domain" or domain != _CAREER_DOMAIN:
+        return None
+    campaign = str(data.get("campaign") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9]{4,32}", campaign):
+        campaign = ""
+    return {
+        "from_planetx": True,
+        "src": src,
+        "domain": domain,
+        "campaign": campaign,
+        "region": region,
+    }
+
+
 @payment_bp.route("/payment/upgrade", methods=["POST"])
 @require_auth
 def upgrade_tier():
@@ -228,21 +251,38 @@ def upgrade_tier():
         amount=plan["price_monthly"],
         currency=plan["currency"],
         out_trade_no=out_trade_no,
-        metadata_json={"mode": "stub", "region": region},
+        metadata_json={"mode": "stub", "region": region, **(_career_trial_attribution(data, region) or {})},
     )
     paid_order = _process_payment_completed(db, out_trade_no, f"STUB_{out_trade_no}", "stub")
     if not paid_order:
         return jsonify(error="internal", message="Stub settlement failed"), 500
 
     if new_tier == "pro":
+        attribution = _career_trial_attribution(data, region)
+        properties = {"from_tier": current_tier}
+        share_code = None
+        if attribution:
+            properties.update(attribution)
+            share_code = attribution["campaign"] or None
         log_product_event(
             db,
             EVENT_TRIAL_STARTED,
             user_id=g.user_id,
             platform=platform_from_request(request),
             source="server",
-            properties={"from_tier": current_tier},
+            share_code=share_code,
+            properties=properties,
         )
+        if attribution:
+            log_product_event(
+                db,
+                EVENT_TIER_ACTIVATED,
+                user_id=g.user_id,
+                platform=platform_from_request(request),
+                source="server",
+                share_code=share_code,
+                properties=attribution,
+            )
 
     access_token = sign_token_for_user(db, g.user_id)
     return jsonify(

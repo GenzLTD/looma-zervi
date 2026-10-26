@@ -133,6 +133,7 @@ export interface MatchSpreadHint {
   message: string | null;
   spread_count: number;
   spread_target: number;
+  wide_scan_unlocked?: boolean;
 }
 
 export interface MatchConsensusItem {

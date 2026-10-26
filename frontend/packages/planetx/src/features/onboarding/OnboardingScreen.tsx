@@ -13,7 +13,7 @@ export default function OnboardingScreen() {
   const navigate = useNavigate()
 
   const handleEnterTSpace = () => {
-    navigate('/tspace')
+    navigate(`/tspace${window.location.search}`)
   }
 
   const handleSelect = (type: Identity) => {

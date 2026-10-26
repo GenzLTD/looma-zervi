@@ -37,6 +37,31 @@ def _user_id():
     return g.get("user_id")
 
 
+def _emit_value_axis_choice(db, user_id, axis, imprint_name, domain, points):
+    """Tell GFCC the option axis. Empty URL, guest, or a bad payload skips. Never raises."""
+    import uuid
+
+    from src.signal_bridge.gfcc_fanout import send_gfcc_value_axis_choice
+
+    if not user_id:
+        return
+    try:
+        user = db.get_user_by_id(user_id)
+        email_hash_value = (user or {}).get("email_hash") or ""
+        send_gfcc_value_axis_choice(
+            email_hash=email_hash_value,
+            axis=axis,
+            imprint_name=imprint_name,
+            domain=domain,
+            points=points,
+            nonce=uuid.uuid4().hex,
+            url=(current_app.config.get("GFCC_SIGNAL_INGEST_URL") or "").strip(),
+            secret=current_app.config.get("SIGNAL_INGEST_SECRET") or "",
+        )
+    except Exception:
+        logger.warning("value_axis_choice emit failed", exc_info=True)
+
+
 # ── Start session ──
 
 @narrative_bp.route("/start", methods=["POST"])
@@ -524,12 +549,19 @@ def act1_make_choice():
                 engine = get_domain_engine(db=db)
                 memory = get_navigator_memory(db=db)
 
-                imprint_axis = result.get("imprint_axis", "freedom")
-                imprint_points = result.get("imprint_points", 2)
+                imprint_axis = result.get("imprint_axis") or ""
+                imprint_points = int(result.get("imprint_points") or 0)
                 target_domain = "诗域" if is_cross else state.domain
+                imprint_name = result.get("imprint_name", "")
 
-                engine.record_choice(session_id, target_domain, result.get("imprint_name", ""), user_id)
-                engine.add_imprint(user_id, target_domain, imprint_points)
+                engine.record_choice(session_id, target_domain, imprint_name, user_id)
+                engine.add_imprint(
+                    user_id, target_domain, imprint_points, axis=imprint_axis,
+                )
+                _emit_value_axis_choice(
+                    db, user_id, imprint_axis, imprint_name, target_domain,
+                    imprint_points,
+                )
 
                 memory.record_choice(
                     user_id=user_id,

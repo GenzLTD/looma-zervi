@@ -649,8 +649,14 @@ export function createPaymentApi(client: ApiClient) {
     status: () => client.get<import("../types/payment").PaymentStatus>(API_ROUTES.PAYMENT_STATUS),
 
     /** Upgrade tier (stub mode only; blocked in production → use checkout instead) */
-    upgrade: (tier: "supporter" | "pro") =>
-      client.post<import("../types/payment").UpgradeResponse>(API_ROUTES.PAYMENT_UPGRADE, { tier }),
+    upgrade: (
+      tier: "supporter" | "pro",
+      attribution?: { src?: string; domain?: string; campaign?: string; region?: string },
+    ) =>
+      client.post<import("../types/payment").UpgradeResponse>(API_ROUTES.PAYMENT_UPGRADE, {
+        tier,
+        ...attribution,
+      }),
 
     /** Create WeChat Pay order (production mode) */
     wechatOrder: (payload: import("../types/payment").WechatOrderRequest) =>

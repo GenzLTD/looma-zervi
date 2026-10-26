@@ -425,6 +425,27 @@ CREATE TABLE IF NOT EXISTS invite_codes (
 
 CREATE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes(code);
 
+-- 同一张免费裂变码可被多人核销；付费 tier_grant 仍是一次一人
+CREATE TABLE IF NOT EXISTS invite_redemptions (
+    id          TEXT PRIMARY KEY,
+    code        TEXT NOT NULL,
+    used_by     TEXT NOT NULL,
+    used_at     TEXT DEFAULT (datetime('now')),
+    UNIQUE(code, used_by)
+);
+
+CREATE INDEX IF NOT EXISTS idx_invite_redemptions_code ON invite_redemptions(code);
+
+-- 每位被邀请人只给邀请人发一次传播 XP，不进 match mission
+CREATE TABLE IF NOT EXISTS spread_bonus_grants (
+    id          TEXT PRIMARY KEY,
+    inviter_id  TEXT NOT NULL,
+    invitee_id  TEXT NOT NULL,
+    xp          INTEGER NOT NULL,
+    created_at  TEXT DEFAULT (datetime('now')),
+    UNIQUE(inviter_id, invitee_id)
+);
+
 -- ============================================
 -- Usage: usage_logs (joint)
 -- ============================================
@@ -1212,6 +1233,13 @@ class DatabaseManager:
                         "Pre-migration ALTER TABLE users ADD COLUMN email_hash failed: %s", e
                     )
             conn.executescript(SCHEMA_SQL)
+            conn.execute(
+                """INSERT OR IGNORE INTO invite_redemptions (id, code, used_by, used_at)
+                   SELECT lower(hex(randomblob(16))), code, used_by, used_at
+                   FROM invite_codes
+                   WHERE used_by IS NOT NULL
+                     AND IFNULL(tier_grant, '') != 'profile_share'"""
+            )
             # Migration: add invite_code to existing fleets tables
             try:
                 conn.execute("ALTER TABLE fleets ADD COLUMN invite_code TEXT")
@@ -2046,23 +2074,99 @@ END;
         return [dict(r) for r in rows]
 
     def count_spread_signals(self, user_id: str) -> int:
-        """Count invitees who used this user's referral code AND completed personality.
+        """Count invitees who redeemed this user's code AND completed personality.
 
-        Design (ENGINEERING_CLOSED_LOOP_P0): count only after first mission to reduce spam.
-        Excludes profile_share codes.
+        One free referral code may be redeemed by many people. profile_share
+        codes never count. Legacy rows that only set invite_codes.used_by are
+        included via the redemption backfill.
         """
         with self.get_conn() as conn:
             row = conn.execute(
-                """SELECT COUNT(DISTINCT ic.used_by) AS cnt
-                   FROM invite_codes ic
+                """SELECT COUNT(DISTINCT r.used_by) AS cnt
+                   FROM invite_redemptions r
+                   INNER JOIN invite_codes ic ON ic.code = r.code
                    INNER JOIN mission_completions mc
-                     ON mc.user_id = ic.used_by AND mc.mission_id = 'personality'
+                     ON mc.user_id = r.used_by AND mc.mission_id = 'personality'
                    WHERE ic.created_by = ?
-                     AND ic.used_by IS NOT NULL
                      AND IFNULL(ic.tier_grant, '') != 'profile_share'""",
                 (user_id,),
             ).fetchone()
         return int(row["cnt"]) if row else 0
+
+    def list_personality_peer_ids(self, user_id: str, limit: int = 30) -> list[str]:
+        """Other users who already have a personality type. Used by wide scan."""
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT user_id FROM game_profiles
+                   WHERE user_id != ?
+                     AND TRIM(IFNULL(personality_type, '')) != ''
+                   ORDER BY updated_at DESC
+                   LIMIT ?""",
+                (user_id, limit),
+            ).fetchall()
+        return [r["user_id"] for r in rows]
+
+    def redeem_growth_code(self, code: str, user_id: str) -> str:
+        """Record a reusable free-code redemption.
+
+        Returns 'created' or 'exists'. Does not change users.tier.
+        """
+        with self.get_conn() as conn:
+            existing = conn.execute(
+                "SELECT id FROM invite_redemptions WHERE code = ? AND used_by = ?",
+                (code, user_id),
+            ).fetchone()
+            if existing:
+                return "exists"
+            conn.execute(
+                """INSERT INTO invite_redemptions (id, code, used_by)
+                   VALUES (?, ?, ?)""",
+                (str(uuid.uuid4()), code, user_id),
+            )
+            conn.execute(
+                """UPDATE invite_codes
+                   SET used_by = ?, used_at = datetime('now')
+                   WHERE code = ? AND used_by IS NULL""",
+                (user_id, code),
+            )
+        return "created"
+
+    def award_spread_bonuses(self, invitee_id: str, xp: int = 5) -> list[str]:
+        """Give each inviter +xp once when this invitee finishes personality.
+
+        Returns inviter ids that received the bonus on this call.
+        """
+        if xp <= 0:
+            return []
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT ic.created_by AS inviter_id
+                   FROM invite_redemptions r
+                   INNER JOIN invite_codes ic ON ic.code = r.code
+                   WHERE r.used_by = ?
+                     AND ic.created_by IS NOT NULL
+                     AND ic.created_by != ?
+                     AND IFNULL(ic.tier_grant, '') != 'profile_share'""",
+                (invitee_id, invitee_id),
+            ).fetchall()
+        awarded: list[str] = []
+        for row in rows:
+            inviter_id = row["inviter_id"]
+            with self.get_conn() as conn:
+                try:
+                    conn.execute(
+                        """INSERT INTO spread_bonus_grants
+                           (id, inviter_id, invitee_id, xp)
+                           VALUES (?, ?, ?, ?)""",
+                        (str(uuid.uuid4()), inviter_id, invitee_id, xp),
+                    )
+                except sqlite3.IntegrityError:
+                    continue
+            if not self.get_game_profile(inviter_id):
+                self.upsert_game_profile(inviter_id, "", "")
+            self.add_xp(inviter_id, xp)
+            awarded.append(inviter_id)
+        return awarded
 
     # ============================================
     # Match consensus (PlanetX phase-2)
@@ -2199,6 +2303,7 @@ END;
             row = conn.execute(
                 """SELECT 1 FROM match_consensus
                    WHERE status = 'verified'
+                     AND expires_at > datetime('now')
                      AND (initiator_id = ? OR candidate_id = ?)
                    LIMIT 1""",
                 (user_id, user_id),

@@ -12,6 +12,7 @@ export const CLOSED_LOOP_EVENTS: Record<string, ClosedLoopEventName> = {
   CANDIDATE_IMPORTED: "candidate_imported",
   TRIAL_STARTED: "trial_started",
   TRIAL_CLICKED: "trial_clicked",
+  TIER_ACTIVATED: "tier_activated",
 } as const;
 
 export const ANALYTICS_SESSION_KEY = "looma_analytics_session";

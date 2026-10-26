@@ -76,8 +76,9 @@
       </view>
       <view wx:if="{{uiState.spreadHint.spread_target > 0}}" class="spread-progress">
         传播进度 {{uiState.spreadHint.spread_count}}/{{uiState.spreadHint.spread_target}}
-        <text wx:if="{{uiState.spreadHint.spread_target - uiState.spreadHint.spread_count > 0}}">
-          · 再邀请 {{uiState.spreadHint.spread_target - uiState.spreadHint.spread_count}} 人
+        <text wx:if="{{uiState.spreadHint.wide_scan_unlocked}}"> · 广域扫描已解锁</text>
+        <text wx:elif="{{uiState.spreadHint.spread_target - uiState.spreadHint.spread_count > 0}}">
+          · 再邀请 {{uiState.spreadHint.spread_target - uiState.spreadHint.spread_count}} 人解锁广域扫描
         </text>
       </view>
       <view

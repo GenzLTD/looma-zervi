@@ -47,6 +47,12 @@ def _calculate_level(xp: int) -> int:
     return int(math.sqrt(xp / 100)) + 1 if xp > 0 else 1
 
 
+# 契约 §5.6：累计有效传播达到此人数后解锁广域扫描。不改付费档位。
+SPREAD_TARGET = 5
+SPREAD_BONUS_XP = 5
+WIDE_SCAN_LIMIT = 30
+
+
 # ── Match helpers (PlanetX 域内 v0 规则配对) ──
 
 PERSONALITY_EMOJI = {
@@ -288,6 +294,13 @@ def complete_mission():
 
     db = _get_db()
 
+    # game.v1.json：match 只在双向共识 verified 且未过期时完成
+    if mission_id == "match" and not db.has_verified_match_consensus(g.user_id):
+        return jsonify(
+            error="consensus_required",
+            message="需先完成双向共识确认",
+        ), 403
+
     # Ensure user has a game profile (create stub if none)
     profile = db.get_game_profile(g.user_id)
     if not profile:
@@ -295,6 +308,12 @@ def complete_mission():
         profile = db.get_game_profile(g.user_id)
 
     completion_id, was_new = db.complete_mission(g.user_id, mission_id, xp_reward)
+
+    if was_new and mission_id == "personality":
+        for inviter_id in db.award_spread_bonuses(g.user_id, xp=SPREAD_BONUS_XP):
+            inviter_profile = db.get_game_profile(inviter_id)
+            if inviter_profile:
+                db.update_level(inviter_id, _calculate_level(inviter_profile["xp"] or 0))
 
     if not was_new:
         return jsonify(
@@ -346,16 +365,25 @@ def fleet_match():
         ), 400
 
     self_type = (profile.get("personality_type") or "").strip()
-    fleet = db.get_user_fleet(g.user_id)
-    if not fleet:
-        return jsonify(
-            error="fleet_required",
-            message="请先加入或创建舰队",
-        ), 400
+    try:
+        spread_count = db.count_spread_signals(g.user_id)
+    except Exception:
+        spread_count = 0
+    wide_scan = spread_count >= SPREAD_TARGET
 
-    members = db.get_fleet_members(fleet["id"])
+    fleet = db.get_user_fleet(g.user_id)
+    members = db.get_fleet_members(fleet["id"]) if fleet else []
     other_ids = [m["user_id"] for m in members if m["user_id"] != g.user_id]
+    if wide_scan:
+        for peer_id in db.list_personality_peer_ids(g.user_id, limit=WIDE_SCAN_LIMIT):
+            if peer_id not in other_ids:
+                other_ids.append(peer_id)
     if not other_ids:
+        if not fleet:
+            return jsonify(
+                error="fleet_required",
+                message="请先加入或创建舰队",
+            ), 400
         return jsonify(
             error="fleet_too_small",
             message="舰队内暂无其他成员可匹配",
@@ -407,7 +435,7 @@ def fleet_match():
 
     pending_consensus_id = None
     # 阶段二：落库待确认共识（不阻塞 v0 mission-complete）
-    if score >= 60:
+    if score >= 60 and fleet:
         try:
             consensus = db.create_match_consensus(
                 fleet_id=fleet["id"],
@@ -435,12 +463,6 @@ def fleet_match():
                 pending_consensus_id = row.get("id")
                 break
 
-    spread_count = 0
-    try:
-        spread_count = db.count_spread_signals(g.user_id)
-    except Exception:
-        pass
-
     return jsonify({
         "matched": True,
         "match": best,
@@ -449,24 +471,29 @@ def fleet_match():
             "personality_type": self_type,
             "personality_emoji": PERSONALITY_EMOJI.get(self_type, "🪐"),
         },
-        "fleet_id": fleet["id"],
-        "fleet_name": fleet["name"],
+        "fleet_id": fleet["id"] if fleet else None,
+        "fleet_name": fleet["name"] if fleet else None,
         "candidates_considered": len(scored),
         "match_mode": match_mode,
-        # v0：舰队内算出配对 + 用户确认即可完成任务（阶段二共识为增强，不阻塞）
-        "can_complete_mission": True,
         "consensus_threshold": threshold,
         "consensus_status": consensus_status,
+        "consensus_passed": score >= threshold,
+        "can_complete_mission": consensus_status == "consensus_verified",
         "pending_consensus_id": pending_consensus_id,
         "spread_hint": {
-            "show_share_cta": consensus_status != "consensus_verified" and score < threshold,
+            "show_share_cta": consensus_status != "consensus_verified",
             "message": (
                 None
-                if score >= threshold
+                if consensus_status == "consensus_verified"
+                else "广域扫描已解锁，候选池已扩到舰队之外"
+                if wide_scan and score < threshold
                 else "契合度未达共识阈值，邀请更多舰员扩大验证池"
+                if score < threshold
+                else "已达门槛，等待对方确认后才能完成任务"
             ),
             "spread_count": spread_count,
-            "spread_target": 3,
+            "spread_target": SPREAD_TARGET,
+            "wide_scan_unlocked": wide_scan,
         },
     })
 

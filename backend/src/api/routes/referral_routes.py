@@ -151,7 +151,7 @@ def use_code():
     try:
         with db.get_conn() as conn:
             row = conn.execute(
-                "SELECT * FROM invite_codes WHERE code = ? AND used_by IS NULL",
+                "SELECT * FROM invite_codes WHERE code = ?",
                 (code,),
             ).fetchone()
 
@@ -166,6 +166,12 @@ def use_code():
                     message="画像分享码不可用于注册核销，请使用普通邀请码",
                 ), 400
 
+            if invite.get("created_by") == g.user_id:
+                return jsonify(
+                    error="bad_request",
+                    message="不能核销自己的邀请码",
+                ), 400
+
             # Check expiry (compare as datetime strings in SQLite format)
             expires_at = invite.get("expires_at")
             if expires_at:
@@ -173,20 +179,30 @@ def use_code():
                 if expires_at < dict(now_row)["now"]:
                     return jsonify(error="expired", message="邀请码已过期"), 400
 
-            conn.execute(
-                """UPDATE invite_codes SET used_by = ?, used_at = datetime('now')
-                   WHERE code = ?""",
-                (g.user_id, code),
-            )
-
             tier_grant = invite.get("tier_grant") or "free"
             tier_updated = False
-            if tier_grant not in ("free", PROFILE_SHARE_GRANT):
+            # 带付费档位的码仍是一次一人，避免一张码把档位发给所有人
+            if tier_grant != "free":
+                if invite.get("used_by"):
+                    return jsonify(error="not_found", message="邀请码不存在或已被使用"), 404
+                conn.execute(
+                    """UPDATE invite_codes SET used_by = ?, used_at = datetime('now')
+                       WHERE code = ? AND used_by IS NULL""",
+                    (g.user_id, code),
+                )
                 conn.execute(
                     "UPDATE users SET tier = ?, updated_at = datetime('now') WHERE id = ?",
                     (tier_grant, g.user_id),
                 )
                 tier_updated = True
+                conn.execute(
+                    """INSERT OR IGNORE INTO invite_redemptions (id, code, used_by)
+                       VALUES (?, ?, ?)""",
+                    (str(uuid.uuid4()), code, g.user_id),
+                )
+
+        if (invite.get("tier_grant") or "free") == "free":
+            db.redeem_growth_code(code, g.user_id)
 
         payload = {"consumed": True, "code": code, "tier_granted": invite.get("tier_grant", "free")}
         if tier_updated:

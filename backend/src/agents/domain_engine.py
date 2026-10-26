@@ -306,14 +306,20 @@ class DomainEngine:
                     pass
         return self._imprints[user_id]
 
-    def add_imprint(self, user_id: str, domain: str, points: int = 0) -> dict:
-        """Record a value imprint when user makes a choice in a domain.
+    def add_imprint(self, user_id: str, domain: str, points: int = 0, axis: str | None = None) -> dict:
+        """Record a value imprint on the choice's own axis.
 
-        Returns {'axis': str, 'added': int, 'total': dict}
+        ``axis`` is the option's imprint_axis. The domain's primary axis is only
+        a fallback when the choice did not name one. Returns
+        {'axis': str, 'added': int, 'total': dict}.
         """
-        axis = DOMAIN_AXIS.get(domain, "freedom")
+        if not user_id:
+            return {"axis": None, "added": 0, "total": {}}
+        if axis not in ("survival", "freedom", "belonging"):
+            axis = DOMAIN_AXIS.get(domain, "freedom")
         imprint = self.get_imprint(user_id)
-        added = points or Tuning.IMPRINT_PER_CHOICE_BASE
+        added = int(points or Tuning.IMPRINT_PER_CHOICE_BASE)
+        added = max(Tuning.IMPRINT_PER_CHOICE_MIN, min(Tuning.IMPRINT_PER_CHOICE_MAX, added))
         imprint.add(axis, added)
 
         # Persist to DB
@@ -385,8 +391,6 @@ class DomainEngine:
         """Record a choice made in a domain."""
         history = self.get_history(session_id)
         history.record_choice(domain, choice)
-        if user_id:
-            self.add_imprint(user_id, domain)
 
     # ---- Cross-Domain Echo ----
 

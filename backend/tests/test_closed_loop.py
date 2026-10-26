@@ -134,6 +134,23 @@ def test_referral_use_rejects_profile_share_code(client):
     assert use_resp.status_code == 400
 
 
+def test_referral_use_rejects_own_code(client):
+    token = _register(client, "own-ref@test.com")
+    create_resp = client.post(
+        "/v1/referral/create",
+        headers=_auth_headers(token),
+        json={"purpose": "referral"},
+    )
+    code = create_resp.get_json()["code"]
+    use_resp = client.post(
+        "/v1/referral/use",
+        headers=_auth_headers(token),
+        json={"code": code},
+    )
+    assert use_resp.status_code == 400
+    assert use_resp.get_json()["error"] == "bad_request"
+
+
 def test_game_profile_returns_mission_ids(client):
     token = _register(client, "g1@test.com")
 

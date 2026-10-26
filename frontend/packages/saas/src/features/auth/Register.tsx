@@ -9,6 +9,7 @@ import { CLOSED_LOOP_EVENTS, trackEvent } from "@looma/shared-core";
 import { useSaasAuthStore } from "./authStore";
 import { useBrand } from "../../brand/useBrand";
 import { LanguageSwitcher } from "../../components/LanguageSwitcher";
+import { pricingReturnPath } from "../pricing/planetxTrialQuery";
 
 export default function Register() {
   const { t } = useTranslation();
@@ -24,9 +25,10 @@ export default function Register() {
   const [errorMsg, setErrorMsg] = useState("");
   const { register, isAuthenticated } = useSaasAuthStore();
   const navigate = useNavigate();
+  const afterAuth = pricingReturnPath(searchParams) ?? "/";
 
   if (isAuthenticated) {
-    navigate("/", { replace: true });
+    navigate(afterAuth, { replace: true });
     return null;
   }
 
@@ -54,7 +56,7 @@ export default function Register() {
           properties: { from: searchParams.get("from") },
         });
       }
-      navigate("/", { replace: true });
+      navigate(afterAuth, { replace: true });
     } catch (err) {
       const msg = (err as { detail?: string })?.detail ?? t("auth.registerFailed");
       setErrorMsg(msg);
@@ -198,7 +200,7 @@ export default function Register() {
           <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
             {t("auth.hasAccount")}{" "}
             <Link
-              to="/login"
+              to={searchParams.toString() ? `/login?${searchParams.toString()}` : "/login"}
               className="no-underline hover:underline"
               style={{ color: "var(--color-primary)" }}
             >
