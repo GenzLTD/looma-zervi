@@ -124,15 +124,21 @@ class TestCheckoutRequestCarriesRegion:
 
     def test_pricing_checkout_passes_billing_region(self):
         text = PRICING_TSX.read_text(encoding="utf-8")
+        assert "const planRegion = trial.region || BILLING_REGION" in text, (
+            "planRegion must fall back to BILLING_REGION. A hardcoded US/CN "
+            "string, or omitting the region, lets Accept-Language pick CN "
+            "prices for a zh browser on the overseas site."
+        )
         start = text.find("createPaymentApi(client).checkout(")
         assert start != -1, "Pricing.tsx no longer calls checkout()"
         block = text[start : text.find("});", start)]
-        assert "region:" in block, (
-            "checkout() must pass `region: BILLING_REGION`. Otherwise the backend "
-            "infers the region from Accept-Language and a zh browser on the "
-            "overseas site gets billed the CN plan price in USD."
+        assert "region: planRegion" in block, (
+            "checkout() must pass region: planRegion. Otherwise the backend "
+            "infers the region from Accept-Language."
         )
-        assert "BILLING_REGION" in block, "region should come from BILLING_REGION, not a hardcoded string"
+        assert 'region: "US"' not in block and 'region: "CN"' not in block, (
+            "checkout() region must not be a hardcoded string"
+        )
 
 
 class TestCheckoutHonoursRegionSentInBody:
