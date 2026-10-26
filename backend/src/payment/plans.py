@@ -138,3 +138,26 @@ def billing_region_for_provider(provider: str) -> str | None:
         if code in {str(name).strip().lower() for name in providers}:
             return region_code
     return None
+
+
+def tier_for_product(rail: str, product_id: str) -> str | None:
+    """Map an IAP product_id to a tier from this contract.
+
+    ``rail`` is ``huawei_iap`` or ``apple_iap``. The products table in
+    ``payment.v1.json`` is the only map. A missing product or a tier outside
+    ``tier_enum`` returns None so the caller can fail closed.
+    """
+    if not product_id or not rail:
+        return None
+    contract = _load_contract()
+    rail_doc = contract.get(rail)
+    if not isinstance(rail_doc, dict):
+        return None
+    products = rail_doc.get("products")
+    if not isinstance(products, dict):
+        return None
+    tier = products.get(product_id)
+    allowed = contract.get("tier_enum") or []
+    if not isinstance(tier, str) or tier not in allowed:
+        return None
+    return tier
