@@ -451,6 +451,17 @@ export function createPaymentApi(client: MiniApiClientInterface) {
         API_ROUTES.PAYMENT_WECHAT_ORDER,
         payload,
       ),
+
+    /**
+     * List configured payment providers — 同时是 stub_mode 的权威源。
+     * /plans 是公开面，契约刻意不带 stub_mode（test_payment_guard），别去那里读。
+     */
+    providers: (region?: import("../types/payment").PaymentRegion) => {
+      const query = region ? `?region=${region}` : "";
+      return client.get<import("../types/payment").ProvidersResponse>(
+        `${API_ROUTES.PAYMENT_PROVIDERS}${query}`,
+      );
+    },
   };
 }
 

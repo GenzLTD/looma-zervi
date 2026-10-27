@@ -9,7 +9,7 @@
 import { paymentApi, authApi } from '../../utils/api'
 import { store } from '../../utils/store'
 import { LOOMA_TOKEN_KEY } from '@looma/shared-core'
-import type { PaymentPlan, PlansResponse, WechatJsapiParams } from '@looma/shared-core'
+import type { PaymentPlan, PlansResponse, ProvidersResponse, WechatJsapiParams } from '@looma/shared-core'
 
 const TIER_LABELS: Record<string, string> = {
   free: '免费版',
@@ -74,8 +74,14 @@ Page({
   async loadPlans() {
     this.setData({ loading: true })
     try {
-      const data: PlansResponse = await paymentApi.plans('CN')
-      const stubMode = data.stub_mode !== false
+      // stub_mode 的权威源是 /v1/payment/providers：/plans 是公开面，契约刻意不带该字段
+      // （守卫见 backend/tests/test_payment_guard.py）。providers 单独失败不拦定价加载。
+      const [data, providers]: [PlansResponse, ProvidersResponse | null] = await Promise.all([
+        paymentApi.plans('CN'),
+        paymentApi.providers('CN').catch(() => null),
+      ])
+      // 拿不到 providers 时缺省 false：宁可让用户看到真实支付报错，也不把生产误判成模拟支付
+      const stubMode = providers?.stub_mode === true
       const currentTier = this.data.currentTier
       const currentOrder = TIER_ORDER[currentTier] ?? 0
 
