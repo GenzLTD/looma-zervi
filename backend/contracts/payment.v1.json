@@ -3,7 +3,7 @@
   "title": "Looma Payment Contract v1",
   "version": "1.4.0",
   "protocol": "contracts/gfcc",
-  "description": "Tier 全球统一；价格按 region 分叉，商品决定定价。双主体目录：CN=深伯乐（微信、华为 IAP）；US=YeDall（Stripe）。协议真源 contracts/gfcc。商品到档位以本文件 huawei_iap.products 与 apple_iap.products 为准。v1.4.0：plans 响应新增必填 stub_mode，客户端不得再用「字段缺失」推断模拟支付。",
+  "description": "Tier 全球统一；价格按 region 分叉，商品决定定价。双主体目录：CN=深伯乐（微信、华为 IAP）；US=YeDall（Stripe）。协议真源 contracts/gfcc。商品到档位以本文件 huawei_iap.products 与 apple_iap.products 为准。v1.4.0：stub_mode 只从 GET /v1/payment/providers 读取，并显式判读 === true。/plans 与 /status 不带该字段。",
   "tier_enum": ["free", "supporter", "pro", "enterprise"],
   "deprecated_tier_aliases": {
     "basic": "supporter"
