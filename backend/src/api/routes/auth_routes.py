@@ -376,6 +376,9 @@ def bind_account():
     Bind WeChat openid to an existing email-based account.
     User must be authenticated (has looma JWT).
     After binding, the user can login from both Web and MiniApp.
+
+    只认 code → openid。小程序多传的 email / password 当前不参与绑定
+    （identity.v1.json 未为该接口定义这两个字段），一律忽略，不做隐式改密或改邮箱。
     """
     data = request.get_json() or {}
     code = data.get("code", "")
@@ -383,12 +386,17 @@ def bind_account():
     if not code:
         return jsonify(error="bad_request", message="wx.login code required"), 400
 
-    try:
-        wechat_data = code2session(code)
-    except ValueError as e:
-        return jsonify(error="wechat_error", message=str(e)), 400
-
-    openid = wechat_data["openid"]
+    # Dev mode: 与 /v1/auth/wechat 同一套约定 —— 跳过微信 code2session，
+    # 由 code 派生 mock openid。本机没有 AppID/Secret 时也能走通绑定链路。
+    if current_app.config.get("WECHAT_DEV_MODE"):
+        openid = f"dev_{code[:20]}"
+        print(f"[DEV MODE] Wechat bind - mock openid: {openid}")
+    else:
+        try:
+            wechat_data = code2session(code)
+        except ValueError as e:
+            return jsonify(error="wechat_error", message=str(e)), 400
+        openid = wechat_data["openid"]
     db = _get_db()
 
     existing = db.get_user_by_openid(openid)

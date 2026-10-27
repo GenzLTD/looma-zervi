@@ -20,6 +20,8 @@ def app():
     os.environ["DATABASE_PATH"] = tmp.name
     os.environ["JWT_SECRET"] = "test-jwt-secret-for-local-testing-only-2026"
     os.environ["SECRET_KEY"] = "test-flask-secret"
+    # 本机 .env 可能有 PAYMENT_STUB_MODE=false（Stripe 联调），别渗进测试
+    os.environ["PAYMENT_STUB_MODE"] = "true"
     from src.app import create_app
     _app = create_app("testing")
     yield _app
@@ -173,3 +175,65 @@ def test_payment_upgrade_returns_fresh_token(client):
     })
     assert resp.status_code == 200
     assert resp.get_json()["tier"] == "pro"
+
+
+def test_bind_wechat_dev_mode_short_circuit():
+    """WECHAT_DEV_MODE 下 /v1/auth/bind 与 /v1/auth/wechat 同约定：不调 code2session。
+
+    本机没有 AppID/Secret 时绑定链路也应跑通（由 code 派生 mock openid），
+    否则绑定邮箱永远 400，小程序全量验证里这一项就只能长期挂起。
+    小程序多传的 email/password 该接口不读，也不得因此报错。
+    """
+    from src.app import create_app
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    prev_dev_mode = os.environ.get("WECHAT_DEV_MODE")
+    try:
+        os.environ["DATABASE_PATH"] = path
+        os.environ["JWT_SECRET"] = "test-jwt-secret-for-local-testing-only-2026"
+        os.environ["WECHAT_DEV_MODE"] = "true"
+        for key in ("WECHAT_APPID", "WECHAT_SECRET"):
+            os.environ.pop(key, None)
+
+        c = create_app("testing").test_client()
+
+        resp = c.post("/v1/auth/register", json={
+            "email": "bind-dev@test.com",
+            "password": "password123",
+        })
+        assert resp.status_code == 201
+        token = resp.get_json()["access_token"]
+
+        resp = c.post(
+            "/v1/auth/bind",
+            json={"code": "mock-wx-code", "email": "ignored@test.com", "password": "ignored"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["message"] == "WeChat account bound successfully"
+
+        # 同一个 mock openid 绑给另一个用户必须 409（dev 模式下 openid=dev_<code>，
+        # 两个账号用同一个 code 即同一个 openid）
+        resp = c.post("/v1/auth/register", json={
+            "email": "bind-dev-2@test.com",
+            "password": "password123",
+        })
+        assert resp.status_code == 201
+        token2 = resp.get_json()["access_token"]
+        resp = c.post(
+            "/v1/auth/bind",
+            json={"code": "mock-wx-code"},
+            headers={"Authorization": f"Bearer {token2}"},
+        )
+        assert resp.status_code == 409
+        assert resp.get_json()["error"] == "conflict"
+    finally:
+        if prev_dev_mode is None:
+            os.environ.pop("WECHAT_DEV_MODE", None)
+        else:
+            os.environ["WECHAT_DEV_MODE"] = prev_dev_mode
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
