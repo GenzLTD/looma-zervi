@@ -140,6 +140,29 @@ class TestOrderLifecycle:
         )
         assert resp.status_code in (200, 500)
 
+    def test_stub_mode_lives_on_providers_only(self, client):
+        """契约 v1.4.0：/providers 是 stub_mode 的权威源，公开面不许带。
+
+        反向钉住 plans/status 的同时，正向钉住 providers 真的会返回布尔值——
+        只钉「不带」是不够的：哪天 providers 少返回这个字段，客户端就会退回
+        靠缺失值推断的老毛病。
+        """
+        assert "stub_mode" not in client.get("/v1/payment/plans").get_json()
+        token = _register(client, "disclosure@test.com")
+        assert "stub_mode" not in client.get(
+            "/v1/payment/status", headers=_auth_headers(token)
+        ).get_json()
+
+        providers = client.get("/v1/payment/providers")
+        assert providers.status_code == 200
+        assert providers.get_json()["stub_mode"] is True
+
+    def test_providers_stub_mode_is_false_when_disabled(self):
+        with _make_app_client(stub_mode="false") as c:
+            resp = c.get("/v1/payment/providers")
+            assert resp.status_code == 200
+            assert resp.get_json()["stub_mode"] is False
+
     def test_plans_response_excludes_stub_mode(self, client):
         """stub_mode must not leak to public API responses."""
         resp = client.get("/v1/payment/plans")
