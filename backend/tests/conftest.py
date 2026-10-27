@@ -25,6 +25,28 @@ def _billing_region_baseline(monkeypatch):
     monkeypatch.setenv("DEPLOY_REGION", "CN")
 
 
+@pytest.fixture(autouse=True)
+def _offline_supabase_baseline(monkeypatch):
+    """默认不连 Supabase：身份链路走本地路径，断网也不该红。
+
+    本机 .env 配了真实 Supabase（URL + SECRET_KEY + JWT_SECRET 三者齐备），
+    而 /v1/auth/wechat 只要这三者齐备就走 Supabase upsert（auth_routes.py:140），
+    需要外网。域名解析一抖就是 6 项 502，与被测代码无关——
+    test_miniprogram_payment_flow.py 整条 stub 流都挂在微信登录上。
+
+    测试不该依赖外网，所以这里把开关关掉（create_app 会 _refresh_config 重读 env）。
+    真正要验 Supabase 的 tests/test_supabase_auth.py 用自己的 app fixture 显式打开：
+    env 在它的 fixture 里设置、晚于本 fixture，所以不受影响。
+    """
+    for _k in (
+        "SUPABASE_URL",
+        "SUPABASE_PUBLISHABLE_KEY",
+        "SUPABASE_SECRET_KEY",
+        "SUPABASE_JWT_SECRET",
+    ):
+        monkeypatch.delenv(_k, raising=False)
+
+
 @pytest.fixture
 def app():
     fd, path = tempfile.mkstemp(suffix=".db")
