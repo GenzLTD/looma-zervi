@@ -130,6 +130,9 @@ def list_plans():
         request.headers.get("Accept-Language"),
     )
     payload = list_plans_for_region(region)
+    # 这里刻意不带 stub_mode：/plans 与 /status 是公开面，是否跑在模拟支付属部署
+    # 内部状态，不外泄（守卫见 backend/tests/test_payment_guard.py）。
+    # stub_mode 的权威源是 GET /v1/payment/providers。
     return jsonify(**payload)
 
 

@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Looma Payment Contract v1",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "protocol": "contracts/gfcc",
-  "description": "Tier 全球统一；价格按 region 分叉，商品决定定价。双主体目录：CN=深伯乐（微信、华为 IAP）；US=YeDall（Stripe）。协议真源 contracts/gfcc。商品到档位以本文件 huawei_iap.products 与 apple_iap.products 为准。",
+  "description": "Tier 全球统一；价格按 region 分叉，商品决定定价。双主体目录：CN=深伯乐（微信、华为 IAP）；US=YeDall（Stripe）。协议真源 contracts/gfcc。商品到档位以本文件 huawei_iap.products 与 apple_iap.products 为准。v1.4.0：plans 响应新增必填 stub_mode，客户端不得再用「字段缺失」推断模拟支付。",
   "tier_enum": ["free", "supporter", "pro", "enterprise"],
   "deprecated_tier_aliases": {
     "basic": "supporter"
@@ -117,6 +117,19 @@
       "APPLE_ENV",
       "PAYMENT_PORT"
     ]
+  },
+  "stub_mode_disclosure": {
+    "description": "模拟支付开关（PAYMENT_STUB_MODE）的暴露面。/plans 与 /status 是公开面，刻意不含 stub_mode——是否跑在模拟支付属部署内部状态（守卫见 backend/tests/test_payment_guard.py: test_plans_response_excludes_stub_mode / test_payment_status_excludes_stub_mode）。",
+    "authoritative_source": "GET /v1/payment/providers → stub_mode: boolean",
+    "plans_response_fields": {
+      "region": "string — CN|US",
+      "currency": "string — 取自 regions[region].currency",
+      "payment_provider": "string — 该区默认通道",
+      "payment_providers": "string[] — 该区全部通道",
+      "plans": "Plan[] — 见 plans 段"
+    },
+    "client_rule": "stub_mode 一律取自 /v1/payment/providers，并显式判读 === true。禁止读 /plans 的 stub_mode（该字段不存在），更禁止把 undefined/null 兜底为 true——那会让生产页面显示 Stub 横幅、点了 402 进不了真实支付。",
+    "history": "v1.4.0：把这条规则写进契约。此前 /plans 无该字段，小程序以 stub_mode !== false 反推为 true，本机恰好是模拟支付所以没暴露；生产补字段后即行为反转。"
   },
   "plans": [
     {
