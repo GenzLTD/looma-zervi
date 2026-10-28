@@ -42,6 +42,7 @@ from src.payment.plans import (
 from src.payment.wechat_pay import (
     create_native_order,
     generate_out_trade_no,
+    load_notify_public_keys,
     verify_notify_sign,
     parse_notify_body,
     build_notify_response,
@@ -466,6 +467,14 @@ def create_wechat_order():
         )
         jsapi_params = None
 
+    if result.error:
+        current_app.logger.warning(
+            "[wechat_pay] order rejected out_trade_no=%s error=%s",
+            out_trade_no,
+            result.error,
+        )
+        return jsonify(error="wechat_order_failed", message=result.error), 502
+
     # 写入订单表
     db = current_app._db
     order = db.create_order(
@@ -512,8 +521,9 @@ def wechat_pay_notify():
     nonce = request.headers.get(WECHAT_NONCE_HEADER, "")
 
     api_v3_key = current_app.config.get("WECHAT_API_V3_KEY", "")
+    stub = _is_stub_mode()
 
-    # 签名验证
+    # 签名验证。stub 才允许无签名；生产必须用微信支付公钥或平台证书做 RSA。
     if not verify_notify_sign(
         body=body,
         signature=signature,
@@ -521,13 +531,15 @@ def wechat_pay_notify():
         timestamp=timestamp,
         nonce=nonce,
         api_v3_key=api_v3_key,
+        public_keys=load_notify_public_keys(current_app.config),
+        allow_unsigned=stub,
     ):
         current_app.logger.warning("[wechat_pay] Notify signature verification FAILED")
         resp, code = build_notify_response(False)
         return resp, code, {"Content-Type": "application/json"}
 
     # 解析通知体
-    result = parse_notify_body(body)
+    result = parse_notify_body(body, api_v3_key=api_v3_key, allow_plaintext=stub)
     if not result.success:
         current_app.logger.warning(f"[wechat_pay] Notify parse error: {result.error}")
         resp, code = build_notify_response(False)

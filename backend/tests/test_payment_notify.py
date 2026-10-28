@@ -30,7 +30,7 @@ def _clean_wechat_env():
 
 @pytest.fixture
 def app():
-    """Stub mode (notify is unaffected by stub_mode) + temp DB."""
+    """Stub mode allows unsigned plaintext notify. Production tests live in test_wechat_notify_crypto.py."""
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     os.environ["DATABASE_PATH"] = path
@@ -118,8 +118,8 @@ class TestValidateNotify:
             out_trade_no=out_trade_no,
         )
 
-        # notify does NOT require auth → no signature validation in stub mode
-        # (api_v3_key is empty → verify_notify_sign returns True)
+        # notify does NOT require auth. PAYMENT_STUB_MODE allows an unsigned
+        # plaintext body. Production rejects that path.
         resp = client.post(
             "/v1/payment/wechat/notify",
             data=_make_notify_body(out_trade_no),

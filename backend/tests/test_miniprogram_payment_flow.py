@@ -23,7 +23,7 @@ import pytest
 import jwt
 
 from src.app import create_app
-from src.payment.wechat_pay import WeChatOrderResult
+from src.payment.wechat_pay import WeChatOrderResult, encrypt_resource
 
 
 def _auth_headers(token):
@@ -267,13 +267,17 @@ class TestProductionFlow:
             "resource_type": "encrypt-resource",
             "event_type": "TRANSACTION.SUCCESS",
             "summary": "支付成功",
-            "resource": {
-                "out_trade_no": order_data["out_trade_no"],
-                "transaction_id": "TXN_FULLFLOW",
-                "trade_type": "JSAPI",
-                "trade_state": "SUCCESS",
-                "amount": {"total": 990, "currency": "CNY"},
-            },
+            "resource": encrypt_resource(
+                "32byteslongsecretkeyforwechatpay",
+                {
+                    "out_trade_no": order_data["out_trade_no"],
+                    "transaction_id": "TXN_FULLFLOW",
+                    "trade_type": "JSAPI",
+                    "trade_state": "SUCCESS",
+                    "amount": {"total": 990, "currency": "CNY"},
+                },
+                nonce="nonce12bytes",
+            ),
         })
 
         with patch(

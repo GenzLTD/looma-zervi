@@ -71,7 +71,7 @@ def _probe_open_items(cfg) -> list[dict]:
     cred_values = [cfg.get(k) for k in cred_names]
     missing = [n for n, v in zip(cred_labels, cred_values) if not _is_set(v)]
     _add(items, "wechat-pay-creds",
-         "微信支付商户凭证不完整，下单将静默返回 stub 假订单", P0,
+         "微信支付商户凭证不完整，生产下单返回 503", P0,
          f"缺失: {', '.join(missing) or '无'}", ok=not missing)
 
     # DeepSeek (LLM primary provider).

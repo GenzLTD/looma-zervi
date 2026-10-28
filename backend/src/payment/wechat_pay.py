@@ -19,7 +19,6 @@ Ownership: szbenyx (与 szbolent-portal 支付共用契约)
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import time
@@ -60,6 +59,8 @@ class WeChatOrderResult:
     qr_code_url: str = ""
     # H5 支付参数
     h5_url: str = ""
+    # 非空表示下单失败。生产路径不得把失败伪装成 stub prepay。
+    error: str = ""
 
 
 @dataclass
@@ -172,8 +173,7 @@ def create_jsapi_order(
 
     private_key_pem = _load_private_key(private_key_path)
     if not private_key_pem or not api_v3_key or not serial_no:
-        # 凭证不全 → stub 模式
-        return _stub_order_result(out_trade_no)
+        return _failed_order(out_trade_no, "WeChat Pay credentials incomplete")
 
     auth = _build_authorization(mchid, serial_no, private_key_pem, "POST", WECHAT_JSAPI_ORDER, body)
     try:
@@ -190,7 +190,9 @@ def create_jsapi_order(
         )
         if resp.status_code == 200:
             data = resp.json()
-            prepay_id = data["prepay_id"]
+            prepay_id = data.get("prepay_id") or ""
+            if not prepay_id:
+                return _failed_order(out_trade_no, "WeChat response missing prepay_id")
 
             # 生成 JSAPI 前端调起支付所需的签名
             jsapi_package = f"prepay_id={prepay_id}"
@@ -207,10 +209,11 @@ def create_jsapi_order(
                 jsapi_nonce_str=nonce_str,
                 jsapi_time_stamp=time_stamp,
             )
-        else:
-            return _stub_order_result(out_trade_no)
-    except Exception:
-        return _stub_order_result(out_trade_no)
+        return _failed_order(
+            out_trade_no, f"WeChat order rejected: HTTP {resp.status_code}"
+        )
+    except Exception as exc:
+        return _failed_order(out_trade_no, f"WeChat order failed: {type(exc).__name__}")
 
 
 def create_native_order(
@@ -242,7 +245,7 @@ def create_native_order(
 
     private_key_pem = _load_private_key(private_key_path)
     if not private_key_pem or not api_v3_key or not serial_no:
-        return _stub_order_result(out_trade_no)
+        return _failed_order(out_trade_no, "WeChat Pay credentials incomplete")
 
     auth = _build_authorization(mchid, serial_no, private_key_pem, "POST", WECHAT_NATIVE_ORDER, body)
     try:
@@ -259,15 +262,24 @@ def create_native_order(
         )
         if resp.status_code == 200:
             data = resp.json()
+            code_url = data.get("code_url") or ""
+            if not code_url:
+                return _failed_order(out_trade_no, "WeChat response missing code_url")
             return WeChatOrderResult(
                 prepay_id="",
                 out_trade_no=out_trade_no,
-                qr_code_url=data.get("code_url", ""),
+                qr_code_url=code_url,
             )
-        else:
-            return _stub_order_result(out_trade_no)
-    except Exception:
-        return _stub_order_result(out_trade_no)
+        return _failed_order(
+            out_trade_no, f"WeChat order rejected: HTTP {resp.status_code}"
+        )
+    except Exception as exc:
+        return _failed_order(out_trade_no, f"WeChat order failed: {type(exc).__name__}")
+
+
+def _failed_order(out_trade_no: str, error: str) -> WeChatOrderResult:
+    """生产下单失败。调用方看到 error 后应返回 5xx，不得落一笔假 prepay。"""
+    return WeChatOrderResult(prepay_id="", out_trade_no=out_trade_no, error=error)
 
 
 def _stub_order_result(out_trade_no: str) -> WeChatOrderResult:
@@ -294,48 +306,157 @@ def verify_notify_sign(
     timestamp: str,
     nonce: str,
     api_v3_key: str = "",
+    public_keys: Optional[dict] = None,
+    allow_unsigned: bool = False,
 ) -> bool:
     """验证微信支付回调通知签名。
 
-    签名串：timestamp + "\n" + nonce + "\n" + body + "\n"
-    用 API v3 key 做 HMAC-SHA256 签名，结果与 callback 头中的签名对比。
+    生产路径：消息为 timestamp\\n + nonce\\n + body\\n，签名是请求头里
+    Base64 的 RSA-SHA256。公钥按 Wechatpay-Serial 选取（微信支付公钥或平台证书）。
+    api_v3_key 不参与验签，只留给报文解密。
+
+    allow_unsigned 只给 PAYMENT_STUB_MODE。空密钥不再放行。
     """
-    if not api_v3_key:
-        # 未配置密钥 → stub 模式下直接放行
+    del api_v3_key  # 解密用，验签不用
+    if allow_unsigned:
         return True
-
-    sign_message = f"{timestamp}\n{nonce}\n{body}\n"
-    expected = hmac_sha256(sign_message, api_v3_key)
-
-    if not _constant_time_compare(expected, signature):
+    if not signature or not serial_no or not timestamp or not nonce:
         return False
-    return True
+    pem = (public_keys or {}).get(serial_no)
+    if not pem:
+        return False
+    message = f"{timestamp}\n{nonce}\n{body}\n"
+    return _verify_rsa_sha256(message, signature, pem)
 
 
-def hmac_sha256(message: str, key: str) -> str:
-    """HMAC-SHA256 签名，返回十六进制字符串。"""
-    import hmac as hmac_module
-    mac = hmac_module.new(
-        key.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
+def _verify_rsa_sha256(message: str, signature_b64: str, pem: str) -> bool:
+    """用证书或公钥 PEM 校验 PKCS1v15 SHA256 签名。"""
+    try:
+        import base64
+
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.x509 import load_pem_x509_certificate
+
+        raw = pem.encode("utf-8") if isinstance(pem, str) else pem
+        if b"BEGIN CERTIFICATE" in raw:
+            public_key = load_pem_x509_certificate(raw).public_key()
+        else:
+            public_key = serialization.load_pem_public_key(raw)
+        public_key.verify(
+            base64.b64decode(signature_b64),
+            message.encode("utf-8"),
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _api_v3_key_bytes(api_v3_key: str) -> bytes:
+    key = (api_v3_key or "").encode("utf-8")
+    if len(key) != 32:
+        raise ValueError("API v3 key must be 32 bytes")
+    return key
+
+
+def encrypt_aes_gcm(
+    api_v3_key: str, nonce: str, plaintext: bytes, associated_data: str = ""
+) -> str:
+    """AEAD_AES_256_GCM，返回 Base64。测试和证书夹具用。"""
+    import base64
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    aad = associated_data.encode("utf-8")
+    ciphertext = AESGCM(_api_v3_key_bytes(api_v3_key)).encrypt(
+        nonce.encode("utf-8"), plaintext, aad
     )
-    return mac.hexdigest()
+    return base64.b64encode(ciphertext).decode("ascii")
 
 
-def _constant_time_compare(a: str, b: str) -> bool:
-    """防时序攻击的字符串比较。"""
-    if len(a) != len(b):
-        return False
-    result = 0
-    for x, y in zip(a, b):
-        result |= ord(x) ^ ord(y)
-    return result == 0
+def decrypt_aes_gcm(
+    api_v3_key: str, nonce: str, ciphertext_b64: str, associated_data: str = ""
+) -> bytes:
+    """解密微信支付 resource 或平台证书。失败抛出异常，不返回明文残片。"""
+    import base64
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    aad = associated_data.encode("utf-8")
+    return AESGCM(_api_v3_key_bytes(api_v3_key)).decrypt(
+        nonce.encode("utf-8"), base64.b64decode(ciphertext_b64), aad
+    )
 
 
-def parse_notify_body(body: str) -> NotifyResult:
+def encrypt_resource(
+    api_v3_key: str,
+    payload: dict,
+    nonce: str,
+    associated_data: str = "transaction",
+) -> dict:
+    """把交易明文包成回调里的 resource 对象。"""
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return {
+        "algorithm": "AEAD_AES_256_GCM",
+        "ciphertext": encrypt_aes_gcm(api_v3_key, nonce, raw, associated_data),
+        "nonce": nonce,
+        "associated_data": associated_data,
+    }
+
+
+def certificates_from_download(api_v3_key: str, payload: dict) -> dict:
+    """解开 GET /v3/certificates 的响应，得到 serial -> PEM。"""
+    found = {}
+    for item in payload.get("data") or []:
+        enc = item.get("encrypt_certificate") or {}
+        if enc.get("algorithm") not in (None, "", "AEAD_AES_256_GCM"):
+            raise ValueError(f"unsupported certificate algorithm: {enc.get('algorithm')}")
+        pem = decrypt_aes_gcm(
+            api_v3_key,
+            enc.get("nonce") or "",
+            enc.get("ciphertext") or "",
+            enc.get("associated_data") or "",
+        ).decode("utf-8")
+        serial = item.get("serial_no") or ""
+        if not serial or "BEGIN CERTIFICATE" not in pem:
+            raise ValueError("platform certificate payload missing serial or PEM")
+        found[serial] = pem
+    if not found:
+        raise ValueError("platform certificate list is empty")
+    return found
+
+
+def load_notify_public_keys(config: dict) -> dict:
+    """按序列号收集验签材料。不访问微信。
+
+    WECHAT_PAY_PUBLIC_KEY_ID + WECHAT_PAY_PUBLIC_KEY_PATH：商户平台的微信支付公钥。
+    WECHAT_PLATFORM_CERT_DIR：文件名即序列号的 PEM（平台证书轮换后的本地缓存）。
+    """
+    keys: dict[str, str] = {}
+    key_id = str(config.get("WECHAT_PAY_PUBLIC_KEY_ID") or "").strip()
+    key_path = str(config.get("WECHAT_PAY_PUBLIC_KEY_PATH") or "").strip()
+    if key_id and key_path and os.path.isfile(key_path):
+        with open(key_path, "r") as handle:
+            keys[key_id] = handle.read()
+    cert_dir = str(config.get("WECHAT_PLATFORM_CERT_DIR") or "").strip()
+    if cert_dir and os.path.isdir(cert_dir):
+        for name in os.listdir(cert_dir):
+            if not name.endswith(".pem"):
+                continue
+            with open(os.path.join(cert_dir, name), "r") as handle:
+                keys[name[:-4]] = handle.read()
+    return keys
+
+
+def parse_notify_body(
+    body: str, api_v3_key: str = "", allow_plaintext: bool = False
+) -> NotifyResult:
     """解析微信支付回调通知 JSON 体。
 
-    回调体结构见：
-    https://pay.weixin.qq.com/doc/v3/merchant/4012791897
+    生产回调的 resource 是 AEAD_AES_256_GCM。解密失败即失败，不把密文当明文。
+    allow_plaintext 只给 PAYMENT_STUB_MODE 的联调夹具。
     """
     try:
         data = json.loads(body)
@@ -346,14 +467,37 @@ def parse_notify_body(body: str) -> NotifyResult:
     if event_type != "TRANSACTION.SUCCESS":
         return NotifyResult(success=False, error=f"Unsupported event: {event_type}")
 
-    resource = data.get("resource", {})
-    # resource 可能是加密的（需用 API v3 key 解密），也可能不加密
-    # 简化处理：如果 resource 是 dict 且包含 ciphertext，跳过解密（stub模式）
-    decrypted = resource
+    resource = data.get("resource") or {}
+    if not isinstance(resource, dict):
+        return NotifyResult(success=False, error="resource is not an object")
 
-    out_trade_no = decrypted.get("out_trade_no", "")
-    transaction_id = decrypted.get("transaction_id", "")
-    amount = decrypted.get("amount", {})
+    if resource.get("ciphertext"):
+        algorithm = resource.get("algorithm") or "AEAD_AES_256_GCM"
+        if algorithm != "AEAD_AES_256_GCM":
+            return NotifyResult(success=False, error=f"Unsupported algorithm: {algorithm}")
+        try:
+            raw = decrypt_aes_gcm(
+                api_v3_key,
+                resource.get("nonce") or "",
+                resource.get("ciphertext") or "",
+                resource.get("associated_data") or "",
+            )
+            decrypted = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return NotifyResult(success=False, error="resource decrypt failed")
+    elif allow_plaintext:
+        decrypted = resource
+    else:
+        return NotifyResult(success=False, error="encrypted resource required")
+
+    if not isinstance(decrypted, dict):
+        return NotifyResult(success=False, error="decrypted resource is not an object")
+
+    out_trade_no = decrypted.get("out_trade_no") or ""
+    if not out_trade_no:
+        return NotifyResult(success=False, error="missing out_trade_no")
+    transaction_id = decrypted.get("transaction_id") or ""
+    amount = decrypted.get("amount") or {}
     amount_total = amount.get("total", 0) if isinstance(amount, dict) else 0
 
     return NotifyResult(

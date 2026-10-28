@@ -117,6 +117,10 @@ class Config:
     WECHAT_SERIAL_NO = os.getenv("WECHAT_SERIAL_NO", "")
     WECHAT_PRIVATE_KEY_PATH = os.getenv("WECHAT_PRIVATE_KEY_PATH", "")
     WECHAT_NOTIFY_URL = os.getenv("WECHAT_NOTIFY_URL", "")
+    # 回调验签：微信支付公钥（序列号常为 PUB_KEY_ID_…）或平台证书目录（文件名=序列号）
+    WECHAT_PAY_PUBLIC_KEY_ID = os.getenv("WECHAT_PAY_PUBLIC_KEY_ID", "")
+    WECHAT_PAY_PUBLIC_KEY_PATH = os.getenv("WECHAT_PAY_PUBLIC_KEY_PATH", "")
+    WECHAT_PLATFORM_CERT_DIR = os.getenv("WECHAT_PLATFORM_CERT_DIR", "")
 
     # Google OAuth (overseas — Sign in with Google)
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -268,6 +272,9 @@ def _refresh_config():
     Config.WECHAT_SERIAL_NO = os.getenv("WECHAT_SERIAL_NO", "")
     Config.WECHAT_PRIVATE_KEY_PATH = os.getenv("WECHAT_PRIVATE_KEY_PATH", "")
     Config.WECHAT_NOTIFY_URL = os.getenv("WECHAT_NOTIFY_URL", "")
+    Config.WECHAT_PAY_PUBLIC_KEY_ID = os.getenv("WECHAT_PAY_PUBLIC_KEY_ID", "")
+    Config.WECHAT_PAY_PUBLIC_KEY_PATH = os.getenv("WECHAT_PAY_PUBLIC_KEY_PATH", "")
+    Config.WECHAT_PLATFORM_CERT_DIR = os.getenv("WECHAT_PLATFORM_CERT_DIR", "")
 
     # Google OAuth (overseas)
     Config.GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
