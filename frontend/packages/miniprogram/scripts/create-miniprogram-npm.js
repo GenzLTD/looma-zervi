@@ -13,6 +13,18 @@ console.log('🔧 创建 miniprogram_npm 目录结构\n');
 const projectRoot = path.join(__dirname, '..');
 const miniprogramNpmDir = path.join(projectRoot, 'miniprogram_npm');
 const sharedCoreNpmDir = path.join(miniprogramNpmDir, '@looma/shared-core');
+// 微信开发者工具「构建 npm」的输入源（miniprogramNpmDistDir = "./"）。
+// 注意：本机 node_modules/@looma/shared-core 是 workspace junction（指向
+// packages/shared-core 源码包），往里写文件等于写进源码包根——必须跳过。
+// 只有它是普通目录（尚未装 workspace 依赖）时才用构建产物伪造一份。
+const nodeModulesDir = path.join(projectRoot, 'node_modules/@looma/shared-core');
+const nodeModulesIsLink = (() => {
+  try {
+    return fs.lstatSync(nodeModulesDir).isSymbolicLink();
+  } catch {
+    return false; // 不存在
+  }
+})();
 
 // 1. 确保 miniprogram_npm 目录存在
 if (!fs.existsSync(miniprogramNpmDir)) {
@@ -31,22 +43,32 @@ const sourceDir = path.join(projectRoot, '../shared-core/dist/mini');
 const sourceFiles = ['index.js', 'index.js.map', 'package.json'];
 
 console.log(`📂 源目录: ${sourceDir}`);
-console.log(`📂 目标目录: ${sharedCoreNpmDir}`);
+if (nodeModulesIsLink) {
+  console.log('ℹ️  node_modules/@looma/shared-core 是 workspace junction，跳过写入');
+}
 
-for (const file of sourceFiles) {
-  const sourcePath = path.join(sourceDir, file);
-  const targetPath = path.join(sharedCoreNpmDir, file);
-  
-  if (fs.existsSync(sourcePath)) {
-    console.log(`📋 复制: ${file}`);
-    fs.copyFileSync(sourcePath, targetPath);
-    
-    // 显示文件信息
-    const stats = fs.statSync(targetPath);
-    const sizeKB = Math.round(stats.size / 1024 * 10) / 10;
-    console.log(`   📦 大小: ${sizeKB} KB`);
-  } else {
-    console.log(`⚠️  文件不存在: ${sourcePath}`);
+if (!fs.existsSync(path.join(sourceDir, 'index.js'))) {
+  console.log('❌ 未找到 mini bundle，请先运行: node ../shared-core/scripts/build-mini.mjs');
+  process.exit(1);
+}
+
+for (const targetDir of [sharedCoreNpmDir, ...(nodeModulesIsLink ? [] : [nodeModulesDir])]) {
+  console.log(`📂 目标目录: ${targetDir}`);
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  for (const file of sourceFiles) {
+    const sourcePath = path.join(sourceDir, file);
+    const targetPath = path.join(targetDir, file);
+
+    if (fs.existsSync(sourcePath)) {
+      fs.copyFileSync(sourcePath, targetPath);
+
+      const stats = fs.statSync(targetPath);
+      const sizeKB = Math.round(stats.size / 1024 * 10) / 10;
+      console.log(`   📋 ${file} (${sizeKB} KB)`);
+    } else {
+      console.log(`   ⚠️  缺失: ${sourcePath}`);
+    }
   }
 }
 

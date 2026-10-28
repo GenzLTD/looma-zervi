@@ -37,7 +37,7 @@
     "packNpmRelationList": [
       {
         "packageJsonPath": "./package.json",
-        "miniprogramNpmDistDir": "./node_modules"
+        "miniprogramNpmDistDir": "./"
       }
     ],
     "minifyWXSS": true,
@@ -62,7 +62,16 @@
   },
   "simulatorPluginLibVersion": {},
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      {
+        "type": "folder",
+        "value": "node_modules"
+      },
+      {
+        "type": "suffix",
+        "value": ".map"
+      }
+    ],
     "include": []
   }
 }

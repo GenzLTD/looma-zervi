@@ -159,6 +159,7 @@ export type {
 export type {
   PaymentPlan,
   PlansResponse,
+  ProvidersResponse,
   PaymentStatus,
   UpgradeRequest,
   UpgradeResponse,
@@ -290,5 +291,7 @@ export {
 
 export { RANK_NAMES, getRankName } from "../types/game";
 export { IDENTITY_LABELS, getPlanetXRankName } from "../types/planetx-game";
+export { deriveMatchUiState } from "../utils/matchConsensus";
+export type { MatchUiState, MatchResultView } from "../utils/matchConsensus";
 
 export const LOOMA_TOKEN_KEY = "looma_token";
