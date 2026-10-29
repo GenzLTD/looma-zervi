@@ -46,19 +46,11 @@
     "client_rule": "页面/工厂统一：status===501 && error==='not_implemented' → 空态/降级文案，不弹通用失败 toast。客户端封装 isNotImplemented(err)，唯一入口，禁止各页面各写一份判断。",
     "transition_405": {
       "verdict": "有条件接受（裁决 2026-10-29）：仅对本契约 status=stub_501 的端点白名单生效；白名单外的端点收到 405 必须按真实错误处理，不得降级——否则『对 /list 发 PUT』这类真 bug 会被静默吞掉。",
-      "whitelist": [
-        "GET /v1/resume/:resume_id",
-        "PUT /v1/resume/:resume_id",
-        "GET /v1/resume/:resume_id/permission",
-        "PUT /v1/resume/:resume_id/permission",
-        "GET /v1/resume/blacklist",
-        "POST /v1/resume/blacklist",
-        "DELETE /v1/resume/blacklist/:item_id",
-        "GET /v1/resume/templates"
-      ],
+      "whitelist": [],
+      "closed_at": "阶段3 完成（2026-10-29）：8 条 stub 全部 implemented，白名单清空——此后任何 405 都按真实错误处理，客户端不得再降级为『未实现』。",
       "logging": "405 降级必须打 warn 日志（含 method + path），便于统计过渡期残留",
       "preferred_fix": "首选在 axum 网关给这些路由挂 any() → 501 的 stub handler（阶段3 一行的事），客户端就不需要 405 分支；405 只是 stub 上线前的兜底，不是契约行为。",
-      "expiry": "阶段3 stub handler 注册后，客户端删除 405 分支。契约验收只认 501 + not_implemented。"
+      "expiry": "已到期（2026-10-29）：stub 全部落地，客户端 405 分支可删除；isNotImplemented 只保留 501 判定。"
     },
     "must_not": [
       "用 404 not_found 表示『功能未上线』",
@@ -204,7 +196,7 @@
   },
 
   "endpoints_implemented": {
-    "description": "zervi-rust/resume-service/src/routes.rs 现网 7 条；网关 api-gateway any() 转发。",
+    "description": "zervi-rust/resume-service/src/routes.rs 现网 15 条（阶段3 全部落地，2026-10-29 @21d25a7）；网关 api-gateway any() 转发，含两段路径 :resume_id/permission。阶段3 复跑：detail 48 + permission 46 断言、blacklist 15 条、网关 8 条转发全通。",
     "routes": [
       {
         "method": "POST",
@@ -259,24 +251,17 @@
         "auth": "required",
         "status": "implemented",
         "response_200": { "message": "deleted", "resume_id": "string" }
-      }
-    ]
-  },
-
-  "endpoints_proposed": {
-    "description": "阶段2 契约冻结；阶段3 实现。落地前一律 not_implemented_convention。",
-    "routes": [
+      },
       {
         "method": "GET",
         "path": "/v1/resume/:resume_id",
         "auth": "required",
         "consent": "jobseeker_core",
-        "status": "stub_501",
-        "landing": "stage3",
+        "status": "implemented",
+        "implemented_in": "zervi-rust@21d25a7（阶段3，2026-10-29）",
         "name": "detail",
         "response_200": { "$ref": "#/types/ResumeDetail" },
         "errors": {
-          "501": "not_implemented（阶段3 前）",
           "404": "not_found — 仅表示简历不存在/无权限，绝不表示功能未上线"
         }
       },
@@ -285,8 +270,8 @@
         "path": "/v1/resume/:resume_id",
         "auth": "required",
         "consent": "jobseeker_core",
-        "status": "stub_501",
-        "landing": "stage3",
+        "status": "implemented",
+        "implemented_in": "zervi-rust@21d25a7（阶段3，2026-10-29）",
         "name": "update",
         "body": { "$ref": "#/types/ResumeUpdateRequest" },
         "response_200": { "$ref": "#/types/ResumeDetail" }
@@ -296,8 +281,8 @@
         "path": "/v1/resume/:resume_id/permission",
         "auth": "required",
         "consent": "jobseeker_core",
-        "status": "stub_501",
-        "landing": "stage3",
+        "status": "implemented",
+        "implemented_in": "zervi-rust@21d25a7（阶段3，2026-10-29）",
         "name": "permission_get",
         "semantics_ref": "#/permission_semantics",
         "response_200": { "$ref": "#/types/ResumePermission" },
@@ -308,8 +293,8 @@
         "path": "/v1/resume/:resume_id/permission",
         "auth": "required",
         "consent": "jobseeker_core",
-        "status": "stub_501",
-        "landing": "stage3",
+        "status": "implemented",
+        "implemented_in": "zervi-rust@21d25a7（阶段3，2026-10-29）",
         "name": "permission_put",
         "semantics_ref": "#/permission_semantics",
         "body": {
@@ -330,8 +315,8 @@
         "path": "/v1/resume/blacklist",
         "auth": "required",
         "consent": "jobseeker_core",
-        "status": "stub_501",
-        "landing": "stage3",
+        "status": "implemented",
+        "implemented_in": "zervi-rust@21d25a7（阶段3，2026-10-29）",
         "name": "blacklist_list",
         "dimension": "user",
         "description": "当前用户屏蔽企业列表（匹配推荐/投递时过滤）。非简历资源。",
@@ -342,8 +327,8 @@
         "path": "/v1/resume/blacklist",
         "auth": "required",
         "consent": "jobseeker_core",
-        "status": "stub_501",
-        "landing": "stage3",
+        "status": "implemented",
+        "implemented_in": "zervi-rust@21d25a7（阶段3，2026-10-29）",
         "name": "blacklist_add",
         "dimension": "user",
         "body": {
@@ -361,8 +346,8 @@
         "path": "/v1/resume/blacklist/:item_id",
         "auth": "required",
         "consent": "jobseeker_core",
-        "status": "stub_501",
-        "landing": "stage3",
+        "status": "implemented",
+        "implemented_in": "zervi-rust@21d25a7（阶段3，2026-10-29）",
         "name": "blacklist_remove",
         "dimension": "user",
         "response_200": { "message": "removed", "id": "string" }
@@ -371,14 +356,20 @@
         "method": "GET",
         "path": "/v1/resume/templates",
         "auth": "optional",
-        "status": "stub_501",
-        "landing": "stage3",
+        "status": "implemented",
+        "implemented_in": "zervi-rust@21d25a7（阶段3，2026-10-29）",
         "name": "templates_list",
         "dimension": "global",
         "description": "全局模板目录，非用户资源。若未来按 identity.value_axes 排序推荐，另在 gfcc 声明 optional adapter（must_not_write）。",
         "write_policy": "0.1 只读，不提供 POST/PUT/DELETE。若未来支持用户自建模板，另开 /v1/resume/templates/custom 并升 minor 版本，不改本端点。",
         "response_200": { "$ref": "#/types/ResumeTemplatesResponse" }
       }
+    ]
+  },
+
+  "endpoints_proposed": {
+    "description": "阶段3 已于 2026-10-29 全部落地，本节清空并保留为「待落地端点」入口：新增端点先在此写 status=stub_501，落地后迁入 endpoints_implemented。",
+    "routes": [
     ]
   },
 
