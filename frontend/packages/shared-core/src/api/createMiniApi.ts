@@ -47,7 +47,7 @@ import type {
   AddCandidateRequest,
   AddCandidateResponse,
 } from "../types/enterprise";
-import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ParsedJob, CreditAnalysis, CheckCompanyRequest, ResumeListResponse, ResumeAnalysisResponse, ResumeDetail, ResumeUpdateRequest, ResumePermission, ResumePermissionGrant, ResumeVisibility, ResumeBlacklistItem, ResumeBlacklistAddRequest, ResumeBlacklistResponse, ResumeTemplatesResponse } from "../types/resume";
+import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ParsedJob, CreditAnalysis, CheckCompanyRequest, ResumeListResponse, ResumeAnalysisResponse, ResumeDetail, ResumeUpdateRequest, ResumeIngestRequest, ResumeIngestResponse, ResumePermission, ResumePermissionGrant, ResumeVisibility, ResumeBlacklistItem, ResumeBlacklistAddRequest, ResumeBlacklistResponse, ResumeTemplatesResponse } from "../types/resume";
 import type { Report, GenerateReportRequest } from "../types/misc";
 import { API_ROUTES } from "../constants/routes";
 
@@ -267,6 +267,10 @@ export function createResumeApi(client: MiniApiClientInterface) {
     upload: (_file: any) => {
       throw new Error('File upload not supported in miniprogram');
     },
+
+    /** Ingest pre-parsed markdown directly (DemoPeter thin-ingest — no LLM call)；extracted 带上即 processed */
+    ingest: (payload: ResumeIngestRequest) =>
+      client.post<ResumeIngestResponse>(API_ROUTES.RESUME_INGEST, payload),
 
     // ── HarmonyOS 简历管理 ──
     /** List all resumes uploaded by current user */
