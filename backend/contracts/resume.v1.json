@@ -86,7 +86,8 @@
         "subject_id": "string",
         "scope": "read | download",
         "expires_at": "RFC3339 | null"
-      }
+      },
+      "expires_at_semantics": "非 null 且已过 → 读响应不返回、业务授权判定按无授权处理；服务端惰性剔除：GET 读到过期条目就地剔除并回写（updated_at 重置为剔除时刻），PUT 校验后写前剔除（过期授权不借全量替换复活）。全表清扫归后台任务，不在端点语义内。"
     },
     "not_user_scoped": "禁止实现 GET /v1/resume/permission（无 :resume_id）。若未来需要『默认简历可见性』，挂 identity.visibility.defaults.resume_summary 或另开 /v1/identity/*，不进本域。"
   },
@@ -309,6 +310,7 @@
         },
         "write_semantics": {
           "full_replacement": true,
+          "expired_grants": "写前剔除：body.grants 里已过期的条目校验通过但不落库（见 permission_semantics.grants.expires_at_semantics）",
           "grants_omitted": "[]（清空）——客户端必须先 GET 再 PUT；禁止把 PUT 当增量合并，否则会静默清掉既有 grants",
           "concurrency": "last-write-wins；0.1 不提供 ETag/If-Match，响应回显 updated_at 供客户端检测被覆盖",
           "updated_at": "服务端生成；客户端传入则忽略"
