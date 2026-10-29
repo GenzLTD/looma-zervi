@@ -242,14 +242,20 @@
         "method": "GET",
         "path": "/v1/resume/analysis",
         "auth": "required",
+        "consent": "jobseeker_core",
         "status": "implemented",
+        "implemented_in": "zervi-rust@5843e8b（阶段3 consent 收口，2026-10-30）",
+        "name": "analysis",
         "query": { "resume_id": "string (required)" }
       },
       {
         "method": "DELETE",
         "path": "/v1/resume/:resume_id",
         "auth": "required",
+        "consent": "jobseeker_core",
         "status": "implemented",
+        "implemented_in": "zervi-rust@5843e8b（阶段3 consent 收口，2026-10-30）",
+        "name": "delete",
         "response_200": { "message": "deleted", "resume_id": "string" }
       },
       {
