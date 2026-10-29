@@ -184,7 +184,7 @@ export class MiniApiClient {
             });
           } else {
             const errorData = this.parseWxError(resp);
-            // 附带请求上下文：isNotImplemented 的 405 白名单判定需要 method+path
+            // 附带请求上下文：405 白名单已于阶段3 收口移除，此处仅留作日志/排查诊断
             reject(
               new ApiError(
                 errorData.message || `HTTP ${status}`,
