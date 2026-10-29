@@ -274,3 +274,100 @@ export interface ResumeAnalysisResponse {
   markdown?: string;
   analysis: ResumeAnalysisResult | null;
 }
+
+// ============================================================
+// resume.v1.json v0.1.0 — 契约缺口类型
+// 契约真源: looma-zervi/backend/contracts/resume.v1.json
+// 裁决 2026-10-29: visibility 单一写入口归 PUT /:resume_id/permission，
+// ResumeUpdateRequest 不含 visibility（双写路径已拆）。
+// ============================================================
+
+export type ResumeVisibility = "everyone" | "trusted" | "private";
+
+export type ResumeDocStatus = "uploaded" | "processed" | "partial";
+
+/** GET /v1/resume/:resume_id 成功体 */
+export interface ResumeDetail {
+  id: string;
+  title: string;
+  filename: string;
+  file_size?: number;
+  uploaded_at: string;
+  extracted: ParsedResume;
+  /** 原文/转换后 markdown；private 默认仅 owner 可得 */
+  markdown?: string;
+  visibility: ResumeVisibility;
+  status?: ResumeDocStatus;
+}
+
+/** PUT /v1/resume/:resume_id 请求体 — 只写正文相关字段，未传字段服务端 merge */
+export interface ResumeUpdateRequest {
+  title?: string;
+  extracted?: ParsedResume;
+  markdown?: string;
+}
+
+export type PermissionScope = "read" | "download";
+
+export interface ResumePermissionGrant {
+  subject_type: "user" | "enterprise" | "share_code_ref";
+  subject_id: string;
+  scope: PermissionScope;
+  expires_at?: string | null;
+}
+
+/** GET/PUT /v1/resume/:resume_id/permission — 简历维授权面 */
+export interface ResumePermission {
+  resume_id: string;
+  visibility: ResumeVisibility;
+  /** 全量替换语义；PUT 时省略即视为 []（清空）——必须先 GET 再 PUT */
+  grants: ResumePermissionGrant[];
+  /** 服务端生成；客户端传入忽略（last-write-wins 检测用） */
+  updated_at?: string;
+}
+
+export type BlacklistMatch = "exact_name" | "credit_code" | "enterprise_id";
+
+export interface ResumeBlacklistItem {
+  id: string;
+  company_name: string;
+  credit_code?: string;
+  enterprise_id?: string;
+  match: BlacklistMatch;
+  created_at?: string;
+  note?: string;
+}
+
+/** POST /v1/resume/blacklist — match 枚举分情况必填 */
+export interface ResumeBlacklistAddRequest {
+  match: BlacklistMatch;
+  /** match=exact_name 时必填 */
+  company_name?: string;
+  /** match=credit_code 时必填 */
+  credit_code?: string;
+  /** match=enterprise_id 时必填 */
+  enterprise_id?: string;
+  note?: string;
+}
+
+export interface ResumeBlacklistResponse {
+  items: ResumeBlacklistItem[];
+  total: number;
+}
+
+export interface ResumeTemplate {
+  id: string;
+  name: string;
+  /** zh-CN | en-US */
+  locale: string;
+  summary?: string;
+  tags?: string[];
+  /** 建议填充的 ParsedResume 字段名 */
+  preview_fields?: string[];
+}
+
+/** GET /v1/resume/templates — 全局目录，0.1 只读（写操作需另开 /custom 端点升 minor） */
+export interface ResumeTemplatesResponse {
+  templates: ResumeTemplate[];
+  total: number;
+}

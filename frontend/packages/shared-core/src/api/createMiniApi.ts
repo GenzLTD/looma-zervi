@@ -26,6 +26,7 @@ import type {
   MissionCompleteRequest,
   MissionCompleteResponse,
   FleetMatchResponse,
+  FleetMatchRequest,
   MatchConsensusListResponse,
   CreateFleetRequest,
   FleetResponse,
@@ -46,7 +47,7 @@ import type {
   AddCandidateRequest,
   AddCandidateResponse,
 } from "../types/enterprise";
-import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ParsedJob, CreditAnalysis, CheckCompanyRequest, ResumeListResponse, ResumeAnalysisResponse } from "../types/resume";
+import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ParsedJob, CreditAnalysis, CheckCompanyRequest, ResumeListResponse, ResumeAnalysisResponse, ResumeDetail, ResumeUpdateRequest, ResumePermission, ResumePermissionGrant, ResumeVisibility, ResumeBlacklistItem, ResumeBlacklistAddRequest, ResumeBlacklistResponse, ResumeTemplatesResponse } from "../types/resume";
 import type { Report, GenerateReportRequest } from "../types/misc";
 import { API_ROUTES } from "../constants/routes";
 
@@ -138,8 +139,10 @@ export function createGameApi(client: MiniApiClientInterface) {
     missionComplete: (payload: MissionCompleteRequest) =>
       client.post<MissionCompleteResponse>(API_ROUTES.GAME_MISSION_COMPLETE, payload),
 
-    /** Fleet 1:1 personality match (PlanetX domain) */
-    match: () => client.post<FleetMatchResponse>(API_ROUTES.GAME_MATCH),
+    /** Fleet 1:1 personality match (PlanetX domain)
+     *  personalize=false 关闭个性化画像匹配（PIPL 自动化决策可拒绝） */
+    match: (payload?: FleetMatchRequest) =>
+      client.post<FleetMatchResponse>(API_ROUTES.GAME_MATCH, payload ?? {}),
 
     acknowledgeConsensus: (payload: { consensus_id: string }) =>
       client.post<{ status: string }>(API_ROUTES.GAME_MATCH_ACK, payload),
@@ -276,6 +279,41 @@ export function createResumeApi(client: MiniApiClientInterface) {
     /** Delete a resume by ID */
     delete: (resumeId: string) =>
       client.delete<{ message: string; resume_id: string }>(`${API_ROUTES.RESUME_DELETE}/${resumeId}`),
+
+    // ── resume.v1.json v0.1.0 契约端点 ──
+    // 阶段3 落地前 8 个端点均为 stub_501；页面用 isNotImplemented(err) 统一降级，
+    // 禁止各页面自行判 501/405。
+    /** GET /v1/resume/:resume_id — 详情（stub_501 → stage3） */
+    detail: (resumeId: string) =>
+      client.get<ResumeDetail>(`${API_ROUTES.RESUME_BASE}/${resumeId}`),
+
+    /** PUT /v1/resume/:resume_id — 正文更新（title/extracted/markdown；不含 visibility，写入口归 setPermission） */
+    update: (resumeId: string, body: ResumeUpdateRequest) =>
+      client.put<ResumeDetail>(`${API_ROUTES.RESUME_BASE}/${resumeId}`, body),
+
+    /** GET /v1/resume/:resume_id/permission — 简历维授权面（仅 owner 可读完整 grants） */
+    permission: (resumeId: string) =>
+      client.get<ResumePermission>(`${API_ROUTES.RESUME_BASE}/${resumeId}/permission`),
+
+    /** PUT /v1/resume/:resume_id/permission — 全量替换语义；grants 省略即清空，必须先 GET 再 PUT */
+    setPermission: (
+      resumeId: string,
+      body: { visibility: ResumeVisibility; grants?: ResumePermissionGrant[] }
+    ) => client.put<ResumePermission>(`${API_ROUTES.RESUME_BASE}/${resumeId}/permission`, body),
+
+    /** GET /v1/resume/blacklist — 用户维屏蔽企业列表 */
+    blacklist: () => client.get<ResumeBlacklistResponse>(API_ROUTES.RESUME_BLACKLIST),
+
+    /** POST /v1/resume/blacklist — match 枚举分情况必填 */
+    blacklistAdd: (body: ResumeBlacklistAddRequest) =>
+      client.post<ResumeBlacklistItem>(API_ROUTES.RESUME_BLACKLIST, body),
+
+    /** DELETE /v1/resume/blacklist/:item_id */
+    blacklistRemove: (itemId: string) =>
+      client.delete<{ message: string; id: string }>(`${API_ROUTES.RESUME_BLACKLIST}/${itemId}`),
+
+    /** GET /v1/resume/templates — 全局模板目录（0.1 只读；auth optional） */
+    templates: () => client.get<ResumeTemplatesResponse>(API_ROUTES.RESUME_TEMPLATES),
   };
 }
 
@@ -445,12 +483,35 @@ export function createPaymentApi(client: MiniApiClientInterface) {
     upgrade: (tier: "supporter" | "pro") =>
       client.post<import("../types/payment").UpgradeResponse>(API_ROUTES.PAYMENT_UPGRADE, { tier }),
 
-    /** Create WeChat Pay order (production mode, JSAPI for miniprogram) */
-    wechatOrder: (payload: import("../types/payment").WechatOrderRequest) =>
-      client.post<import("../types/payment").WechatOrderResponse>(
-        API_ROUTES.PAYMENT_WECHAT_ORDER,
+    /** Create WeChat Pay order. region 写在这一单上，微信支付只接受 CN。 */
+    wechatOrder: (
+      payload: import("../types/payment").WechatOrderRequest,
+      region?: import("../types/payment").PaymentRegion,
+    ) => {
+      const query = region ? `?region=${region}` : "";
+      return client.post<import("../types/payment").WechatOrderResponse>(
+        `${API_ROUTES.PAYMENT_WECHAT_ORDER}${query}`,
         payload,
+      );
+    },
+
+    /** Stub only: simulate the WeChat success notify for an existing order. */
+    wechatNotifySimulate: (outTradeNo: string) =>
+      client.post<{ settled: boolean; out_trade_no: string; tier: string }>(
+        API_ROUTES.PAYMENT_WECHAT_NOTIFY_SIMULATE,
+        { out_trade_no: outTradeNo },
       ),
+
+    /**
+     * List configured payment providers — 同时是 stub_mode 的权威源。
+     * /plans 是公开面，契约刻意不带 stub_mode（test_payment_guard），别去那里读。
+     */
+    providers: (region?: import("../types/payment").PaymentRegion) => {
+      const query = region ? `?region=${region}` : "";
+      return client.get<import("../types/payment").ProvidersResponse>(
+        `${API_ROUTES.PAYMENT_PROVIDERS}${query}`,
+      );
+    },
   };
 }
 
@@ -510,6 +571,28 @@ export function createTrustApi(client: MiniApiClientInterface) {
     /** Revoke a share code */
     revokeShareCode: (codeId: string) =>
       client.delete<{ message: string }>(`${API_ROUTES.TRUST_SHARE_CODE}/${codeId}`),
+  };
+}
+
+export function createTimelineApi(client: MiniApiClientInterface) {
+  return {
+    list: (params?: { cursor?: string; limit?: number; kind?: string; since?: string }) => {
+      const q: string[] = [];
+      if (params?.cursor) q.push(`cursor=${encodeURIComponent(params.cursor)}`);
+      if (params?.limit != null) q.push(`limit=${params.limit}`);
+      if (params?.kind) q.push(`kind=${encodeURIComponent(params.kind)}`);
+      if (params?.since) q.push(`since=${encodeURIComponent(params.since)}`);
+      const qs = q.join("&");
+      return client.get<import("../types/timeline").TimelineListResponse>(
+        qs ? `${API_ROUTES.TIMELINE}?${qs}` : API_ROUTES.TIMELINE,
+      );
+    },
+    createEvent: (payload: import("../types/timeline").CreateTimelineEventRequest) =>
+      client.post<import("../types/timeline").TimelineEvent>(API_ROUTES.TIMELINE_EVENTS, payload),
+    growth: () =>
+      client.get<import("../types/timeline").TimelineGrowthResponse>(API_ROUTES.TIMELINE_GROWTH),
+    backfill: () =>
+      client.post<import("../types/timeline").TimelineBackfillResponse>(API_ROUTES.TIMELINE_BACKFILL),
   };
 }
 

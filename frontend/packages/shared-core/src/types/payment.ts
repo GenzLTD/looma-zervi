@@ -33,7 +33,8 @@ export interface PlansResponse {
   payment_provider: PaymentProvider;
   payment_providers?: PaymentProvider[];  // Multi-provider regions (overseas)
   plans: PaymentPlan[];
-  stub_mode?: boolean;
+  // 注意：这里没有 stub_mode。/plans 是公开面，契约刻意不外泄该字段。
+  // stub_mode 的权威源是 GET /v1/payment/providers → ProvidersResponse.stub_mode。
 }
 
 /** GET /v1/payment/status 响应 */

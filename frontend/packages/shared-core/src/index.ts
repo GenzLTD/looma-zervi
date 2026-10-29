@@ -14,6 +14,7 @@ export {
   webStorageAdapter,
   wxStorageAdapter,
 } from "./api/ApiClient";
+export { isNotImplemented } from "./api/not-implemented";
 export type {
   ApiClientConfig,
   StorageAdapter,
@@ -113,6 +114,7 @@ export type {
   MissionCompleteResponse,
   FleetMatchCandidate,
   FleetMatchResponse,
+  FleetMatchRequest,
   ConsensusStatus,
   MatchSpreadHint,
   MatchConsensusItem,
@@ -187,6 +189,20 @@ export type {
   QccCompanyInfo,
   QccRiskData,
   QccOperationData,
+  // resume.v1.json v0.1.0 契约缺口类型
+  ResumeDetail,
+  ResumeUpdateRequest,
+  ResumePermission,
+  ResumePermissionGrant,
+  ResumeVisibility,
+  ResumeDocStatus,
+  PermissionScope,
+  ResumeBlacklistItem,
+  ResumeBlacklistAddRequest,
+  ResumeBlacklistResponse,
+  BlacklistMatch,
+  ResumeTemplate,
+  ResumeTemplatesResponse,
 } from "./types/resume";
 
 export type {
@@ -274,6 +290,7 @@ export type {
 export type {
   PaymentPlan,
   PlansResponse,
+  ProvidersResponse,
   PaymentStatus,
   UpgradeRequest,
   UpgradeResponse,
@@ -345,6 +362,7 @@ export {
 } from "./constants/quota";
 
 export { API_ROUTES } from "./constants/routes";
+export { LEGAL, LEGAL_PRIVACY_SUMMARY } from "./constants/legal";
 
 export {
   CLAIM_LABEL,

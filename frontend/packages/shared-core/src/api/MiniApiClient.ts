@@ -184,12 +184,13 @@ export class MiniApiClient {
             });
           } else {
             const errorData = this.parseWxError(resp);
+            // 附带请求上下文：isNotImplemented 的 405 白名单判定需要 method+path
             reject(
               new ApiError(
                 errorData.message || `HTTP ${status}`,
                 status,
                 errorData.code,
-                errorData
+                { ...errorData, __method: method, __path: url }
               )
             );
           }

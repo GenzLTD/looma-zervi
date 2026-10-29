@@ -42,6 +42,7 @@ import type {
   MissionCompleteRequest,
   MissionCompleteResponse,
   FleetMatchResponse,
+  FleetMatchRequest,
   MatchConsensusListResponse,
   CreateFleetRequest,
   FleetResponse,
@@ -68,7 +69,7 @@ import type {
   JobPostMatchesResponse,
   CandidateListResponse,
 } from "../types/enterprise";
-import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ResumeUploadResult, ResumeIngestRequest, ResumeIngestResponse, ParsedJob, JobUploadResult, CreditAnalysis, CheckCompanyRequest, CheckCompanyResponse, ResumeListResponse, ResumeAnalysisResponse } from "../types/resume";
+import type { ParsedResume, JobMatchRequest, JobMatchResponse, Job, ResumeUploadResult, ResumeIngestRequest, ResumeIngestResponse, ParsedJob, JobUploadResult, CreditAnalysis, CheckCompanyRequest, CheckCompanyResponse, ResumeListResponse, ResumeAnalysisResponse, ResumeDetail, ResumeUpdateRequest, ResumePermission, ResumePermissionGrant, ResumeVisibility, ResumeBlacklistItem, ResumeBlacklistAddRequest, ResumeBlacklistResponse, ResumeTemplatesResponse } from "../types/resume";
 import type { Report, GenerateReportRequest } from "../types/misc";
 import type {
   CreateMatchReportRequest,
@@ -231,8 +232,10 @@ export function createGameApi(client: ApiClient) {
     missionComplete: (payload: MissionCompleteRequest) =>
       client.post<MissionCompleteResponse>(API_ROUTES.GAME_MISSION_COMPLETE, payload),
 
-    /** Fleet 1:1 personality match (PlanetX domain) */
-    match: () => client.post<FleetMatchResponse>(API_ROUTES.GAME_MATCH),
+    /** Fleet 1:1 personality match (PlanetX domain)
+     *  personalize=false 关闭个性化画像匹配（PIPL 自动化决策可拒绝） */
+    match: (payload?: FleetMatchRequest) =>
+      client.post<FleetMatchResponse>(API_ROUTES.GAME_MATCH, payload ?? {}),
 
     /** 双向共识确认（阶段二） */
     acknowledgeConsensus: (payload: { consensus_id: string }) =>
@@ -401,6 +404,34 @@ export function createResumeApi(client: ApiClient) {
     /** Delete a resume by ID */
     delete: (resumeId: string) =>
       client.delete<{ message: string; resume_id: string }>(`${API_ROUTES.RESUME_DELETE}/${resumeId}`),
+
+    // ── resume.v1.json v0.1.0 契约端点（与 createMiniApi.ts 同面镜像）──
+    // 阶段3 落地前 8 个端点均为 stub_501；统一用 isNotImplemented(err) 降级。
+    detail: (resumeId: string) =>
+      client.get<ResumeDetail>(`${API_ROUTES.RESUME_BASE}/${resumeId}`),
+
+    /** 正文更新（title/extracted/markdown；visibility 写入口归 setPermission，裁决 2026-10-29） */
+    update: (resumeId: string, body: ResumeUpdateRequest) =>
+      client.put<ResumeDetail>(`${API_ROUTES.RESUME_BASE}/${resumeId}`, body),
+
+    permission: (resumeId: string) =>
+      client.get<ResumePermission>(`${API_ROUTES.RESUME_BASE}/${resumeId}/permission`),
+
+    /** 全量替换语义；grants 省略即清空，必须先 GET 再 PUT */
+    setPermission: (
+      resumeId: string,
+      body: { visibility: ResumeVisibility; grants?: ResumePermissionGrant[] }
+    ) => client.put<ResumePermission>(`${API_ROUTES.RESUME_BASE}/${resumeId}/permission`, body),
+
+    blacklist: () => client.get<ResumeBlacklistResponse>(API_ROUTES.RESUME_BLACKLIST),
+
+    blacklistAdd: (body: ResumeBlacklistAddRequest) =>
+      client.post<ResumeBlacklistItem>(API_ROUTES.RESUME_BLACKLIST, body),
+
+    blacklistRemove: (itemId: string) =>
+      client.delete<{ message: string; id: string }>(`${API_ROUTES.RESUME_BLACKLIST}/${itemId}`),
+
+    templates: () => client.get<ResumeTemplatesResponse>(API_ROUTES.RESUME_TEMPLATES),
   };
 }
 
@@ -658,11 +689,23 @@ export function createPaymentApi(client: ApiClient) {
         ...attribution,
       }),
 
-    /** Create WeChat Pay order (production mode) */
-    wechatOrder: (payload: import("../types/payment").WechatOrderRequest) =>
-      client.post<import("../types/payment").WechatOrderResponse>(
-        API_ROUTES.PAYMENT_WECHAT_ORDER,
+    /** Create WeChat Pay order. region 写在这一单上，微信支付只接受 CN。 */
+    wechatOrder: (
+      payload: import("../types/payment").WechatOrderRequest,
+      region?: import("../types/payment").PaymentRegion,
+    ) => {
+      const query = region ? `?region=${region}` : "";
+      return client.post<import("../types/payment").WechatOrderResponse>(
+        `${API_ROUTES.PAYMENT_WECHAT_ORDER}${query}`,
         payload,
+      );
+    },
+
+    /** Stub only: simulate the WeChat success notify for an existing order. */
+    wechatNotifySimulate: (outTradeNo: string) =>
+      client.post<{ settled: boolean; out_trade_no: string; tier: string }>(
+        API_ROUTES.PAYMENT_WECHAT_NOTIFY_SIMULATE,
+        { out_trade_no: outTradeNo },
       ),
 
     /** List configured overseas payment providers */

@@ -8,6 +8,12 @@ export interface MatchUiState {
   threshold: number;
   spreadHint: MatchSpreadHint;
   statusLabel: string;
+  /**
+   * 分数已达阈值、但双向共识尚未双方确认（consensus_passed）。
+   * 此时 completeMission 会被后端以 403 consensus_required 拒绝，
+   * 页面要给出「等待对方确认」的中间态，而不是让它看起来像契合度不足。
+   */
+  awaitingPeer: boolean;
 }
 
 const DEFAULT_THRESHOLD = 85;
@@ -65,13 +71,16 @@ export function deriveMatchUiState(data: FleetMatchResponse): MatchUiState {
 
   const spreadHint = data.spread_hint ?? defaultSpreadHint(view, canComplete);
 
+  // consensus_passed = 分数已过阈值，但仍缺对方的认可；未 verified 前不能完成任务。
+  const awaitingPeer = status === "consensus_passed" && !canComplete;
+
   const statusLabel: Record<MatchResultView, string> = {
     verified: "共识共振达成",
-    weak: "弱共振 · 待双向确认",
+    weak: awaitingPeer ? "已达门槛 · 等待对方确认" : "弱共振 · 待双向确认",
     failed: "未达共识阈值",
   };
 
-  return { view, canComplete, threshold, spreadHint, statusLabel: statusLabel[view] };
+  return { view, canComplete, threshold, spreadHint, statusLabel: statusLabel[view], awaitingPeer };
 }
 
 export function consensusStatusLabel(status: ConsensusStatus): string {

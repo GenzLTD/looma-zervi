@@ -172,6 +172,8 @@ export interface FleetMatchResponse {
   fleet_id: string;
   fleet_name: string;
   candidates_considered: number;
+  /** PIPL 自动化决策可拒绝（P-10）：false=用户已关闭个性化，结果不基于画像 */
+  personalized?: boolean;
   /** 阶段二：共识阈值（默认 85） */
   consensus_threshold?: number;
   consensus_status?: ConsensusStatus;
@@ -179,6 +181,12 @@ export interface FleetMatchResponse {
   can_complete_mission?: boolean;
   pending_consensus_id?: string | null;
   spread_hint?: MatchSpreadHint;
+}
+
+/** POST /v1/game/match 请求体 */
+export interface FleetMatchRequest {
+  /** 是否开启个性化画像匹配；false=关闭个性化（非画像随机匹配） */
+  personalize?: boolean;
 }
 
 export interface Fleet {

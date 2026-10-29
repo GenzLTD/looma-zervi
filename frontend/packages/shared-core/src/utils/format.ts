@@ -2,8 +2,17 @@
  * Formatting utilities shared across brands.
  */
 
+/**
+ * iOS/旧 WebView 的 Date 解析不接受 "YYYY-MM-DD HH:mm:ss"（空格分隔），
+ * 后端时间戳正是这种格式。统一在解析前把首个空格换成 "T"。
+ */
+function parseDate(date: string | Date): Date {
+  if (date instanceof Date) return date;
+  return new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(date) ? date.replace(" ", "T") : date);
+}
+
 export function formatDate(date: string | Date, locale = "zh-CN"): string {
-  const d = typeof date === "string" ? new Date(date) : date;
+  const d = parseDate(date);
   return d.toLocaleDateString(locale, {
     year: "numeric",
     month: "2-digit",
@@ -12,7 +21,7 @@ export function formatDate(date: string | Date, locale = "zh-CN"): string {
 }
 
 export function formatDateTime(date: string | Date, locale = "zh-CN"): string {
-  const d = typeof date === "string" ? new Date(date) : date;
+  const d = parseDate(date);
   return d.toLocaleString(locale, {
     year: "numeric",
     month: "2-digit",
@@ -27,7 +36,7 @@ export function formatNumber(n: number): string {
 }
 
 export function formatRelativeTime(date: string | Date): string {
-  const d = typeof date === "string" ? new Date(date) : date;
+  const d = parseDate(date);
   const now = new Date();
   const diff = now.getTime() - d.getTime();
   const seconds = Math.floor(diff / 1000);

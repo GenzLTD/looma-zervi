@@ -87,6 +87,12 @@ export const API_ROUTES = {
   RESUME_LIST: "/v1/resume/list",        // GET — 用户简历列表
   RESUME_ANALYSIS: "/v1/resume/analysis",// GET — AI 分析 (?resume_id=xxx)
   RESUME_DELETE: "/v1/resume",           // DELETE /:id — 拼接方式: `${RESUME_DELETE}/${resumeId}`
+  // Resume — resume.v1.json v0.1.0（契约真源: looma-zervi/backend/contracts/resume.v1.json）
+  // 裁决 2026-10-29: detail/update/permission 不设同值常量，统一走 RESUME_BASE 拼接
+  // （`${RESUME_BASE}/${id}`、`${RESUME_BASE}/${id}/permission`），避免三个 '/v1/resume' 分不清谁是谁。
+  RESUME_BASE: "/v1/resume",             // detail/update/permission 的拼接基座
+  RESUME_BLACKLIST: "/v1/resume/blacklist", // GET 列表 / POST 添加；DELETE /:item_id 走拼接
+  RESUME_TEMPLATES: "/v1/resume/templates", // GET — 全局模板目录（0.1 只读）
 
   // Reports (ops daily/weekly/monthly)
   REPORTS_GENERATE: "/v1/reports/generate",
@@ -103,6 +109,8 @@ export const API_ROUTES = {
   PAYMENT_CHECKOUT: "/v1/payment/checkout",
   PAYMENT_WECHAT_ORDER: "/v1/payment/wechat/order",
   PAYMENT_WECHAT_NOTIFY: "/v1/payment/wechat/notify",
+  /** 仅 PAYMENT_STUB_MODE 可用。商户号下来前，模拟微信成功回调，走同一条核销链。 */
+  PAYMENT_WECHAT_NOTIFY_SIMULATE: "/v1/payment/wechat/notify-simulate",
   // Apple IAP（payment.v1.json v1.2.0；服务端 zervi-rust payment-service）。
   // webhook 是 Apple→服务端回调，App/前端不调用，故不注册。
   PAYMENT_APPLE_VERIFY: "/v1/payment/apple/verify",

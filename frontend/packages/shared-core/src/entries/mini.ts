@@ -4,6 +4,7 @@
 export {
   MiniApiClient,
   createMiniApiClient,
+  createPlatformAwareApiClient,
   wxStorageAdapter,
   isWechatMiniProgram,
 } from "../api/MiniApiClientAdapter";
@@ -32,9 +33,11 @@ export {
   createAnalyticsApi,
   createComplianceApi,
   createTrustApi,
+  createTimelineApi,
 } from "../api/createMiniApi";
 
 export type { MiniApiClientInterface } from "../api/createMiniApi";
+export { isNotImplemented } from "../api/not-implemented";
 
 // Auth
 export type {
@@ -85,6 +88,8 @@ export type {
   MissionCompleteResponse,
   FleetMatchCandidate,
   FleetMatchResponse,
+  FleetMatchRequest,
+  MatchConsensusItem,
   CreateFleetRequest,
   JoinFleetRequest,
   FleetResponse,
@@ -121,6 +126,20 @@ export type {
   JobMatchScore,
   CreditAnalysis,
   CheckCompanyRequest,
+  // resume.v1.json v0.1.0 契约缺口类型
+  ResumeDetail,
+  ResumeUpdateRequest,
+  ResumePermission,
+  ResumePermissionGrant,
+  ResumeVisibility,
+  ResumeDocStatus,
+  PermissionScope,
+  ResumeBlacklistItem,
+  ResumeBlacklistAddRequest,
+  ResumeBlacklistResponse,
+  BlacklistMatch,
+  ResumeTemplate,
+  ResumeTemplatesResponse,
 } from "../types/resume";
 
 // Enterprise
@@ -159,6 +178,7 @@ export type {
 export type {
   PaymentPlan,
   PlansResponse,
+  ProvidersResponse,
   PaymentStatus,
   UpgradeRequest,
   UpgradeResponse,
@@ -238,6 +258,7 @@ export type {
 export { QUIZ_QUESTIONS } from "../constants/quiz";
 export { PERSONALITY_MAP, PERSONALITY_FALLBACK_MAP } from "../constants/personality";
 export { API_ROUTES } from "../constants/routes";
+export { LEGAL, LEGAL_PRIVACY_SUMMARY } from "../constants/legal";
 export {
   QUOTA_LIMITS,
   TIER_ORDER,
@@ -262,6 +283,8 @@ export { BRAND, BRAND_PLANETX, BRAND_SAAS } from "../types/brand";
 
 // Utils
 export { computePersonality, hydratePersonality } from "../utils/quiz";
+export { deriveMatchUiState } from "../utils/matchConsensus";
+export type { MatchUiState, MatchResultView } from "../utils/matchConsensus";
 export { getShareText } from "../utils/share";
 export {
   ensureConsent,
