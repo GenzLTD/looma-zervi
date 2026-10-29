@@ -1,0 +1,422 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Looma Resume Contract v1",
+  "version": "0.1.0",
+  "description": "简历域 REST 契约（CRUD + 授权面）。真源：looma-zervi/backend/contracts/resume.v1.json。与 payment/timeline 同级；非 gfcc kernel 端口。shared-core 镜像：frontend/packages/shared-core/src/types/resume.ts + constants/routes.ts。服务实现：zervi-rust/resume-service。",
+
+  "principles": {
+    "resource_style": "同一前缀下少造字面量；详情/更新挂 /v1/resume/:resume_id（GET/PUT），勿再造 /detail|/update 字面量段——会与既有 DELETE /:resume_id 及网关 any() 通配打架。",
+    "contract_home": "本文件属 looma-zervi backend/contracts。仅当某端点读写 identity.value_axes（如模板按价值轴打分）时，才在 gfcc 补 optional adapter；默认不进 gfcc，防双库漂移。",
+    "reuse_shared_core": "ParsedResume / ResumeExperience / ResumeEducation / ResumeProject / ResumeUploadResult / ResumeList* / ResumeAnalysis* 已在 shared-core；本契约只声明缺口类型（Detail/Update/Permission/Blacklist/Template）。",
+    "stage_split": "阶段2：契约 + shared-core 常量/类型/API 工厂 + 页面族降级空态 + jest。阶段3：resume-service 落地 detail/update（及本文件 stub 端点的真实现）。页面不得等 200 才写完；统一按 not_implemented 降级。"
+  },
+
+  "error_format": {
+    "description": "对齐 zervi-rust common::looma::fail — 无 code/success 包裹。",
+    "schema": {
+      "type": "object",
+      "required": ["error", "message"],
+      "properties": {
+        "error": { "type": "string", "description": "机器可读错误码" },
+        "message": { "type": "string", "description": "人类可读描述" }
+      }
+    },
+    "existing_codes": {
+      "bad_request": "参数缺失/非法",
+      "not_found": "简历不存在或不属于当前主体",
+      "convert_failed": "二进制简历转换失败（未接 MarkItDown）",
+      "parse_failed": "LLM 解析失败",
+      "improve_failed": "改进建议生成失败",
+      "delete_failed": "删除失败",
+      "server_error": "入库或其他内部错误",
+      "consent_required": "缺 jobseeker_core 等同意域（由 gate 抛出）",
+      "quota_exceeded": "日配额耗尽（由 consume_daily 抛出）"
+    }
+  },
+
+  "not_implemented_convention": {
+    "description": "阶段3 落地前，所有 status=stub_501 的端点必须返回固定形态；禁止用 404/405 冒充『未实现』——否则阶段3 上线时页面错误分支要全改。",
+    "http_status": 501,
+    "error": "not_implemented",
+    "message_template": "{METHOD} {path} is not implemented yet (stage3)",
+    "body_example": {
+      "error": "not_implemented",
+      "message": "GET /v1/resume/:resume_id is not implemented yet (stage3)"
+    },
+    "client_rule": "页面/工厂统一：status===501 && error==='not_implemented' → 空态/降级文案，不弹通用失败 toast。客户端封装 isNotImplemented(err)，唯一入口，禁止各页面各写一份判断。",
+    "transition_405": {
+      "verdict": "有条件接受（裁决 2026-10-29）：仅对本契约 status=stub_501 的端点白名单生效；白名单外的端点收到 405 必须按真实错误处理，不得降级——否则『对 /list 发 PUT』这类真 bug 会被静默吞掉。",
+      "whitelist": [
+        "GET /v1/resume/:resume_id",
+        "PUT /v1/resume/:resume_id",
+        "GET /v1/resume/:resume_id/permission",
+        "PUT /v1/resume/:resume_id/permission",
+        "GET /v1/resume/blacklist",
+        "POST /v1/resume/blacklist",
+        "DELETE /v1/resume/blacklist/:item_id",
+        "GET /v1/resume/templates"
+      ],
+      "logging": "405 降级必须打 warn 日志（含 method + path），便于统计过渡期残留",
+      "preferred_fix": "首选在 axum 网关给这些路由挂 any() → 501 的 stub handler（阶段3 一行的事），客户端就不需要 405 分支；405 只是 stub 上线前的兜底，不是契约行为。",
+      "expiry": "阶段3 stub handler 注册后，客户端删除 405 分支。契约验收只认 501 + not_implemented。"
+    },
+    "must_not": [
+      "用 404 not_found 表示『功能未上线』",
+      "用 405 作为长期契约行为",
+      "为每个 stub 端点发明不同 error 字符串（统一 not_implemented）"
+    ]
+  },
+
+  "path_design": {
+    "literal_before_param": "静态段（list/parse/upload/…/blacklist/templates）优先于 :resume_id；网关 any() 不能当路由表，契约与 service 路由表必须一致。",
+    "forbidden_literals": [
+      "/v1/resume/detail",
+      "/v1/resume/update",
+      "/v1/resume/permission"
+    ],
+    "forbidden_reason": "/detail|/update 与 /:resume_id 同前缀冲突；裸 /permission 会把『用户维』与『简历维』语义搅浑——本契约钉死 permission 为简历维。"
+  },
+
+  "permission_semantics": {
+    "dimension": "resume",
+    "path": "/v1/resume/:resume_id/permission",
+    "rationale": "『谁可看』锚定单份简历，而非账号全局开关。用户级屏蔽企业走 blacklist；身份声明级可见性仍在 identity.v1（resume_summary 默认 private），本端点管『这份简历文档』的授权面。",
+    "visibility_enum_ref": "identity.v1.json#visibility_enum",
+    "visibility_enum": ["everyone", "trusted", "private"],
+    "defaults": {
+      "visibility": "private"
+    },
+    "trusted_means": "已登录且存在业务关系：舰队成员、合伙人候选人池、已授权 match、或本简历 grants 列表内主体。",
+    "grants": {
+      "description": "显式授权条目（可选）；与 trust share_code 互补——share_code 走 /v1/trust/*，此处只存简历侧策略快照。",
+      "item": {
+        "subject_type": "user | enterprise | share_code_ref",
+        "subject_id": "string",
+        "scope": "read | download",
+        "expires_at": "RFC3339 | null"
+      }
+    },
+    "not_user_scoped": "禁止实现 GET /v1/resume/permission（无 :resume_id）。若未来需要『默认简历可见性』，挂 identity.visibility.defaults.resume_summary 或另开 /v1/identity/*，不进本域。"
+  },
+
+  "enums": {
+    "resume_doc_status": ["uploaded", "processed", "partial"],
+    "ingest_api_status": ["processed", "stored"],
+    "upload_api_status": ["complete", "partial"],
+    "improve_focus": ["skills", "experience", "education", "overall"],
+    "permission_scope": ["read", "download"],
+    "blacklist_match": ["exact_name", "credit_code", "enterprise_id"]
+  },
+
+  "types": {
+    "ResumeDetail": {
+      "description": "GET /v1/resume/:resume_id 成功体。复用 list/analysis 已有字段，补 markdown 与 permission 摘要。",
+      "type": "object",
+      "required": ["id", "title", "filename", "uploaded_at", "extracted", "visibility"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "filename": { "type": "string" },
+        "file_size": { "type": "integer" },
+        "uploaded_at": { "type": "string", "format": "date-time" },
+        "extracted": { "$comment": "ParsedResume" },
+        "markdown": { "type": "string", "description": "原文/转换后 markdown；private 默认仅 owner" },
+        "visibility": { "type": "string", "enum": ["everyone", "trusted", "private"] },
+        "status": { "type": "string", "enum": ["uploaded", "processed", "partial"] }
+      }
+    },
+    "ResumeUpdateRequest": {
+      "description": "PUT /v1/resume/:resume_id 请求体。只写正文相关字段，未传字段保持原值（服务端 merge）。visibility 不在此处——单一写入口归 /permission，避免同一字段两条写路径的 last-write-wins 歧义（评审裁决 2026-10-29）。",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "extracted": { "$comment": "ParsedResume partial/full" },
+        "markdown": { "type": "string" }
+      }
+    },
+    "ResumePermission": {
+      "type": "object",
+      "required": ["resume_id", "visibility", "grants"],
+      "properties": {
+        "resume_id": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["everyone", "trusted", "private"] },
+        "grants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["subject_type", "subject_id", "scope"],
+            "properties": {
+              "subject_type": { "type": "string", "enum": ["user", "enterprise", "share_code_ref"] },
+              "subject_id": { "type": "string" },
+              "scope": { "type": "string", "enum": ["read", "download"] },
+              "expires_at": { "type": ["string", "null"], "format": "date-time" }
+            }
+          }
+        },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ResumeBlacklistItem": {
+      "type": "object",
+      "required": ["id", "company_name", "match"],
+      "properties": {
+        "id": { "type": "string" },
+        "company_name": { "type": "string" },
+        "credit_code": { "type": "string" },
+        "enterprise_id": { "type": "string" },
+        "match": { "type": "string", "enum": ["exact_name", "credit_code", "enterprise_id"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "note": { "type": "string" }
+      }
+    },
+    "ResumeBlacklistResponse": {
+      "type": "object",
+      "required": ["items", "total"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/types/ResumeBlacklistItem" } },
+        "total": { "type": "integer" }
+      }
+    },
+    "ResumeTemplate": {
+      "type": "object",
+      "required": ["id", "name", "locale"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "locale": { "type": "string", "description": "zh-CN | en-US" },
+        "summary": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "preview_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "建议填充的 ParsedResume 字段名"
+        }
+      }
+    },
+    "ResumeTemplatesResponse": {
+      "type": "object",
+      "required": ["templates", "total"],
+      "properties": {
+        "templates": { "type": "array", "items": { "$ref": "#/types/ResumeTemplate" } },
+        "total": { "type": "integer" }
+      }
+    }
+  },
+
+  "endpoints_implemented": {
+    "description": "zervi-rust/resume-service/src/routes.rs 现网 7 条；网关 api-gateway any() 转发。",
+    "routes": [
+      {
+        "method": "POST",
+        "path": "/v1/resume/parse",
+        "auth": "optional",
+        "consent": "jobseeker_core",
+        "status": "implemented",
+        "body": { "text": "string (required)" },
+        "response_200": { "extracted": "ParsedResume" }
+      },
+      {
+        "method": "POST",
+        "path": "/v1/resume/upload",
+        "auth": "optional",
+        "consent": "jobseeker_core",
+        "status": "implemented",
+        "content_type": "multipart/form-data",
+        "note": "小程序端 createResumeApi.upload 刻意抛错；走 parse/ingest。"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/resume/ingest",
+        "auth": "optional",
+        "consent": "jobseeker_core",
+        "status": "implemented",
+        "body": { "markdown": "string", "filename": "string?", "extracted": "ParsedResume?" }
+      },
+      {
+        "method": "POST",
+        "path": "/v1/resume/improve",
+        "auth": "optional",
+        "consent": "jobseeker_core",
+        "status": "implemented"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/resume/list",
+        "auth": "required",
+        "status": "implemented",
+        "response_200": { "resumes": "ResumeListItem[]", "total": "number" }
+      },
+      {
+        "method": "GET",
+        "path": "/v1/resume/analysis",
+        "auth": "required",
+        "status": "implemented",
+        "query": { "resume_id": "string (required)" }
+      },
+      {
+        "method": "DELETE",
+        "path": "/v1/resume/:resume_id",
+        "auth": "required",
+        "status": "implemented",
+        "response_200": { "message": "deleted", "resume_id": "string" }
+      }
+    ]
+  },
+
+  "endpoints_proposed": {
+    "description": "阶段2 契约冻结；阶段3 实现。落地前一律 not_implemented_convention。",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/v1/resume/:resume_id",
+        "auth": "required",
+        "consent": "jobseeker_core",
+        "status": "stub_501",
+        "landing": "stage3",
+        "name": "detail",
+        "response_200": { "$ref": "#/types/ResumeDetail" },
+        "errors": {
+          "501": "not_implemented（阶段3 前）",
+          "404": "not_found — 仅表示简历不存在/无权限，绝不表示功能未上线"
+        }
+      },
+      {
+        "method": "PUT",
+        "path": "/v1/resume/:resume_id",
+        "auth": "required",
+        "consent": "jobseeker_core",
+        "status": "stub_501",
+        "landing": "stage3",
+        "name": "update",
+        "body": { "$ref": "#/types/ResumeUpdateRequest" },
+        "response_200": { "$ref": "#/types/ResumeDetail" }
+      },
+      {
+        "method": "GET",
+        "path": "/v1/resume/:resume_id/permission",
+        "auth": "required",
+        "consent": "jobseeker_core",
+        "status": "stub_501",
+        "landing": "stage3",
+        "name": "permission_get",
+        "semantics_ref": "#/permission_semantics",
+        "response_200": { "$ref": "#/types/ResumePermission" },
+        "note": "仅 owner 可读完整 grants；trusted/everyone 访客不走本端点，走业务读路径按 visibility 过滤。"
+      },
+      {
+        "method": "PUT",
+        "path": "/v1/resume/:resume_id/permission",
+        "auth": "required",
+        "consent": "jobseeker_core",
+        "status": "stub_501",
+        "landing": "stage3",
+        "name": "permission_put",
+        "semantics_ref": "#/permission_semantics",
+        "body": {
+          "visibility": "everyone|trusted|private (required)",
+          "grants": "ResumePermission.grants — 全量替换；省略即视为空数组（清空授权）"
+        },
+        "write_semantics": {
+          "full_replacement": true,
+          "grants_omitted": "[]（清空）——客户端必须先 GET 再 PUT；禁止把 PUT 当增量合并，否则会静默清掉既有 grants",
+          "concurrency": "last-write-wins；0.1 不提供 ETag/If-Match，响应回显 updated_at 供客户端检测被覆盖",
+          "updated_at": "服务端生成；客户端传入则忽略"
+        },
+        "response_200": { "$ref": "#/types/ResumePermission" },
+        "note": "权限写入与正文 update 拆开：PUT detail 不碰 visibility/grants，PUT permission 只管授权面。裁决（2026-10-29）：阶段2 保留本 PUT，不冻结为 GET-only。"
+      },
+      {
+        "method": "GET",
+        "path": "/v1/resume/blacklist",
+        "auth": "required",
+        "consent": "jobseeker_core",
+        "status": "stub_501",
+        "landing": "stage3",
+        "name": "blacklist_list",
+        "dimension": "user",
+        "description": "当前用户屏蔽企业列表（匹配推荐/投递时过滤）。非简历资源。",
+        "response_200": { "$ref": "#/types/ResumeBlacklistResponse" }
+      },
+      {
+        "method": "POST",
+        "path": "/v1/resume/blacklist",
+        "auth": "required",
+        "consent": "jobseeker_core",
+        "status": "stub_501",
+        "landing": "stage3",
+        "name": "blacklist_add",
+        "dimension": "user",
+        "body": {
+          "match": "exact_name|credit_code|enterprise_id (required)",
+          "company_name": "string (match=exact_name 时必填)",
+          "credit_code": "string (match=credit_code 时必填)",
+          "enterprise_id": "string (match=enterprise_id 时必填)",
+          "note": "string?"
+        },
+        "response_200": { "$ref": "#/types/ResumeBlacklistItem" },
+        "note": "裁决（2026-10-29）：本版补进 0.1。blacklist 只有 GET 会让阶段2 的『屏蔽企业』入口无处可去，阶段3 必然要再动契约版本。"
+      },
+      {
+        "method": "DELETE",
+        "path": "/v1/resume/blacklist/:item_id",
+        "auth": "required",
+        "consent": "jobseeker_core",
+        "status": "stub_501",
+        "landing": "stage3",
+        "name": "blacklist_remove",
+        "dimension": "user",
+        "response_200": { "message": "removed", "id": "string" }
+      },
+      {
+        "method": "GET",
+        "path": "/v1/resume/templates",
+        "auth": "optional",
+        "status": "stub_501",
+        "landing": "stage3",
+        "name": "templates_list",
+        "dimension": "global",
+        "description": "全局模板目录，非用户资源。若未来按 identity.value_axes 排序推荐，另在 gfcc 声明 optional adapter（must_not_write）。",
+        "write_policy": "0.1 只读，不提供 POST/PUT/DELETE。若未来支持用户自建模板，另开 /v1/resume/templates/custom 并升 minor 版本，不改本端点。",
+        "response_200": { "$ref": "#/types/ResumeTemplatesResponse" }
+      }
+    ]
+  },
+
+  "shared_core_delta": {
+    "description": "阶段2 第二刀（单独 dual-review 提交，先于页面）：契约审过后再改。",
+    "API_ROUTES_add": {
+      "RESUME_BASE": "/v1/resume",
+      "RESUME_BASE_note": "裁决（2026-10-29）：不新增三个同值常量（DETAIL/UPDATE/PERMISSION 都是 '/v1/resume'，读代码时分不清谁是谁）。detail/update 用 `${RESUME_BASE}/${id}`，permission 用 `${RESUME_BASE}/${id}/permission`。既有 RESUME_DELETE='/v1/resume' 本轮不动（避免牵动 DELETE 调用点），日后与 RESUME_BASE 二选一收敛。",
+      "RESUME_BLACKLIST": "/v1/resume/blacklist",
+      "RESUME_TEMPLATES": "/v1/resume/templates"
+    },
+    "types_add": [
+      "ResumeDetail",
+      "ResumeUpdateRequest",
+      "ResumePermission",
+      "ResumePermissionGrant",
+      "ResumeBlacklistItem",
+      "ResumeBlacklistResponse",
+      "ResumeTemplate",
+      "ResumeTemplatesResponse"
+    ],
+    "createResumeApi_add": [
+      "detail(resumeId)",
+      "update(resumeId, body)",
+      "permission(resumeId)",
+      "setPermission(resumeId, body)",
+      "blacklist()",
+      "blacklistAdd(body)",
+      "blacklistRemove(itemId)",
+      "templates()"
+    ],
+    "client_helpers_add": [
+      "isNotImplemented(err) — 唯一判定入口：501+not_implemented 为真；405 且端点在 transition_405.whitelist 内为真（打 warn 日志）"
+    ]
+  },
+
+  "miniprogram_discipline": {
+    "vant": "页面 json 按需注册 vant，禁止往 app.json usingComponents 堆全量",
+    "build_npm": "禁止点开发者工具『构建 npm』；对拍哈希应对齐 vant tree df533451… / shared-core index c06b612…（未碰 dist/vant 时不变）"
+  }
+}
