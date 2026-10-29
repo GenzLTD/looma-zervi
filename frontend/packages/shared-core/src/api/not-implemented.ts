@@ -11,8 +11,11 @@
  */
 
 /** resume.v1.json#not_implemented_convention.transition_405.whitelist（8 端点） */
+// GET /v1/resume/:resume_id 需排除已实现的静态段（list/analysis/parse/upload/ingest/improve），
+// 否则对 /list、/analysis 的真 405 会被吞掉（复验裁决 2026-10-29）
+const IMPLEMENTED_STATIC_SEGMENTS = "list|analysis|parse|upload|ingest|improve";
 const STUB_501_WHITELIST: Array<{ method: string; pattern: RegExp }> = [
-  { method: "GET", pattern: "^/v1/resume/[^/]+$" },
+  { method: "GET", pattern: `^/v1/resume/(?!${IMPLEMENTED_STATIC_SEGMENTS}$)[^/]+$` },
   { method: "PUT", pattern: "^/v1/resume/[^/]+$" },
   { method: "GET", pattern: "^/v1/resume/[^/]+/permission$" },
   { method: "PUT", pattern: "^/v1/resume/[^/]+/permission$" },
