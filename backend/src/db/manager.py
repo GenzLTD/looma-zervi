@@ -1778,6 +1778,57 @@ END;
                 (tier, user_id)
             )
 
+    # tier 序，与 PG 的 tier_rank() 及 zervi-rust auth.rs 的层级保持一致
+    #   未知 tier → -99，永不取胜，避免脏字符串意外提权
+    TIER_RANK = {
+        "guest": -1, "free": 0, "supporter": 1, "pro": 2, "enterprise": 3,
+    }
+
+    def recompute_user_tier(self, user_id: str) -> str:
+        """entitlement 仲裁：tier = max(所有未过期订阅的 tier)，无有效订阅则 free。
+
+        取代「到期就直接 `UPDATE users SET tier='free'`」——那样会把用户在另一条
+        变现轨上**仍然有效**的订阅连带抹掉（已付费权益凭空消失）。
+
+        ⚠️ 范围限制：本方法只看**本库（SQLite）**的 subscriptions 表。真正的跨轨
+        仲裁在 PG 的 `recompute_user_tier()` + `v_active_entitlements` 视图里完成。
+        本方法保留为同语义的本地兜底。
+        """
+        now = _dt_now()
+        best = "free"
+        best_rank = self.TIER_RANK["free"]
+
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT tier, expires_at FROM subscriptions
+                    WHERE user_id = ? AND lower(coalesce(status, 'active')) = 'active'""",
+                (user_id,),
+            ).fetchall()
+
+            for r in rows:
+                raw = r["expires_at"]
+                if not raw:
+                    continue
+                try:
+                    exp = datetime.fromisoformat(str(raw))
+                except (ValueError, TypeError):
+                    continue                      # 不可解析 ⇒ 视为无效期限
+                if exp.tzinfo is not None and now.tzinfo is None:
+                    exp = exp.replace(tzinfo=None)
+                if exp <= now:
+                    continue                      # 已过期，不贡献权益
+
+                t = str(r["tier"] or "free").lower()
+                rank = self.TIER_RANK.get(t, -99)  # 未知 tier 永不取胜
+                if rank > best_rank:
+                    best, best_rank = t, rank
+
+            conn.execute(
+                "UPDATE users SET tier = ?, updated_at = datetime('now') WHERE id = ?",
+                (best, user_id),
+            )
+        return best
+
     # ============================================
     # Usage tracking (joint)
     # ============================================

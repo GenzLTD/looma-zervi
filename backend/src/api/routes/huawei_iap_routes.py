@@ -195,12 +195,12 @@ def _process_delivery(purchase_data: dict, user_id: str) -> tuple[bool, str]:
         },
     )
 
-    # --- 标记支付 + 升级 tier + 创建订阅 ---
+    # --- 标记支付 + 创建订阅 + 仲裁 tier ---
     db.mark_order_paid(out_trade_no, purchase_token)
-    db.update_user_tier(settle_uid, tier)
 
     expires = (datetime.now() + timedelta(days=30)).isoformat()
     db.upsert_subscription(settle_uid, tier, f"huawei_{product_id}", expires, auto_renew=False)
+    db.recompute_user_tier(settle_uid)
 
     logger.info(
         f"[huawei_iap] Delivery complete: user={settle_uid} "
