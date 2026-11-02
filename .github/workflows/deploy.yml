@@ -1,44 +1,36 @@
 # ============================================================
-# Deploy — 合并到 main 后自动部署到腾讯云内测机
+# Deploy — 大陆轨（main → 天翼 only）
 #
-# 范围（仅大陆产品，不含营销站）:
-#   - PlanetX  /var/www/planetx/dist  →  http://<IP>/
-#   - T-space    /var/www/saas/dist     →  http://<IP>/tspace/
-#   - Looma API  Docker :5200         →  http://<IP>/v1/
+# 双轨决策（2026-11）：
+#   mainland = push main / workflow_dispatch → 本文件 → 天翼 14.29.216.219
+#   overseas = git tag stack-v* → .github/workflows/deploy-sg.yml
+#              （派发 GenzLTD/Vultr-Genzltd Deploy stack，不在本 job SSH 新加坡）
+#
+# 已退役：
+#   - Deploy to Server（腾讯云 1.14.202.161）— 主机已下线
+#   - 勿再为该主机配置/使用 SSH_HOST / SSH_USER / SSH_PRIVATE_KEY
+#   - deploy-overseas.yml — 本仓 rsync 会盖掉海外会员蓝图；海外真源 = Vultr-Genzltd
 #
 # 不在此 workflow 部署:
-#   - genz.ltd 营销站 → 独立仓 genz-web，Vercel 自动部署
-#   - Bolent 企业站   → szbolent-portal / WordPress，阿里云独立部署
-#   - 海外 Vultr      → deploy-overseas.yml（overseas-* tag 触发）
+#   - genz.ltd 营销站 → genz-web + Vercel
+#   - Bolent 企业站   → 独立部署
+#   - 海外 Vultr SG   → deploy-sg.yml → Vultr-Genzltd（tag stack-v*）
 #
 # 目标机:
-#   deploy           - 腾讯云 1.14.202.161 (ubuntu, /home/ubuntu/looma-zervi)
-#   deploy-tianyi    - 天翼云 14.29.216.219 (root, /opt/looma-zervi,
-#                      docker-compose.tianyi.full.yml, 宿主映射 :5203)
+#   deploy-tianyi — 天翼云 14.29.216.219 (root, /opt/looma-zervi,
+#                   docker-compose.tianyi.full.yml, 宿主映射 :5203)
 #
-# 部署约定: rsync 后写 backend/git_commit.txt=<GITHUB_SHA>，
-#           每端 health 的 git_commit 字段 == 目标 SHA（三端追溯闭合）。
+# 部署约定: 写 backend/git_commit.txt=<GITHUB_SHA>，
+#           health.git_commit == 目标 SHA。
 #
-# GitHub Secrets（必填）:
-#   SSH_HOST            - 1.14.202.161
-#   SSH_USER            - ubuntu
-#   SSH_PRIVATE_KEY     - looma_key.pem 全文
+# GitHub Secrets（大陆必填）:
 #   TIANYI_SSH_HOST          - 14.29.216.219
 #   TIANYI_SSH_USER          - root
 #   TIANYI_SSH_PRIVATE_KEY   - 天翼 root SSH 私钥全文
 #   TIANYI_DEPLOY_PATH       - /opt/looma-zervi
 #   TIANYI_COMPOSE_FILE      - docker-compose.tianyi.full.yml
-#   ENV_JWT_SECRET      - JWT 签名密钥 (≥32 字符)
-#   ENV_DEEPSEEK_API_KEY
-#   ENV_DEEPSEEK_BASE_URL  (默认 https://api.deepseek.com/v1)
-#   ENV_ENV               - production
 #
-# GitHub Secrets / Variables（可选，有默认值）:
-#   DEPLOY_PATH           - 默认 /opt/looma-zervi
-#   DEPLOY_NGINX_MODE     - ip | full | domain（Repository Variable，默认 ip）
-#
-# 备案前: DEPLOY_NGINX_MODE=ip → nginx-looma-zervi-ip.conf
-# 备案后: 改为 domain + 更新 nginx 模板 server_name
+# 与海外密钥隔离：VULTR_* / ENV_STRIPE_* 不进本 job。
 # ============================================================
 name: Deploy
 
@@ -53,57 +45,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy
+  group: deploy-tianyi
   cancel-in-progress: false
 
-env:
-  DEPLOY_PATH: ${{ secrets.DEPLOY_PATH != '' && secrets.DEPLOY_PATH || '/opt/looma-zervi' }}
-  DEPLOY_NGINX_MODE: ${{ vars.DEPLOY_NGINX_MODE != '' && vars.DEPLOY_NGINX_MODE || 'ip' }}
-
 jobs:
-  frontend-build:
-    name: "Build Frontend"
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Build PlanetX
-        run: pnpm build:planetx
-        env:
-          VITE_API_BASE: ""
-          VITE_SAAS_URL: "/tspace/"
-
-      - name: Build Saas (T-space)
-        run: pnpm --filter @looma/saas exec vite build --base /tspace/
-        env:
-          VITE_API_BASE: ""
-
-      - name: Upload PlanetX artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: planetx-dist
-          path: frontend/packages/planetx/dist
-          retention-days: 1
-
-      - name: Upload Saas artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: saas-dist
-          path: frontend/packages/saas/dist
-          retention-days: 1
-
   backend-test:
     name: "Backend Tests"
     runs-on: ubuntu-latest
@@ -137,354 +82,47 @@ jobs:
           CHROMA_PERSIST_DIR: /tmp/chroma_ci
         run: python -m pytest tests/ -v --tb=short
 
-  deploy:
-    name: "Deploy to Server"
+  require-tianyi-config:
+    name: "Require Tianyi secrets"
     runs-on: ubuntu-latest
-    needs: [frontend-build, backend-test]
+    needs: [backend-test]
     if: success()
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download PlanetX dist
-        uses: actions/download-artifact@v4
-        with:
-          name: planetx-dist
-          path: artifacts/planetx
-
-      - name: Download Saas dist
-        uses: actions/download-artifact@v4
-        with:
-          name: saas-dist
-          path: artifacts/saas
-
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.1
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Add host key
+      - name: Fail-fast — 缺一项就失败，禁止无鉴权静默跳过
+        env:
+          T_HOST: ${{ secrets.TIANYI_SSH_HOST }}
+          T_USER: ${{ secrets.TIANYI_SSH_USER }}
+          T_KEY: ${{ secrets.TIANYI_SSH_PRIVATE_KEY }}
+          T_PATH: ${{ secrets.TIANYI_DEPLOY_PATH }}
+          T_COMPOSE: ${{ secrets.TIANYI_COMPOSE_FILE }}
         run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
-
-      - name: Setup SSH env
-        run: |
-          echo 'SSH_CMD=ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o StrictHostKeyChecking=accept-new' >> $GITHUB_ENV
-          echo "DEPLOY_TARGET=${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" >> $GITHUB_ENV
-
-      - name: Bootstrap server
-        run: |
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << BOOTSTRAP
           set -euo pipefail
-          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          echo "=== Bootstrap server (DEPLOY_PATH=\${DEPLOY_PATH}) ==="
-          sudo mkdir -p "\${DEPLOY_PATH}" /var/www/planetx/dist /var/www/saas/dist "\${DEPLOY_PATH}/data" "\${DEPLOY_PATH}/logs"
-          sudo chown -R \$(whoami):\$(whoami) "\${DEPLOY_PATH}" /var/www/planetx /var/www/saas 2>/dev/null || true
-
-          ENV_FILE="\${DEPLOY_PATH}/backend/.env"
-          mkdir -p "\$(dirname "\${ENV_FILE}")"
-          if [ ! -f "\${ENV_FILE}" ]; then
-            echo "=== Creating backend/.env ==="
-            printf '%s\n' \
-              '# Auto-generated by GitHub Actions' \
-              'FLASK_ENV=production' \
-              'FLASK_PORT=5200' \
-              "JWT_SECRET=${{ secrets.ENV_JWT_SECRET }}" \
-              "DEEPSEEK_API_KEY=${{ secrets.ENV_DEEPSEEK_API_KEY }}" \
-              "DEEPSEEK_BASE_URL=${{ secrets.ENV_DEEPSEEK_BASE_URL != '' && secrets.ENV_DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1' }}" \
-              'DATABASE_PATH=/app/data/looma.db' \
-              'POETRY_CHROMA_PATH=/app/poetry_data' \
-              'CHROMA_MODE=remote' \
-              'CHROMA_HOST=chromadb' \
-              'CHROMA_PORT=8000' \
-              'WECHAT_DEV_MODE=true' \
-              > "\${ENV_FILE}"
-            echo "=== .env created ==="
-          else
-            echo "=== .env already exists, will normalize paths ==="
+          missing=""
+          [ -n "$T_HOST" ] || missing="$missing TIANYI_SSH_HOST"
+          [ -n "$T_USER" ] || missing="$missing TIANYI_SSH_USER"
+          [ -n "$T_KEY" ] || missing="$missing TIANYI_SSH_PRIVATE_KEY"
+          [ -n "$T_PATH" ] || missing="$missing TIANYI_DEPLOY_PATH"
+          [ -n "$T_COMPOSE" ] || missing="$missing TIANYI_COMPOSE_FILE"
+          if [ -n "$missing" ]; then
+            echo "::error::大陆轨缺少 Secrets:$missing — 禁止静默跳过 Deploy to Tianyi"
+            exit 1
           fi
-
-          set_kv() {
-            local key="\$1" val="\$2"
-            if grep -q "^\${key}=" "\${ENV_FILE}"; then
-              sed -i "s|^\${key}=.*|\${key}=\${val}|" "\${ENV_FILE}"
-            else
-              echo "\${key}=\${val}" >> "\${ENV_FILE}"
-            fi
-          }
-          set_kv FLASK_PORT 5200
-          set_kv DATABASE_PATH /app/data/looma.db
-          set_kv POETRY_CHROMA_PATH /app/poetry_data
-          set_kv CHROMA_MODE remote
-          set_kv CHROMA_HOST chromadb
-          set_kv CHROMA_PORT 8000
-
-          echo "=== Bootstrap done ==="
-          BOOTSTRAP
-
-      - name: Sync code to server
-        run: |
-          rsync -avz -e "$SSH_CMD" --delete \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='frontend/node_modules' \
-            --exclude='**/__pycache__' \
-            --exclude='**/*.pyc' \
-            --exclude='backend/venv' \
-            --exclude='backend/data' \
-            --exclude='data/poetry_full' \
-            --exclude='data/pgdata' \
-            --exclude='.env' \
-            --exclude='backend/.env' \
-            --exclude='frontend/' \
-            ./ \
-            ${{ env.DEPLOY_TARGET }}:${{ env.DEPLOY_PATH }}/
-
-      - name: Sync poetry ChromaDB data
-        run: |
-          if [ -d "data/poetry_full" ]; then
-            echo "=== Syncing poetry ChromaDB data ==="
-            rsync -avz -e "$SSH_CMD" \
-              data/poetry_full/ \
-              ${{ env.DEPLOY_TARGET }}:${{ env.DEPLOY_PATH }}/data/poetry_full/
-          else
-            echo "=== data/poetry_full/ not in repo — using server copy if present ==="
-          fi
-
-      - name: Upload frontend dist
-        run: |
-          rsync -avz -e "$SSH_CMD" --delete \
-            artifacts/planetx/ \
-            ${{ env.DEPLOY_TARGET }}:/var/www/planetx/dist/
-          rsync -avz -e "$SSH_CMD" --delete \
-            artifacts/saas/ \
-            ${{ env.DEPLOY_TARGET }}:/var/www/saas/dist/
-
-      - name: Deploy nginx config
-        run: |
-          NGINX_MODE="${{ env.DEPLOY_NGINX_MODE }}"
-          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          case "$NGINX_MODE" in
-            ip)     NGINX_SRC="nginx-looma-zervi-ip.conf" ;;
-            domain) NGINX_SRC="nginx-looma-zervi.conf" ;;
-            *)      NGINX_SRC="nginx-looma-zervi.conf" ;;
+          case "$T_HOST" in
+            1.14.202.161)
+              echo "::error::TIANYI_SSH_HOST 指向已退役腾讯机 1.14.202.161"
+              exit 1
+              ;;
+            139.180.184.25|api.genz.ltd)
+              echo "::error::TIANYI_SSH_HOST 指向新加坡 — 大陆轨禁止推 SG"
+              exit 1
+              ;;
           esac
-          echo "=== Nginx mode: ${NGINX_MODE} → ${NGINX_SRC} ==="
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << NGINX
-          set -euo pipefail
-          DEPLOY_PATH="${DEPLOY_PATH}"
-          NGINX_SRC="${NGINX_SRC}"
-          SRC="\${DEPLOY_PATH}/\${NGINX_SRC}"
-
-          if [ ! -f "\${SRC}" ]; then
-            echo "Missing \${SRC}, fallback to nginx-looma-zervi.conf"
-            SRC="\${DEPLOY_PATH}/nginx-looma-zervi.conf"
-          fi
-
-          sudo cp "\${SRC}" /etc/nginx/sites-available/looma-zervi
-          sudo ln -sf /etc/nginx/sites-available/looma-zervi /etc/nginx/sites-enabled/looma-zervi
-
-          # 备案前 IP 内测：looma 作为 default_server；保留其他站点可手动共存
-          if [ "${NGINX_MODE}" = "ip" ]; then
-            sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
-          fi
-
-          # 旧域名配置（若存在）备份，不强制删除其他 conf.d
-          if [ -f /etc/nginx/sites-enabled/api.genz.ltd ]; then
-            sudo mv /etc/nginx/sites-enabled/api.genz.ltd \
-              "/etc/nginx/sites-enabled/api.genz.ltd.bak.\$(date +%Y%m%d%H%M%S)"
-          fi
-
-          sudo nginx -t
-          sudo systemctl start nginx 2>/dev/null || true
-          sudo nginx -s reload 2>/dev/null || sudo systemctl reload nginx
-          echo "=== Nginx reloaded ==="
-          NGINX
-
-      - name: Write git_commit marker (main SHA, before container start)
-        run: |
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'MARKER'
-          set -euo pipefail
-          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          GIT_SHA="${{ github.sha }}"
-          echo "${GIT_SHA}" > "${DEPLOY_PATH}/backend/git_commit.txt"
-          echo "=== git_commit.txt: $(cat "${DEPLOY_PATH}/backend/git_commit.txt") ==="
-          MARKER
-
-      - name: Build & restart Docker backend
-        run: |
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'DOCKER'
-          set -euo pipefail
-          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          COMPOSE="docker compose -f ${DEPLOY_PATH}/docker/docker-compose.yml -p looma-zervi"
-          COMPOSE_FILE="${DEPLOY_PATH}/docker/docker-compose.yml"
-
-          echo "=== Stop legacy stacks / free name looma-backend ==="
-          for proj in looma-zervi docker; do
-            docker compose -f "${COMPOSE_FILE}" -p "${proj}" down --remove-orphans 2>/dev/null || true
-          done
-          docker rm -f looma-backend looma-chromadb 2>/dev/null || true
-
-          echo "=== Free port 5200 (native gunicorn) ==="
-          if command -v lsof >/dev/null 2>&1; then
-            for pid in $(lsof -t -i :5200 2>/dev/null || true); do
-              cmd=$(ps -p "$pid" -o comm= 2>/dev/null || true)
-              if [ "$cmd" != "docker-proxy" ]; then
-                kill "$pid" 2>/dev/null || sudo kill "$pid" 2>/dev/null || true
-              fi
-            done
-          fi
-          sleep 2
-
-          echo "=== Populate poetry Docker volume if empty ==="
-          VOLUME_NAME="looma-zervi_poetry-data"
-          if ! docker run --rm -v ${VOLUME_NAME}:/data alpine test -f /data/chroma.sqlite3 2>/dev/null; then
-            if [ -d "${DEPLOY_PATH}/data/poetry_full" ]; then
-              docker run --rm \
-                -v ${VOLUME_NAME}:/dest \
-                -v ${DEPLOY_PATH}/data/poetry_full:/src:ro \
-                alpine cp -a /src/. /dest/
-              echo "=== Poetry volume populated ==="
-            else
-              echo "=== No poetry source on server, skip volume init ==="
-            fi
-          fi
-
-          cd "${DEPLOY_PATH}/docker"
-          HASH=$((sha256sum "${DEPLOY_PATH}/backend/requirements.txt" "${DEPLOY_PATH}/docker/Dockerfile.backend"; find "${DEPLOY_PATH}/backend/src" -type f -exec sha256sum {} +) | sha256sum | awk '{print $1}')
-          MARKER="/tmp/looma-backend-image.hash"
-          NEED_BUILD=1
-          if [ -f "${MARKER}" ] && [ "$(cat "${MARKER}")" = "${HASH}" ]; then
-            if docker image inspect looma-zervi-backend:latest >/dev/null 2>&1; then
-              NEED_BUILD=0
-              echo "=== Backend image up-to-date, skip rebuild ==="
-            fi
-          fi
-          if [ "${NEED_BUILD}" = "1" ]; then
-            echo "=== Build backend image (deps only, gunicorn :5200) ==="
-            DOCKER_BUILDKIT=1 ${COMPOSE} build backend
-            echo "${HASH}" > "${MARKER}"
-          fi
-
-          echo "=== Start / recreate containers ==="
-          ${COMPOSE} up -d --remove-orphans --force-recreate --no-build backend
-          # pgvector 必须在此列出：上面 `compose down -p looma-zervi` 已删除该项目
-          # 全部容器（含 pgvector），不 up 就会被永久停掉。数据在 named volume 中，安全。
-          ${COMPOSE} up -d --no-build chromadb pgvector
-
-          echo "=== Assert pgvector survived the down/up cycle (D1b guard) ==="
-          if [ "$(docker inspect -f '{{.State.Running}}' looma-pgvector 2>/dev/null)" != "true" ]; then
-            echo "FATAL: looma-pgvector 不在运行 —— up 列表漏了 pgvector？数据在 named volume 中安全，但服务已停摆"
-            ${COMPOSE} logs --tail 30 pgvector 2>/dev/null || true
-            exit 1
-          fi
-          READY=0
-          for i in $(seq 1 20); do
-            if docker exec looma-pgvector pg_isready -U looma -d genzltd >/dev/null 2>&1; then
-              READY=1; echo "pgvector ready after ${i}s"; break
-            fi
-            sleep 1
-          done
-          if [ "$READY" != "1" ]; then
-            echo "FATAL: pgvector 20s 内未就绪"
-            ${COMPOSE} logs --tail 40 pgvector 2>/dev/null || true
-            exit 1
-          fi
-          TABLES=$(docker exec looma-pgvector psql -U looma -d genzltd -tAc "select count(*) from pg_tables where schemaname='public'")
-          echo "=== genzltd tables=${TABLES} (expect >= 55) ==="
-          if [ "${TABLES:-0}" -lt 55 ]; then
-            echo "FATAL: genzltd 表数异常（< 55）—— 卷 pgdata 是否丢失？立即人工介入，勿继续部署"
-            exit 1
-          fi
-
-          echo "=== Wait for backend health ==="
-          for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:5200/health >/dev/null 2>&1; then
-              echo "Backend healthy after ${i}s"
-              break
-            fi
-            sleep 2
-          done
-          curl -sf http://127.0.0.1:5200/health || { ${COMPOSE} logs --tail 40 backend; exit 1; }
-          DOCKER
-
-      - name: Import poetry into SQLite
-        run: |
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'POETRY_IMPORT'
-          set -euo pipefail
-          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
-          COMPOSE="docker compose -f ${DEPLOY_PATH}/docker/docker-compose.yml -p looma-zervi"
-
-          count_poems() {
-            local out="0"
-            for i in $(seq 1 5); do
-              out=$(${COMPOSE} exec -T backend \
-                python -c "from src.db.manager import DatabaseManager; db=DatabaseManager('/app/data/looma.db'); db.init_schema(); print(db.get_poetry_stats()['total'])" 2>/dev/null || echo "0")
-              count="$(printf '%s' "$out" | tail -1 | tr -d '[:space:]')"
-              if [ "${count:-0}" -gt 0 ] 2>/dev/null; then
-                printf '%s' "$count"
-                return 0
-              fi
-              sleep 3
-            done
-            printf '%s' "$count"
-          }
-
-          COUNT="$(count_poems)"
-          if [ "${COUNT:-0}" -gt 0 ] 2>/dev/null; then
-            echo "=== Poems table already has ${COUNT} entries, skipping import ==="
-          else
-            echo "=== Running poetry import (ChromaDB → SQLite) ==="
-            if ! ${COMPOSE} exec -T backend \
-              python scripts/import_poetry.py \
-                --source-dir /app/poetry_data \
-                --db-path /app/data/looma.db \
-                --batch-size 1000; then
-              echo "=== Import command returned non-zero; verifying SQLite count ==="
-            fi
-            COUNT="$(count_poems)"
-          fi
-
-          if [ "${COUNT:-0}" -le 0 ] 2>/dev/null; then
-            echo "=== Poetry import verification FAILED (total=${COUNT}) ==="
-            ${COMPOSE} logs --tail 30 backend || true
-            exit 1
-          fi
-          echo "=== Poetry import OK: ${COUNT} poems in SQLite ==="
-          curl -sf http://127.0.0.1/v1/poetry/stats | head -c 120
-          echo ""
-          POETRY_IMPORT
-
-      - name: Health check (local + nginx)
-        run: |
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'HEALTH'
-          set -euo pipefail
-          echo "=== Backend :5200 ==="
-          curl -sf http://127.0.0.1:5200/health
-          echo ""
-          echo "=== Nginx :80 /health ==="
-          curl -sf http://127.0.0.1/health
-          echo ""
-          echo "=== Poetry stats ==="
-          curl -sf http://127.0.0.1/v1/poetry/stats | head -c 200
-          echo ""
-          HEALTH
-
-      - name: Public health check
-        run: |
-          echo "=== Public http://${{ secrets.SSH_HOST }}/health ==="
-          curl -sf --connect-timeout 15 "http://${{ secrets.SSH_HOST }}/health"
-          echo ""
-
-      - name: Clean up old images
-        run: |
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "docker image prune -f"
+          echo "Tianyi target = ${T_USER}@${T_HOST} path=${T_PATH} compose=${T_COMPOSE}"
 
   deploy-tianyi:
     name: "Deploy to Tianyi (14.29.216.219)"
     runs-on: ubuntu-latest
-    needs: [backend-test]
+    needs: [backend-test, require-tianyi-config]
     if: success()
     env:
       T_HOST: ${{ secrets.TIANYI_SSH_HOST }}
