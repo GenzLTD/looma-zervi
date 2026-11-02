@@ -138,7 +138,7 @@ class TestOrderLifecycle:
             data="not valid json",
             content_type="application/json",
         )
-        assert resp.status_code in (200, 500)
+        assert resp.status_code == 400
 
     def test_plans_response_excludes_stub_mode(self, client):
         """stub_mode must not leak to public API responses."""

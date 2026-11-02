@@ -12,10 +12,17 @@ Endpoints:
   GET  /v1/auth/profile      - Get current user profile (requires auth)
   GET  /v1/auth/identities   - List linked identities (requires auth)
   POST /v1/auth/refresh      - Refresh JWT token (requires auth)
-  POST /v1/auth/bridge       - [OPTIONAL] Supabase JWT -> looma JWT (MVP: 501)
+  POST /v1/auth/bridge       - Circle (looma JWT → ethos/circle JWT) when ETHOS_AUTH_SECRET set;
+                               else Supabase/circle 501 design stub (no fake 200)
 """
-import bcrypt
+import base64
+import hashlib
+import hmac
+import json
 import logging
+import time
+
+import bcrypt
 from flask import Blueprint, request, jsonify, current_app, g
 
 from src.api.auth.jwt_handler import sign_token, verify_token, get_current_user_id, sign_token_for_user
@@ -466,12 +473,105 @@ def refresh_token():
 
 
 # ============================================
-# Supabase bridge (OPTIONAL - MVP returns 501)
+# Identity bridge (circle when ETHOS configured; else honest 501)
 # ============================================
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _issue_circle_ethos_token(sub: str, secret: str, *, days: int = 30, tier: str = "free") -> str:
+    """Mint HS256 JWT compatible with gfcc_kernel / ethos (sub/tier/iat/exp)."""
+    now = int(time.time())
+    header = {"alg": "HS256", "typ": "JWT"}
+    payload = {
+        "sub": sub,
+        "tier": tier,
+        "iat": now,
+        "exp": now + days * 86400,
+        "iss": "looma-bridge",
+    }
+    h = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    p = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sig = hmac.new(secret.encode("utf-8"), f"{h}.{p}".encode("utf-8"), hashlib.sha256).digest()
+    return f"{h}.{p}.{_b64url(sig)}"
+
+
 @auth_bp.route("/bridge", methods=["POST"])
-def supabase_bridge():
+def auth_bridge():
+    """Exchange identity across product faces.
+
+    Targets:
+      - ``circle`` (preferred): Bearer looma JWT → circle/ethos JWT when
+        ``ETHOS_AUTH_SECRET`` matches gfcc_kernel. Smallest useful bridge
+        without calling kernel redeem (invite still separate).
+      - ``supabase`` / default: still 501 until Admin API path lands.
+
+    Never returns fake 200 without a verifiable token.
     """
-    [OPTIONAL] Exchange a Supabase JWT for a looma JWT.
-    MVP: not implemented. Enable when Web social login is needed.
-    """
-    return jsonify(error="not_implemented", message="Supabase bridge will be available in a future phase"), 501
+    data = request.get_json(silent=True) or {}
+    target = (data.get("target") or data.get("to") or "supabase").strip().lower()
+
+    if target in ("circle", "gfcc", "ethos"):
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify(
+                error="unauthorized",
+                message="Missing or invalid Authorization header",
+            ), 401
+
+        secret = (current_app.config.get("ETHOS_AUTH_SECRET") or "").strip()
+        if not secret:
+            return jsonify(
+                error="not_implemented",
+                message=(
+                    "Circle bridge requires ETHOS_AUTH_SECRET on looma "
+                    "(same HS256 secret as gfcc_kernel). "
+                    "Invite redeem via circle /api/redeem remains the "
+                    "standalone path until secret is provisioned."
+                ),
+                design={
+                    "target": "circle",
+                    "input": "Authorization: Bearer <looma JWT>",
+                    "output": "circle_token HS256 (sub=principal_sub|user_id)",
+                    "secret": "ETHOS_AUTH_SECRET",
+                    "alternate": "POST https://circle.genz.ltd/circle/api/redeem",
+                },
+            ), 501
+
+        from src.api.auth.jwt_handler import resolve_auth_token
+        from src.api.auth.decorators import _resolve_user
+
+        try:
+            source, payload = resolve_auth_token(auth_header[7:])
+        except Exception as e:
+            return jsonify(error="unauthorized", message=f"Invalid token: {e}"), 401
+
+        db = _get_db()
+        user = _resolve_user(db, source, payload)
+        if not user:
+            return jsonify(error="unauthorized", message="user not found"), 401
+
+        from src.identity.ledger_subject import ensure_principal_sub
+
+        sub = ensure_principal_sub(db, user["id"])
+        tier = user.get("tier") or "free"
+        circle_token = _issue_circle_ethos_token(sub, secret, tier=tier)
+        return jsonify(
+            target="circle",
+            circle_token=circle_token,
+            token_type="bearer",
+            expires_in=30 * 86400,
+            sub=sub,
+            user_id=user["id"],
+        )
+
+    return jsonify(
+        error="not_implemented",
+        message="Supabase bridge will be available in a future phase",
+        design={
+            "target": "supabase",
+            "status": "deferred",
+            "circle_path": "POST /v1/auth/bridge with {\"target\":\"circle\"} + looma Bearer",
+        },
+    ), 501

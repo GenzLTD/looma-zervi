@@ -128,9 +128,11 @@ def test_profile_with_token(client):
 
 
 def test_bridge_not_implemented(client):
-    """Supabase bridge should return 501 in MVP."""
+    """Default / Supabase bridge still 501 until that path lands."""
     resp = client.post("/v1/auth/bridge", json={})
     assert resp.status_code == 501
+    data = resp.get_json()
+    assert data["error"] == "not_implemented"
 
 
 def test_require_auth_rejects_unknown_user(client):

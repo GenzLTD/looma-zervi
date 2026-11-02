@@ -257,11 +257,20 @@ class TestNotifyEdgeCases:
         assert db.get_user_by_id(user["id"])["tier"] == "supporter"
 
     def test_invalid_json_body_handled(self, client):
-        """Malformed JSON body → handled gracefully."""
+        """Malformed JSON body → stable 400 FAIL (not 500)."""
         resp = client.post(
             "/v1/payment/wechat/notify",
             data="not valid json at all",
             content_type="application/json",
         )
-        # Should not 500 crash
-        assert resp.status_code in (200, 400, 500)
+        assert resp.status_code == 400
+        assert json.loads(resp.get_data(as_text=True))["code"] == "FAIL"
+
+    def test_empty_body_is_400(self, client):
+        resp = client.post(
+            "/v1/payment/wechat/notify",
+            data="",
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.get_data(as_text=True))["code"] == "FAIL"
