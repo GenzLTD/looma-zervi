@@ -249,7 +249,7 @@ def upgrade_tier():
     plan = get_plan_for_tier(new_tier, region)
 
     # Stub 也走与微信/Stripe 回调完全相同的核销链：
-    #   建单(pending) → mark_order_paid → update_user_tier → upsert_subscription(+30天)
+    #   建单(pending) → mark_order_paid → upsert_subscription(+30天) → recompute_user_tier
     # 这样本机验证覆盖的语义与生产核销一致，而不是旁路。需求决定代码。
     out_trade_no = generate_out_trade_no()
     db.create_order(
@@ -590,11 +590,10 @@ def wechat_pay_notify():
     tier = paid_order["tier"]
     plan_id = paid_order["plan_id"]
 
-    db.update_user_tier(user_id, tier)
-
     from datetime import datetime, timedelta
     expires = (datetime.now() + timedelta(days=30)).isoformat()
     db.upsert_subscription(user_id, tier, plan_id, expires, auto_renew=False)
+    db.recompute_user_tier(user_id)
 
     current_app.logger.info(
         f"[wechat_pay] Payment confirmed: user={user_id} "
@@ -616,7 +615,7 @@ def wechat_pay_notify_simulate():
 
     用途：商户号审批下来之前，在本机/联调环境模拟「用户扫码 → 支付成功
     → 微信回调」这半段。走的核销逻辑与真实回调（wechat_pay_notify）完全
-    一致：mark_order_paid → update_user_tier → upsert_subscription(+30天)。
+    一致：mark_order_paid → upsert_subscription(+30天) → recompute_user_tier。
 
     Request body:
         { "out_trade_no": "LOOMA2026..." }
@@ -697,11 +696,10 @@ def _process_payment_completed(db, out_trade_no: str, transaction_id: str,
     tier = paid_order["tier"]
     plan_id = paid_order["plan_id"]
 
-    db.update_user_tier(user_id, tier)
-
     from datetime import datetime, timedelta
     expires = (datetime.now() + timedelta(days=30)).isoformat()
     db.upsert_subscription(user_id, tier, plan_id, expires, auto_renew=False)
+    db.recompute_user_tier(user_id)
 
     current_app.logger.info(
         f"[{provider_name}] Payment confirmed: user={user_id} "
@@ -1135,11 +1133,10 @@ def stripe_webhook():
         tier = paid_order["tier"]
         plan_id = paid_order["plan_id"]
 
-        db.update_user_tier(user_id, tier)
-
         from datetime import datetime, timedelta
         expires = (datetime.now() + timedelta(days=30)).isoformat()
         db.upsert_subscription(user_id, tier, plan_id, expires, auto_renew=False)
+        db.recompute_user_tier(user_id)
 
         current_app.logger.info(
             f"[stripe] Payment confirmed: user={user_id} tier={tier} "
