@@ -1,0 +1,45 @@
+# Lock 1 export gate — keep payment.v1.PIN.json honest on tip.
+name: Dual-track gates
+
+on:
+  pull_request:
+    paths:
+      - "backend/contracts/payment.v1.json"
+      - "contracts/payment.v1.PIN.json"
+      - "contracts/gfcc/SOURCE.json"
+      - "backend/src/identity/**"
+      - "docs/dual-track-ledger-boundary.md"
+      - "scripts/assert-payment-v1-pin.sh"
+      - ".github/workflows/dual-track-gates.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/contracts/payment.v1.json"
+      - "contracts/payment.v1.PIN.json"
+      - "backend/src/identity/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  payment-pin:
+    name: payment.v1 PIN
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert PIN matches payment.v1 blob
+        run: bash scripts/assert-payment-v1-pin.sh
+
+  identity-present:
+    name: identity join present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require ledger_subject
+        run: |
+          set -euo pipefail
+          test -f backend/src/identity/ledger_subject.py
+          test -f backend/src/identity/__init__.py
+          grep -q recompute_user_tier backend/src/db/manager.py
+          echo "OK looma join semantics present on tip"

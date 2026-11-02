@@ -1,0 +1,11 @@
+{
+  "schema": "looma-zervi.payment-v1-pin.v1",
+  "purpose": "Export pin so Vultr dual-track-gates can assert same-blob against looma tip",
+  "path": "backend/contracts/payment.v1.json",
+  "git_blob": "e2eee4c350e4b55e23cfd3cbca0e1d568872bf6b",
+  "sha256": "7591951b80c29a6030e1973a751c717900c4691f29ef4b8222992b8493faf8ae",
+  "version": "1.3.0",
+  "looma_sha": "ad3f39eac2dc591f483d48473c70025e469bafc5",
+  "pinned_at": "2026-11-03",
+  "consumer": "GenzLTD/Vultr-Genzltd scripts/assert-payment-v1-same-blob.sh"
+}
