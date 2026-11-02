@@ -23,6 +23,11 @@ from flask import Blueprint, jsonify, g, request, current_app
 import re
 
 from src.api.auth.decorators import require_auth
+from src.identity.ledger_subject import (
+    AmbiguousLedgerSubject,
+    ensure_principal_sub,
+    resolve_settlement_user_id,
+)
 from src.api.auth.jwt_handler import sign_token_for_user
 from src.analytics.events import (
     log_product_event,
@@ -166,11 +171,14 @@ def payment_status():
         except KeyError:
             plan = get_plan_for_tier("free", region)
 
+    principal_sub = ensure_principal_sub(db, g.user_id)
     return jsonify(
         tier=tier,
         plan=plan,
         status=sub_status,
         expires_at=expires_at,
+        principal_sub=principal_sub,
+        user_id=g.user_id,
     )
 
 
@@ -363,10 +371,19 @@ def create_wechat_order():
     # 生产（PAYMENT_STUB_MODE=false）走不到这里，行为与真下码完全一致。
     if _is_stub_mode():
         db = current_app._db
+        try:
+            settle_uid = resolve_settlement_user_id(
+                db,
+                session_user_id=g.user_id,
+                issuer="wechat" if openid else None,
+                subject=openid or None,
+            )
+        except AmbiguousLedgerSubject as exc:
+            return jsonify(error="ambiguous_subject", message=str(exc)), 409
         out_trade_no = generate_out_trade_no()
         stub_qr = f"weixin://wxpay/stub/{out_trade_no}"
         order = db.create_order(
-            user_id=g.user_id,
+            user_id=settle_uid,
             plan_id=plan["plan_id"],
             tier=new_tier,
             amount=plan["price_monthly"],
@@ -377,6 +394,7 @@ def create_wechat_order():
             metadata_json={
                 "trade_type": trade_type,
                 "region": region,
+                "principal_sub": ensure_principal_sub(db, settle_uid),
                 "mode": "stub",
             },
         )
@@ -466,10 +484,19 @@ def create_wechat_order():
         )
         jsapi_params = None
 
-    # 写入订单表
+    # 写入订单表（认钱认人：会话 + 可选微信 openid 必须同一主体）
     db = current_app._db
+    try:
+        settle_uid = resolve_settlement_user_id(
+            db,
+            session_user_id=g.user_id,
+            issuer="wechat" if openid else None,
+            subject=openid or None,
+        )
+    except AmbiguousLedgerSubject as exc:
+        return jsonify(error="ambiguous_subject", message=str(exc)), 409
     order = db.create_order(
-        user_id=g.user_id,
+        user_id=settle_uid,
         plan_id=plan["plan_id"],
         tier=new_tier,
         amount=plan["price_monthly"],
@@ -480,6 +507,7 @@ def create_wechat_order():
         metadata_json={
             "trade_type": trade_type,
             "region": region,
+            "principal_sub": ensure_principal_sub(db, settle_uid),
         },
     )
 
@@ -546,26 +574,31 @@ def wechat_pay_notify():
         resp, code = build_notify_response(True)
         return resp, code, {"Content-Type": "application/json"}
 
-    # 原子操作：标记支付 → 升级 tier → 创建订阅
+    # 认钱认人：只结算到订单所属主体（与会话/外部身份冲突则拒）
+    try:
+        user_id = resolve_settlement_user_id(db, order_user_id=order["user_id"])
+    except AmbiguousLedgerSubject as exc:
+        current_app.logger.error(f"[wechat_pay] Ambiguous subject: {exc}")
+        resp, code = build_notify_response(False)
+        return resp, code, {"Content-Type": "application/json"}
+
     paid_order = db.mark_order_paid(result.out_trade_no, result.transaction_id)
     if not paid_order:
         resp, code = build_notify_response(True)
         return resp, code, {"Content-Type": "application/json"}
 
-    user_id = paid_order["user_id"]
     tier = paid_order["tier"]
     plan_id = paid_order["plan_id"]
 
-    # 升级用户 tier
     db.update_user_tier(user_id, tier)
 
-    # 创建/更新订阅（1 个月有效期）
     from datetime import datetime, timedelta
     expires = (datetime.now() + timedelta(days=30)).isoformat()
     db.upsert_subscription(user_id, tier, plan_id, expires, auto_renew=False)
 
     current_app.logger.info(
-        f"[wechat_pay] Payment confirmed: user={user_id} tier={tier} "
+        f"[wechat_pay] Payment confirmed: user={user_id} "
+        f"principal_sub={ensure_principal_sub(db, user_id)} tier={tier} "
         f"txn={result.transaction_id} order={result.out_trade_no}"
     )
 
@@ -622,11 +655,16 @@ def wechat_pay_notify_simulate():
 
 
 def _process_payment_completed(db, out_trade_no: str, transaction_id: str,
-                                provider_name: str) -> dict | None:
+                                provider_name: str,
+                                *,
+                                session_user_id: str | None = None,
+                                issuer: str | None = None,
+                                subject: str | None = None) -> dict | None:
     """Shared webhook handler: mark order paid + upgrade tier + create subscription.
 
-    Used by Stripe, PayPal, Airwallex, and future providers.
-    Returns the paid order dict or None (idempotent skip).
+    Used by Stripe, PayPal, Airwallex, WeChat stub, and future providers.
+    Settles only onto the unique ledger subject (认钱认人).
+    Returns the paid order dict or None (idempotent skip / ambiguous).
     """
     order = db.get_order_by_out_trade_no(out_trade_no)
     if not order:
@@ -638,11 +676,24 @@ def _process_payment_completed(db, out_trade_no: str, transaction_id: str,
     if order["status"] == "paid":
         return None  # idempotent
 
+    try:
+        user_id = resolve_settlement_user_id(
+            db,
+            order_user_id=order["user_id"],
+            session_user_id=session_user_id,
+            issuer=issuer,
+            subject=subject,
+        )
+    except AmbiguousLedgerSubject as exc:
+        current_app.logger.error(
+            f"[{provider_name}] Ambiguous ledger subject for {out_trade_no}: {exc}"
+        )
+        return None
+
     paid_order = db.mark_order_paid(out_trade_no, transaction_id)
     if not paid_order:
         return None
 
-    user_id = paid_order["user_id"]
     tier = paid_order["tier"]
     plan_id = paid_order["plan_id"]
 
@@ -653,7 +704,8 @@ def _process_payment_completed(db, out_trade_no: str, transaction_id: str,
     db.upsert_subscription(user_id, tier, plan_id, expires, auto_renew=False)
 
     current_app.logger.info(
-        f"[{provider_name}] Payment confirmed: user={user_id} tier={tier} "
+        f"[{provider_name}] Payment confirmed: user={user_id} "
+        f"principal_sub={ensure_principal_sub(db, user_id)} tier={tier} "
         f"order={out_trade_no} txn={transaction_id}"
     )
     return paid_order
