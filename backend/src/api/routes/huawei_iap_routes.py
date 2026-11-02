@@ -24,6 +24,11 @@ from cryptography.hazmat.backends import default_backend
 
 from src.api.auth.decorators import require_auth
 from src.payment.plans import tier_for_product
+from src.identity.ledger_subject import (
+    AmbiguousLedgerSubject,
+    ensure_principal_sub,
+    resolve_settlement_user_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -164,13 +169,19 @@ def _process_delivery(purchase_data: dict, user_id: str) -> tuple[bool, str]:
     if tier is None:
         return False, "unknown_product"
 
+    # --- 认钱认人：会话必须解析到唯一主体 ---
+    try:
+        settle_uid = resolve_settlement_user_id(db, session_user_id=user_id)
+    except AmbiguousLedgerSubject as exc:
+        return False, f"ambiguous_subject:{exc}"
+
     # --- 写入订单 ---
     out_trade_no = f"LOOMA_HW_{order_id or purchase_token[:16]}"
     amount_value = float(purchase_data.get("price", 0))
     currency = purchase_data.get("currency", "CNY")
 
     order = db.create_order(
-        user_id=user_id,
+        user_id=settle_uid,
         plan_id=f"huawei_{product_id}",
         tier=tier,
         amount=amount_value,
@@ -186,13 +197,14 @@ def _process_delivery(purchase_data: dict, user_id: str) -> tuple[bool, str]:
 
     # --- 标记支付 + 升级 tier + 创建订阅 ---
     db.mark_order_paid(out_trade_no, purchase_token)
-    db.update_user_tier(user_id, tier)
+    db.update_user_tier(settle_uid, tier)
 
     expires = (datetime.now() + timedelta(days=30)).isoformat()
-    db.upsert_subscription(user_id, tier, f"huawei_{product_id}", expires, auto_renew=False)
+    db.upsert_subscription(settle_uid, tier, f"huawei_{product_id}", expires, auto_renew=False)
 
     logger.info(
-        f"[huawei_iap] Delivery complete: user={user_id} tier={tier} "
+        f"[huawei_iap] Delivery complete: user={settle_uid} "
+        f"principal_sub={ensure_principal_sub(db, settle_uid)} tier={tier} "
         f"product={product_id} order={out_trade_no}"
     )
     return True, order_id
@@ -257,6 +269,9 @@ def iap_notify():
     from flask import g as request_g
     user_id = request_g.user_id
     success, detail = _process_delivery(purchase_data, user_id)
+
+    if not success and str(detail).startswith("ambiguous_subject:"):
+        return jsonify(error="ambiguous_subject", message=detail), 409
 
     if success:
         return jsonify(
