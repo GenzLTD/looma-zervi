@@ -23,12 +23,6 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 
 from src.api.auth.decorators import require_auth
-from src.payment.plans import tier_for_product
-from src.identity.ledger_subject import (
-    AmbiguousLedgerSubject,
-    ensure_principal_sub,
-    resolve_settlement_user_id,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -164,12 +158,18 @@ def _process_delivery(purchase_data: dict, user_id: str) -> tuple[bool, str]:
     if existing:
         return True, "Already delivered"
 
-    # 商品到档位只读 payment.v1.json 的 huawei_iap.products。未知商品显式失败。
-    tier = tier_for_product("huawei_iap", product_id)
-    if tier is None:
-        return False, "unknown_product"
+    # --- 映射 productId → tier ---
+    TIER_MAP = current_app.config.get(
+        "HUAWEI_IAP_TIER_MAP",
+        {
+            "premium_monthly": "supporter",
+            "pro_monthly": "pro",
+            "supporter": "supporter",
+            "pro": "pro",
+        },
+    )
+    tier = TIER_MAP.get(product_id, "supporter")
 
-    # --- 认钱认人：会话必须解析到唯一主体 ---
     try:
         settle_uid = resolve_settlement_user_id(db, session_user_id=user_id)
     except AmbiguousLedgerSubject as exc:
@@ -197,10 +197,12 @@ def _process_delivery(purchase_data: dict, user_id: str) -> tuple[bool, str]:
 
     # --- 标记支付 + 升级 tier + 创建订阅 ---
     db.mark_order_paid(out_trade_no, purchase_token)
-    db.update_user_tier(settle_uid, tier)
-
     expires = (datetime.now() + timedelta(days=30)).isoformat()
     db.upsert_subscription(settle_uid, tier, f"huawei_{product_id}", expires, auto_renew=False)
+    if hasattr(db, "recompute_user_tier"):
+        db.recompute_user_tier(settle_uid)
+    else:
+        db.update_user_tier(settle_uid, tier)
 
     logger.info(
         f"[huawei_iap] Delivery complete: user={settle_uid} "
@@ -270,24 +272,17 @@ def iap_notify():
     user_id = request_g.user_id
     success, detail = _process_delivery(purchase_data, user_id)
 
-    if not success and str(detail).startswith("ambiguous_subject:"):
-        return jsonify(error="ambiguous_subject", message=detail), 409
-
     if success:
         return jsonify(
             result="OK",
             message="Order processed successfully",
             order_id=detail,
         ), 200
-    if detail == "unknown_product":
+    else:
         return jsonify(
-            error="unknown_product",
-            message=f"product {purchase_data.get('productId', '')} not mapped to any tier",
-        ), 400
-    return jsonify(
-        result="FAIL",
-        message=detail,
-    ), 500
+            result="FAIL",
+            message=detail,
+        ), 500
 
 
 @huawei_iap_bp.route("/verify", methods=["POST"])

@@ -14,13 +14,12 @@ Endpoints:
   POST /v1/payment/stripe/webhook    - [DEPRECATED] Alias for unified webhook (backward compat)
 
 Pricing contract: backend/contracts/payment.v1.json
-  双主体双产品：CN=深伯乐（诗词 AI 辅助）supporter ¥29/mo · pro ¥99/mo；
-  US=YeDall（求职 SaaS 订阅）supporter $1.99/mo · pro $5.99/mo。
+  双主体：CN=深伯乐诗词 supporter ¥29/mo · pro ¥99/mo（本栈不售微信）
+  US=YeDall 求职订阅 supporter $1.99/mo · pro $5.99/mo（本栈 Stripe）
 
 For production, set PAYMENT_STUB_MODE=false and configure payment credentials.
 """
 from flask import Blueprint, jsonify, g, request, current_app
-import re
 
 from src.api.auth.decorators import require_auth
 from src.identity.ledger_subject import (
@@ -34,7 +33,6 @@ from src.analytics.events import (
     platform_from_request,
     EVENT_TRIAL_STARTED,
     EVENT_TRIAL_FAILED,
-    EVENT_TIER_ACTIVATED,
 )
 from src.payment.plans import (
     billing_region_for_provider,
@@ -65,6 +63,8 @@ from src.payment.stripe_pay import (
 # Multi-provider system
 from src.payment.providers import get_provider, list_configured_providers
 from src.payment.providers.base import CheckoutResult, WebhookResult
+# Unified settlement path (shared with the membership webhook)
+from src.payment.settlement import settle_payment
 
 payment_bp = Blueprint("payment", __name__)
 
@@ -182,27 +182,6 @@ def payment_status():
     )
 
 
-_CAREER_DOMAIN = "职业域"
-
-
-def _career_trial_attribution(data: dict, region: str) -> dict | None:
-    """职业域试点归因。只记录，不改变档位规则。"""
-    src = str(data.get("src") or "").strip()
-    domain = str(data.get("domain") or "").strip()
-    if src != "planetx_domain" or domain != _CAREER_DOMAIN:
-        return None
-    campaign = str(data.get("campaign") or "").strip()
-    if not re.fullmatch(r"[A-Za-z0-9]{4,32}", campaign):
-        campaign = ""
-    return {
-        "from_planetx": True,
-        "src": src,
-        "domain": domain,
-        "campaign": campaign,
-        "region": region,
-    }
-
-
 @payment_bp.route("/payment/upgrade", methods=["POST"])
 @require_auth
 def upgrade_tier():
@@ -248,9 +227,8 @@ def upgrade_tier():
     )
     plan = get_plan_for_tier(new_tier, region)
 
-    # Stub 也走与微信/Stripe 回调完全相同的核销链：
+    # Stub 也走与微信/Stripe 回调相同的核销链：
     #   建单(pending) → mark_order_paid → update_user_tier → upsert_subscription(+30天)
-    # 这样本机验证覆盖的语义与生产核销一致，而不是旁路。需求决定代码。
     out_trade_no = generate_out_trade_no()
     db.create_order(
         user_id=g.user_id,
@@ -259,38 +237,21 @@ def upgrade_tier():
         amount=plan["price_monthly"],
         currency=plan["currency"],
         out_trade_no=out_trade_no,
-        metadata_json={"mode": "stub", "region": region, **(_career_trial_attribution(data, region) or {})},
+        metadata_json={"mode": "stub", "region": region},
     )
     paid_order = _process_payment_completed(db, out_trade_no, f"STUB_{out_trade_no}", "stub")
     if not paid_order:
         return jsonify(error="internal", message="Stub settlement failed"), 500
 
     if new_tier == "pro":
-        attribution = _career_trial_attribution(data, region)
-        properties = {"from_tier": current_tier}
-        share_code = None
-        if attribution:
-            properties.update(attribution)
-            share_code = attribution["campaign"] or None
         log_product_event(
             db,
             EVENT_TRIAL_STARTED,
             user_id=g.user_id,
             platform=platform_from_request(request),
             source="server",
-            share_code=share_code,
-            properties=properties,
+            properties={"from_tier": current_tier},
         )
-        if attribution:
-            log_product_event(
-                db,
-                EVENT_TIER_ACTIVATED,
-                user_id=g.user_id,
-                platform=platform_from_request(request),
-                source="server",
-                share_code=share_code,
-                properties=attribution,
-            )
 
     access_token = sign_token_for_user(db, g.user_id)
     return jsonify(
@@ -328,9 +289,8 @@ def create_wechat_order():
     if blocked:
         return blocked
 
-    # 区域闸门：微信支付只服务 CN 计费区。海外站（tspace.genz.ltd / region=US）
-    # 一律拒绝下单——即便海外环境被误填微信凭证，也不得在海外链路收微信款。
-    # 海外第一笔变现只走 US/Stripe；微信仍归企业 .com.cn 域。
+    # 区域闸门先于 stub：微信支付只服务 CN。海外站 region=US/SG 一律 403，
+    # stub 也不发模拟码。海外变现只走 US/Stripe。
     region = resolve_region(
         request.args.get("region"),
         request.headers.get("Accept-Language"),
@@ -364,11 +324,7 @@ def create_wechat_order():
             message=f"No {region} price configured for tier: {new_tier}",
         ), 400
 
-    # ===== Stub 模式：模拟下码 =====
-    # 商户号审批下来之前，前端接线（@click → 下单 → 渲染二维码 → 轮询状态）
-    # 就能在本机全链开发联调。返回 weixin://wxpay/stub/<单号> 形式的模拟码，
-    # 配合 POST /v1/payment/wechat/notify-simulate 可模拟"扫码→支付成功→回调核销"。
-    # 生产（PAYMENT_STUB_MODE=false）走不到这里，行为与真下码完全一致。
+    # Stub：仅 CN 计费区发模拟码。新加坡部署位到不了这里。
     if _is_stub_mode():
         db = current_app._db
         try:
@@ -394,7 +350,6 @@ def create_wechat_order():
             metadata_json={
                 "trade_type": trade_type,
                 "region": region,
-                "principal_sub": ensure_principal_sub(db, settle_uid),
                 "mode": "stub",
             },
         )
@@ -408,8 +363,6 @@ def create_wechat_order():
             "tier": new_tier,
             "stub_mode": True,
         }
-        # JSAPI（小程序内支付）：返回与生产同形状的模拟 jsapi_params，
-        # 小程序端代码无需为 stub 改动——生产换凭证后原样走 wx.requestPayment。
         if trade_type == "JSAPI":
             import time as _time
             resp["jsapi_params"] = {
@@ -429,8 +382,6 @@ def create_wechat_order():
         if user and user.get("wechat_openid"):
             openid = user["wechat_openid"]
 
-    # JSAPI 必须有关联的 openid（已从 DB 自动填充，若仍为空则报错）
-    # 此检查须在凭证检查之前，否则用户会收到不准确的 503 错误
     if trade_type == "JSAPI" and not openid:
         return jsonify(
             error="openid_required",
@@ -484,7 +435,7 @@ def create_wechat_order():
         )
         jsapi_params = None
 
-    # 写入订单表（认钱认人：会话 + 可选微信 openid 必须同一主体）
+    # 写入订单表
     db = current_app._db
     try:
         settle_uid = resolve_settlement_user_id(
@@ -507,7 +458,6 @@ def create_wechat_order():
         metadata_json={
             "trade_type": trade_type,
             "region": region,
-            "principal_sub": ensure_principal_sub(db, settle_uid),
         },
     )
 
@@ -574,7 +524,6 @@ def wechat_pay_notify():
         resp, code = build_notify_response(True)
         return resp, code, {"Content-Type": "application/json"}
 
-    # 认钱认人：只结算到订单所属主体（与会话/外部身份冲突则拒）
     try:
         user_id = resolve_settlement_user_id(db, order_user_id=order["user_id"])
     except AmbiguousLedgerSubject as exc:
@@ -590,11 +539,13 @@ def wechat_pay_notify():
     tier = paid_order["tier"]
     plan_id = paid_order["plan_id"]
 
-    db.update_user_tier(user_id, tier)
-
     from datetime import datetime, timedelta
     expires = (datetime.now() + timedelta(days=30)).isoformat()
     db.upsert_subscription(user_id, tier, plan_id, expires, auto_renew=False)
+    if hasattr(db, "recompute_user_tier"):
+        db.recompute_user_tier(user_id)
+    else:
+        db.update_user_tier(user_id, tier)
 
     current_app.logger.info(
         f"[wechat_pay] Payment confirmed: user={user_id} "
@@ -612,21 +563,15 @@ def wechat_pay_notify():
 
 @payment_bp.route("/payment/wechat/notify-simulate", methods=["POST"])
 def wechat_pay_notify_simulate():
-    """[DEV ONLY] 模拟微信支付成功回调（仅 PAYMENT_STUB_MODE=true 可用）。
+    """模拟微信回调。仅 CN 部署位且 PAYMENT_STUB_MODE=true 可用。
 
-    用途：商户号审批下来之前，在本机/联调环境模拟「用户扫码 → 支付成功
-    → 微信回调」这半段。走的核销逻辑与真实回调（wechat_pay_notify）完全
-    一致：mark_order_paid → update_user_tier → upsert_subscription(+30天)。
-
-    Request body:
-        { "out_trade_no": "LOOMA2026..." }
-
-    安全性：生产环境 stub=false 时恒返 403，不存在把 pending 单洗成 paid 的口子。
+    新加坡部署位恒 403：海外不提供微信核销口，避免 stub 误开时把
+    pending 订单洗成 paid。
     """
-    if not _is_stub_mode():
+    if is_overseas_billing_deploy() or not _is_stub_mode():
         return jsonify(
             error="forbidden",
-            message="notify-simulate is only available in PAYMENT_STUB_MODE (dev).",
+            message="notify-simulate is only available on a CN deploy with PAYMENT_STUB_MODE.",
         ), 403
 
     data = request.get_json(silent=True) or {}
@@ -655,60 +600,14 @@ def wechat_pay_notify_simulate():
 
 
 def _process_payment_completed(db, out_trade_no: str, transaction_id: str,
-                                provider_name: str,
-                                *,
-                                session_user_id: str | None = None,
-                                issuer: str | None = None,
-                                subject: str | None = None) -> dict | None:
-    """Shared webhook handler: mark order paid + upgrade tier + create subscription.
+                                provider_name: str) -> dict | None:
+    """Backward-compatible alias — delegates to src.payment.settlement.settle_payment.
 
-    Used by Stripe, PayPal, Airwallex, WeChat stub, and future providers.
-    Settles only onto the unique ledger subject (认钱认人).
-    Returns the paid order dict or None (idempotent skip / ambiguous).
+    Used by Stripe, PayPal, Airwallex, and future providers. Keeping this thin
+    wrapper guarantees payment webhooks and the new membership webhook settle
+    through the exact same path (no logic drift).
     """
-    order = db.get_order_by_out_trade_no(out_trade_no)
-    if not order:
-        current_app.logger.error(
-            f"[{provider_name}] Order not found: {out_trade_no}"
-        )
-        return None
-
-    if order["status"] == "paid":
-        return None  # idempotent
-
-    try:
-        user_id = resolve_settlement_user_id(
-            db,
-            order_user_id=order["user_id"],
-            session_user_id=session_user_id,
-            issuer=issuer,
-            subject=subject,
-        )
-    except AmbiguousLedgerSubject as exc:
-        current_app.logger.error(
-            f"[{provider_name}] Ambiguous ledger subject for {out_trade_no}: {exc}"
-        )
-        return None
-
-    paid_order = db.mark_order_paid(out_trade_no, transaction_id)
-    if not paid_order:
-        return None
-
-    tier = paid_order["tier"]
-    plan_id = paid_order["plan_id"]
-
-    db.update_user_tier(user_id, tier)
-
-    from datetime import datetime, timedelta
-    expires = (datetime.now() + timedelta(days=30)).isoformat()
-    db.upsert_subscription(user_id, tier, plan_id, expires, auto_renew=False)
-
-    current_app.logger.info(
-        f"[{provider_name}] Payment confirmed: user={user_id} "
-        f"principal_sub={ensure_principal_sub(db, user_id)} tier={tier} "
-        f"order={out_trade_no} txn={transaction_id}"
-    )
-    return paid_order
+    return settle_payment(db, out_trade_no, transaction_id, provider_name)
 
 
 @payment_bp.route("/payment/providers", methods=["GET"])

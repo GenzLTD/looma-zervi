@@ -61,10 +61,10 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash   TEXT,                      -- bcrypt hash (nullable for miniprogram-only)
     wechat_openid   TEXT UNIQUE,               -- WeChat miniprogram login
     supabase_uid    TEXT UNIQUE,               -- Supabase Auth user UUID (THOMAS 统一身份, RFC supabase-unified-auth-v1)
-    principal_sub   TEXT UNIQUE,               -- GFCC principal.sub（认钱认人）；缺省 bootstrap=id
+    principal_sub   TEXT UNIQUE,               -- GFCC principal.sub bootstrap=id
     name            TEXT DEFAULT '',
     tier            TEXT DEFAULT 'free',       -- free | supporter | pro
-    role            TEXT DEFAULT 'user',       -- user | admin
+    role            TEXT DEFAULT 'user',       -- user | enterprise | admin | driver
     is_early_adopter INTEGER DEFAULT 0,
     created_at      TEXT DEFAULT (datetime('now')),
     updated_at      TEXT DEFAULT (datetime('now'))
@@ -73,7 +73,6 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 -- NOTE: idx_users_email_hash 由 init_schema 迁移块创建（旧库需先 ALTER 加列）
 CREATE INDEX IF NOT EXISTS idx_users_wechat_openid ON users(wechat_openid);
--- NOTE: idx_users_principal_sub 由 init_schema 迁移块创建（旧库需先 ALTER 加列）
 -- NOTE: idx_users_supabase_uid 由 init_schema 迁移块创建（旧库需先 ALTER 加列）
 
 -- ============================================
@@ -427,27 +426,6 @@ CREATE TABLE IF NOT EXISTS invite_codes (
 
 CREATE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes(code);
 
--- 同一张免费裂变码可被多人核销；付费 tier_grant 仍是一次一人
-CREATE TABLE IF NOT EXISTS invite_redemptions (
-    id          TEXT PRIMARY KEY,
-    code        TEXT NOT NULL,
-    used_by     TEXT NOT NULL,
-    used_at     TEXT DEFAULT (datetime('now')),
-    UNIQUE(code, used_by)
-);
-
-CREATE INDEX IF NOT EXISTS idx_invite_redemptions_code ON invite_redemptions(code);
-
--- 每位被邀请人只给邀请人发一次传播 XP，不进 match mission
-CREATE TABLE IF NOT EXISTS spread_bonus_grants (
-    id          TEXT PRIMARY KEY,
-    inviter_id  TEXT NOT NULL,
-    invitee_id  TEXT NOT NULL,
-    xp          INTEGER NOT NULL,
-    created_at  TEXT DEFAULT (datetime('now')),
-    UNIQUE(inviter_id, invitee_id)
-);
-
 -- ============================================
 -- Usage: usage_logs (joint)
 -- ============================================
@@ -613,7 +591,6 @@ CREATE TABLE IF NOT EXISTS articles (
 CREATE INDEX IF NOT EXISTS idx_articles_driver ON articles(driver_id);
 CREATE INDEX IF NOT EXISTS idx_articles_column ON articles(column_id);
 -- NOTE: poems.publisher_id / idx_poems_publisher / idx_poems_column 由 init_schema 迁移块创建
-
 -- ============================================
 -- Poetry challenge: 信达雅英译赛 (Jason / overseas)
 -- ============================================
@@ -1152,21 +1129,42 @@ NON_FK_USER_TABLES = (
     ("audit_logs", "actor", True),   # 审计轨迹默认保留，include_audit=True 时才清
 )
 
-# 有真实资金流水痕迹的订单状态：paid（已支付）/ refunded（已退款，同样存在支付历史）。
-# delete_user / purge 对存在此类订单的用户一律拒绝（对齐 Stripe 自身：
-# 不允许删除有支付历史的客户）。要清这类账号，先走「按订单清理」处理掉订单。
 PAID_ORDER_STATUSES = ("paid", "refunded")
+
+# 导出时一律剔除的凭据类列。双重保险：
+#   * 精确表项覆盖已知的 users.password_hash；
+#   * 片段规则兜住后续新增的凭据字段 —— 不能指望"有人记得把它加进白名单"。
+REDACTED_EXPORT_COLUMNS = {
+    "users": frozenset({"password_hash"}),
+}
+
+_REDACT_COLUMN_SUBSTRINGS = ("password", "passwd", "secret", "private_key", "api_key")
+_REDACT_COLUMN_TOKENS = ("token",)
+
+
+def _is_redacted_export_column(table: str, column: str) -> bool:
+    """该列是否属于导出时必须剔除的凭据（不可逆摘要 / 密钥 / 会话令牌）。"""
+    col = (column or "").lower()
+    if col in REDACTED_EXPORT_COLUMNS.get(table, ()):
+        return True
+    if any(s in col for s in _REDACT_COLUMN_SUBSTRINGS):
+        return True
+    return any(col == s or col.endswith("_" + s) for s in _REDACT_COLUMN_TOKENS)
+
+
+def _redact_export_row(table: str, row: dict) -> dict:
+    """返回剔除凭据列后的行副本。
+
+    密码哈希这类不可逆摘要不属于「数据主体可携带的数据」—— 导出它既无意义，
+    又白白扩大凭据泄露面。"""
+    return {k: v for k, v in row.items() if not _is_redacted_export_column(table, k)}
 
 # purge_test_orders 允许清理的订单状态白名单默认值（绝不含 PAID_ORDER_STATUSES）。
 PURGEABLE_ORDER_STATUSES = ("pending", "expired")
 
 
 class PaidOrderBlockedError(Exception):
-    """用户存在已支付/已退款订单，删除被资金安全护栏拒绝。
-
-    orders 携带订单明细（id / out_trade_no / amount / currency / status / paid_at），
-    供管理端接口透出给运维定位。
-    """
+    """用户存在已支付/已退款订单，删除被资金安全护栏拒绝。"""
 
     def __init__(self, user_id: str, orders: list):
         self.user_id = user_id
@@ -1235,13 +1233,6 @@ class DatabaseManager:
                         "Pre-migration ALTER TABLE users ADD COLUMN email_hash failed: %s", e
                     )
             conn.executescript(SCHEMA_SQL)
-            conn.execute(
-                """INSERT OR IGNORE INTO invite_redemptions (id, code, used_by, used_at)
-                   SELECT lower(hex(randomblob(16))), code, used_by, used_at
-                   FROM invite_codes
-                   WHERE used_by IS NOT NULL
-                     AND IFNULL(tier_grant, '') != 'profile_share'"""
-            )
             # Migration: add invite_code to existing fleets tables
             try:
                 conn.execute("ALTER TABLE fleets ADD COLUMN invite_code TEXT")
@@ -1335,7 +1326,7 @@ class DatabaseManager:
                     "Migration UNIQUE INDEX idx_users_supabase_uid failed: %s", e
                 )
 
-            # Migration: principal_sub — GFCC principal.sub ↔ users.id（认钱认人）
+            # Migration: principal_sub — GFCC principal.sub ↔ users.id
             try:
                 conn.execute("ALTER TABLE users ADD COLUMN principal_sub TEXT")
             except sqlite3.OperationalError as e:
@@ -1772,11 +1763,69 @@ END;
         return self.get_user_by_id(user_id), True  # newly created
 
     def update_user_tier(self, user_id: str, tier: str):
+        """直接提/降档 —— 仅限管理后台或人工干预。
+
+        正常业务路径请改用 `recompute_user_tier()`：直接写 tier 是 last-write-wins，
+        会把另一条轨上仍然有效的订阅连带抹掉。
+        """
         with self.get_conn() as conn:
             conn.execute(
                 "UPDATE users SET tier = ?, updated_at = datetime('now') WHERE id = ?",
                 (tier, user_id)
             )
+
+    # tier 序，与 PG 的 tier_rank() 及 zervi-rust auth.rs 的层级保持一致
+    #   未知 tier → -99，永不取胜，避免脏字符串意外提权
+    TIER_RANK = {
+        "guest": -1, "free": 0, "supporter": 1, "pro": 2, "enterprise": 3,
+    }
+
+    def recompute_user_tier(self, user_id: str) -> str:
+        """entitlement 仲裁：tier = max(所有未过期订阅的 tier)，无有效订阅则 free。
+
+        取代「到期就直接 `UPDATE users SET tier='free'`」——那样会把用户在另一条
+        变现轨上**仍然有效**的订阅连带抹掉（已付费权益凭空消失）。
+
+        ⚠️ 范围限制：本方法只看**本库（SQLite）**的 subscriptions 表，即 Stripe 轨
+        自己这一轨。真正的跨轨仲裁（Stripe ∪ Apple IAP）在 PG 的
+        `recompute_user_tier()` + `v_active_entitlements` 视图里完成。
+        ⇒ 海外站接入 PG（单源权威工程）后，这里应改为调用 PG 版本；
+           本方法保留为同语义的本地兜底。
+        """
+        now = _dt_now()
+        best = "free"
+        best_rank = self.TIER_RANK["free"]
+
+        with self.get_conn() as conn:
+            rows = conn.execute(
+                """SELECT tier, expires_at FROM subscriptions
+                    WHERE user_id = ? AND lower(coalesce(status, 'active')) = 'active'""",
+                (user_id,),
+            ).fetchall()
+
+            for r in rows:
+                raw = r["expires_at"]
+                if not raw:
+                    continue
+                try:
+                    exp = datetime.fromisoformat(str(raw))
+                except (ValueError, TypeError):
+                    continue                      # 不可解析 ⇒ 视为无效期限
+                if exp.tzinfo is not None and now.tzinfo is None:
+                    exp = exp.replace(tzinfo=None)
+                if exp <= now:
+                    continue                      # 已过期，不贡献权益
+
+                t = str(r["tier"] or "free").lower()
+                rank = self.TIER_RANK.get(t, -99)  # 未知 tier 永不取胜
+                if rank > best_rank:
+                    best, best_rank = t, rank
+
+            conn.execute(
+                "UPDATE users SET tier = ?, updated_at = datetime('now') WHERE id = ?",
+                (best, user_id),
+            )
+        return best
 
     # ============================================
     # Usage tracking (joint)
@@ -2120,99 +2169,23 @@ END;
         return [dict(r) for r in rows]
 
     def count_spread_signals(self, user_id: str) -> int:
-        """Count invitees who redeemed this user's code AND completed personality.
+        """Count invitees who used this user's referral code AND completed personality.
 
-        One free referral code may be redeemed by many people. profile_share
-        codes never count. Legacy rows that only set invite_codes.used_by are
-        included via the redemption backfill.
+        Design (ENGINEERING_CLOSED_LOOP_P0): count only after first mission to reduce spam.
+        Excludes profile_share codes.
         """
         with self.get_conn() as conn:
             row = conn.execute(
-                """SELECT COUNT(DISTINCT r.used_by) AS cnt
-                   FROM invite_redemptions r
-                   INNER JOIN invite_codes ic ON ic.code = r.code
+                """SELECT COUNT(DISTINCT ic.used_by) AS cnt
+                   FROM invite_codes ic
                    INNER JOIN mission_completions mc
-                     ON mc.user_id = r.used_by AND mc.mission_id = 'personality'
+                     ON mc.user_id = ic.used_by AND mc.mission_id = 'personality'
                    WHERE ic.created_by = ?
+                     AND ic.used_by IS NOT NULL
                      AND IFNULL(ic.tier_grant, '') != 'profile_share'""",
                 (user_id,),
             ).fetchone()
         return int(row["cnt"]) if row else 0
-
-    def list_personality_peer_ids(self, user_id: str, limit: int = 30) -> list[str]:
-        """Other users who already have a personality type. Used by wide scan."""
-        with self.get_conn() as conn:
-            rows = conn.execute(
-                """SELECT user_id FROM game_profiles
-                   WHERE user_id != ?
-                     AND TRIM(IFNULL(personality_type, '')) != ''
-                   ORDER BY updated_at DESC
-                   LIMIT ?""",
-                (user_id, limit),
-            ).fetchall()
-        return [r["user_id"] for r in rows]
-
-    def redeem_growth_code(self, code: str, user_id: str) -> str:
-        """Record a reusable free-code redemption.
-
-        Returns 'created' or 'exists'. Does not change users.tier.
-        """
-        with self.get_conn() as conn:
-            existing = conn.execute(
-                "SELECT id FROM invite_redemptions WHERE code = ? AND used_by = ?",
-                (code, user_id),
-            ).fetchone()
-            if existing:
-                return "exists"
-            conn.execute(
-                """INSERT INTO invite_redemptions (id, code, used_by)
-                   VALUES (?, ?, ?)""",
-                (str(uuid.uuid4()), code, user_id),
-            )
-            conn.execute(
-                """UPDATE invite_codes
-                   SET used_by = ?, used_at = datetime('now')
-                   WHERE code = ? AND used_by IS NULL""",
-                (user_id, code),
-            )
-        return "created"
-
-    def award_spread_bonuses(self, invitee_id: str, xp: int = 5) -> list[str]:
-        """Give each inviter +xp once when this invitee finishes personality.
-
-        Returns inviter ids that received the bonus on this call.
-        """
-        if xp <= 0:
-            return []
-        with self.get_conn() as conn:
-            rows = conn.execute(
-                """SELECT DISTINCT ic.created_by AS inviter_id
-                   FROM invite_redemptions r
-                   INNER JOIN invite_codes ic ON ic.code = r.code
-                   WHERE r.used_by = ?
-                     AND ic.created_by IS NOT NULL
-                     AND ic.created_by != ?
-                     AND IFNULL(ic.tier_grant, '') != 'profile_share'""",
-                (invitee_id, invitee_id),
-            ).fetchall()
-        awarded: list[str] = []
-        for row in rows:
-            inviter_id = row["inviter_id"]
-            with self.get_conn() as conn:
-                try:
-                    conn.execute(
-                        """INSERT INTO spread_bonus_grants
-                           (id, inviter_id, invitee_id, xp)
-                           VALUES (?, ?, ?, ?)""",
-                        (str(uuid.uuid4()), inviter_id, invitee_id, xp),
-                    )
-                except sqlite3.IntegrityError:
-                    continue
-            if not self.get_game_profile(inviter_id):
-                self.upsert_game_profile(inviter_id, "", "")
-            self.add_xp(inviter_id, xp)
-            awarded.append(inviter_id)
-        return awarded
 
     # ============================================
     # Match consensus (PlanetX phase-2)
@@ -2349,7 +2322,6 @@ END;
             row = conn.execute(
                 """SELECT 1 FROM match_consensus
                    WHERE status = 'verified'
-                     AND expires_at > datetime('now')
                      AND (initiator_id = ? OR candidate_id = ?)
                    LIMIT 1""",
                 (user_id, user_id),
@@ -3197,13 +3169,87 @@ END;
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def _collect_owned_ids(self, conn, user_id: str) -> tuple:
+        """沿外键图收集属于 ``user_id`` 的全部行主键（迭代至不动点）。
+
+        返回 ``(tabs, pk, order, removed)``：
+
+          * ``tabs``    —— 库内全部业务表名
+          * ``pk``      —— 表 -> 主键列名（无 ``id`` 时退化为 ``rowid``）
+          * ``order``   —— 外键反向拓扑序（子表在前、父表在后）
+          * ``removed`` —— 表 -> 该用户可达的行主键集合
+
+        ``users`` 自身先播种为 ``{user_id}``，再沿外键向下扩散；孙表
+        （如 match_report_items 经由 match_reports 关联）靠不动点迭代覆盖。
+
+        **delete_user 与 export_user_data 共用本方法**：数据主体的「导出范围」
+        与「删除范围」必须是同一份集合，否则会出现导出漏了、删除却删了
+        （或反之）这种自相矛盾的合规表现。
+        """
+        tabs = [
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+                " AND name NOT LIKE 'sqlite_%'"
+            )
+        ]
+
+        pk, fks, children = {}, [], {}
+        for t in tabs:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(%s)" % t)]
+            pk[t] = "id" if "id" in cols else "rowid"
+            for fk in conn.execute("PRAGMA foreign_key_list(%s)" % t):
+                parent, child_col = fk[2], fk[3]
+                fks.append((t, child_col, parent))
+                if parent != t:
+                    children.setdefault(parent, set()).add(t)
+
+        # 外键反向拓扑序：子表排在父表之前
+        order, state = [], {}
+
+        def visit(t):
+            if state.get(t) in (1, 2):
+                return          # 1=环中，交由不动点迭代兜底
+            state[t] = 1
+            for ch in children.get(t, ()):
+                visit(ch)
+            state[t] = 2
+            order.append(t)
+
+        for t in tabs:
+            visit(t)
+
+        # 收集行主键（iterate to fixpoint）
+        removed = {t: set() for t in tabs}
+        removed["users"] = {user_id}
+        for _ in range(30):
+            changed = False
+            for child, child_col, parent in fks:
+                parent_ids = [v for v in removed.get(parent, ()) if v is not None]
+                if not parent_ids or child == "users":
+                    continue
+                found = set()
+                for i in range(0, len(parent_ids), 400):
+                    block = parent_ids[i:i + 400]
+                    rows = conn.execute(
+                        "SELECT %s FROM %s WHERE %s IN (%s)"
+                        % (pk[child], child, child_col, ",".join("?" * len(block))),
+                        block,
+                    ).fetchall()
+                    found |= {r[0] for r in rows}
+                found -= removed[child]
+                if found:
+                    removed[child] |= found
+                    changed = True
+            if not changed:
+                break
+
+        return tabs, pk, order, removed
+
     def delete_user(self, user_id: str, include_audit: bool = False) -> dict:
         """删除用户及其全部依赖行，返回 ``{"user_id":..., "deleted": {table: n}}``。
 
-        资金安全护栏（2026-09-19）：用户存在任一 paid / refunded 订单时直接抛
-        PaidOrderBlockedError 拒绝删除——orders 落在删除拓扑内，不设护栏会连
-        真金白银订单一起级联清掉。要清这类账号，先用 purge_test_orders
-        处理订单（或确认走退款流程），再删用户。
+        资金安全护栏：存在任一 paid / refunded 订单时抛 PaidOrderBlockedError，
+        用户与依赖行全不动。要清这类账号，先走 purge_test_orders（或退款）。
 
         为什么不能直接 ``DELETE FROM users``：
           库内 34 张表以裸外键引用 users(id)，没有任何 ``ON DELETE CASCADE``，
@@ -3218,70 +3264,12 @@ END;
 
         ``include_audit=False``（默认）保留 audit_logs 中的审计轨迹。
         """
-        # 资金安全护栏：paid / refunded 订单存在 → 一票否决，用户与依赖行全不动。
         paid_orders = self.list_paid_orders(user_id)
         if paid_orders:
             raise PaidOrderBlockedError(user_id, paid_orders)
 
         with self.get_conn() as conn:
-            tabs = [
-                r[0] for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                    " AND name NOT LIKE 'sqlite_%'"
-                )
-            ]
-
-            pk, fks, children, fk_cols = {}, [], {}, {}
-            for t in tabs:
-                cols = [r[1] for r in conn.execute("PRAGMA table_info(%s)" % t)]
-                pk[t] = "id" if "id" in cols else "rowid"
-                fk_cols[t] = set()
-                for fk in conn.execute("PRAGMA foreign_key_list(%s)" % t):
-                    parent, child_col = fk[2], fk[3]
-                    fks.append((t, child_col, parent))
-                    fk_cols[t].add(child_col)
-                    if parent != t:
-                        children.setdefault(parent, set()).add(t)
-
-            # 外键反向拓扑序：子表排在父表之前
-            order, state = [], {}
-
-            def visit(t):
-                if state.get(t) in (1, 2):
-                    return          # 1=环中，交由不动点迭代兜底
-                state[t] = 1
-                for ch in children.get(t, ()):
-                    visit(ch)
-                state[t] = 2
-                order.append(t)
-
-            for t in tabs:
-                visit(t)
-
-            # 收集待删主键（iterate to fixpoint）
-            removed = {t: set() for t in tabs}
-            removed["users"] = {user_id}
-            for _ in range(30):
-                changed = False
-                for child, child_col, parent in fks:
-                    parent_ids = [v for v in removed.get(parent, ()) if v is not None]
-                    if not parent_ids or child == "users":
-                        continue
-                    found = set()
-                    for i in range(0, len(parent_ids), 400):
-                        block = parent_ids[i:i + 400]
-                        rows = conn.execute(
-                            "SELECT %s FROM %s WHERE %s IN (%s)"
-                            % (pk[child], child, child_col, ",".join("?" * len(block))),
-                            block,
-                        ).fetchall()
-                        found |= {r[0] for r in rows}
-                    found -= removed[child]
-                    if found:
-                        removed[child] |= found
-                        changed = True
-                if not changed:
-                    break
+            tabs, pk, order, removed = self._collect_owned_ids(conn, user_id)
 
             deleted = {}
 
@@ -3318,6 +3306,84 @@ END;
 
             return {"user_id": user_id, "deleted": deleted}
 
+    def export_user_data(
+        self,
+        user_id: str,
+        include_audit: bool = False,
+        max_rows_per_table: int = 10000,
+    ) -> dict:
+        """导出该用户的全部个人数据（GDPR Art.15 查阅权 / PIPL 第 45 条可携带权）。
+
+        与 ``delete_user`` 共用 ``_collect_owned_ids``，保证「导出看到的」与
+        「删除删掉的」是同一份行集合。
+
+        安全约定：
+          * 只按 ``user_id`` 取数，调用方无法指定他人；
+          * 凭据列一律剔除（见 ``_redact_export_row``）；
+          * 无外键表（query_logs / product_events）显式补扫 —— 沿外键遍历
+            永远覆盖不到它们，漏掉会让导出看起来"少了一块"；
+          * audit_logs 默认不导出（与 delete_user 的 include_audit 语义一致）；
+          * 单表超 ``max_rows_per_table`` 时截断并在 ``truncated`` 中标注，
+            避免一次响应把进程拖垮。
+
+        返回 ``{"user_id", "tables": {表: [行dict]}, "counts": {表: n},
+        "truncated": [表]}``。
+        """
+        with self.get_conn() as conn:
+            tabs, pk, _order, removed = self._collect_owned_ids(conn, user_id)
+
+            tables: dict = {}
+            counts: dict = {}
+            truncated: list = []
+
+            for t in sorted(removed):
+                values = [v for v in removed.get(t, ()) if v is not None]
+                if not values:
+                    continue
+                rows: list = []
+                for i in range(0, len(values), 400):
+                    block = values[i:i + 400]
+                    cur = conn.execute(
+                        "SELECT * FROM %s WHERE %s IN (%s)"
+                        % (t, pk[t], ",".join("?" * len(block))),
+                        block,
+                    )
+                    cols = [d[0] for d in cur.description]
+                    for r in cur.fetchall():
+                        rows.append(_redact_export_row(t, dict(zip(cols, r))))
+                if not rows:
+                    continue
+                counts[t] = len(rows)
+                if len(rows) > max_rows_per_table:
+                    truncated.append(t)
+                    rows = rows[:max_rows_per_table]
+                tables[t] = rows
+
+            # 无外键表：沿外键遍历永远覆盖不到，必须显式补扫
+            for table, column, is_audit in NON_FK_USER_TABLES:
+                if is_audit and not include_audit:
+                    continue
+                if table not in tabs:
+                    continue
+                cur = conn.execute(
+                    "SELECT * FROM %s WHERE %s = ?" % (table, column), (user_id,)
+                )
+                cols = [d[0] for d in cur.description]
+                rows = [
+                    _redact_export_row(table, dict(zip(cols, r)))
+                    for r in cur.fetchall()
+                ]
+                if rows:
+                    tables[table] = rows
+                    counts[table] = len(rows)
+
+            return {
+                "user_id": user_id,
+                "tables": tables,
+                "counts": counts,
+                "truncated": truncated,
+            }
+
     def purge_test_orders(
         self,
         prefixes,
@@ -3325,22 +3391,9 @@ END;
         zero_amount_only: bool = False,
         dry_run: bool = False,
     ) -> dict:
-        """按订单维度清理测试订单（**不触碰 users 及其他任何表**）。
+        """按订单维度清理测试订单（不触碰 users 及其他表）。
 
-        与 delete_user 的分工：delete_user 以用户为中心、有 paid 护栏；
-        本方法以订单为中心，用于在不动用户的前提下清掉测试订单
-        （如 LOOMA-WIN-* 零元单、灰度残留 pending 单）。
-
-        匹配规则（各条件 AND）：
-          * ``out_trade_no`` 以 ``prefixes`` 中任一前缀开头（必填——不允许全表扫）；
-          * ``status`` ∈ ``statuses``（默认 PURGEABLE_ORDER_STATUSES）；
-          * ``zero_amount_only=True`` 时还要求 ``amount == 0``。
-
-        paid / refunded 订单在结构上不可能被本方法选中：状态白名单显式排除
-        （传入即 ValueError），与 delete_user 护栏互为犄角。
-
-        返回 ``{"matched": n, "deleted": n, "orders": [...], "skipped_non_purgeable": n}``；
-        ``orders`` 为命中明细（最多 100 条，dry_run 与实际删除一致）。
+        paid / refunded 不允许进入状态白名单，与 delete_user 护栏互为犄角。
         """
         if not prefixes:
             raise ValueError("prefixes 必填——按订单清理不允许无前缀全表扫")
@@ -3372,7 +3425,6 @@ END;
                     params,
                 ).fetchall()
             ]
-            # 同前缀但状态不在白名单内的单（含 paid/refunded——结构上不可清）
             any_prefix_sql = " OR ".join("out_trade_no LIKE ?" for _ in prefixes)
             total_prefixed = conn.execute(
                 "SELECT COUNT(*) FROM orders WHERE (%s)" % any_prefix_sql,
@@ -3775,6 +3827,11 @@ END;
             "hr_register_from_share",
             "candidate_imported",
             "trial_started",
+            # 支付漏斗（海外会员）
+            "pricing_viewed",
+            "subscribe_clicked",
+            "checkout_redirected",
+            "payment_succeeded",
         ]
         since = f"-{int(days)} days"
         with self.get_conn() as conn:
@@ -3815,6 +3872,10 @@ END;
             "view_after_share": rate(steps["profile_view_public"], steps["share_code_created"]),
             "import_after_view": rate(steps["candidate_imported"], steps["profile_view_public"]),
             "trial_after_import": rate(steps["trial_started"], steps["candidate_imported"]),
+            # 支付漏斗：看不到价格就不可能付费，付费率是「生意能不能做成」的直接读数
+            "click_after_view": rate(steps["subscribe_clicked"], steps["pricing_viewed"]),
+            "checkout_after_click": rate(steps["checkout_redirected"], steps["subscribe_clicked"]),
+            "paid_after_checkout": rate(steps["payment_succeeded"], steps["checkout_redirected"]),
         }
         return {
             "days": days,
@@ -4205,6 +4266,85 @@ END;
             ).fetchone()
         return dict(row) if row else None
 
+    def merge_order_metadata(self, order_id: str, extra: dict) -> bool:
+        """Merge keys into orders.metadata_json without clobbering existing ones."""
+        extra = {k: v for k, v in (extra or {}).items() if v}
+        if not extra:
+            return False
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT metadata_json FROM orders WHERE id = ?", (order_id,),
+            ).fetchone()
+            if not row:
+                return False
+            try:
+                current = json.loads(row["metadata_json"] or "{}")
+                if not isinstance(current, dict):
+                    current = {}
+            except (TypeError, ValueError):
+                current = {}
+            current.update(extra)
+            conn.execute(
+                "UPDATE orders SET metadata_json = ? WHERE id = ?",
+                (json.dumps(current, ensure_ascii=False), order_id),
+            )
+        return True
+
+    def find_order_by_stripe_subscription(self, subscription_id: str) -> dict | None:
+        """Resolve the originating order from a Stripe subscription id."""
+        if not subscription_id:
+            return None
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM orders
+                   WHERE json_extract(metadata_json, '$.stripe_subscription_id') = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (subscription_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def find_order_by_stripe_customer(self, customer_id: str) -> dict | None:
+        """Resolve the most recent order from a Stripe customer id."""
+        if not customer_id:
+            return None
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM orders
+                   WHERE json_extract(metadata_json, '$.stripe_customer_id') = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (customer_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def find_stripe_refs_for_user(self, user_id: str) -> dict:
+        """取该用户最近一笔带 Stripe 引用的订单，返回其 customer / subscription id。
+
+        自助管理订阅（Billing Portal / 取消 / 换卡）必须先知道"在 Stripe 那边
+        我是谁"。我们不单独存 customer 表，而是把 id 留痕在订单 metadata 上
+        （见 settlement._remember_provider_refs）；这里按 user_id 反查最近一笔，
+        换绑或重复购买后以最新为准。
+
+        无留痕时返回 ``{}`` —— 调用方据此给出"没有可管理的订阅"，而不是伪造。
+        """
+        if not user_id:
+            return {}
+        with self.get_conn() as conn:
+            row = conn.execute(
+                """SELECT json_extract(metadata_json, '$.stripe_customer_id') AS customer_id,
+                          json_extract(metadata_json, '$.stripe_subscription_id') AS subscription_id
+                   FROM orders
+                   WHERE user_id = ?
+                     AND json_extract(metadata_json, '$.stripe_customer_id') IS NOT NULL
+                   ORDER BY created_at DESC LIMIT 1""",
+                (user_id,),
+            ).fetchone()
+        if not row:
+            return {}
+        return {
+            "stripe_customer_id": row["customer_id"] or "",
+            "stripe_subscription_id": row["subscription_id"] or "",
+        }
+
     def mark_order_paid(self, out_trade_no: str, transaction_id: str) -> dict | None:
         with self.get_conn() as conn:
             conn.execute(
@@ -4260,6 +4400,44 @@ END;
             ).fetchone()
         return dict(row) if row else None
 
+    def renew_subscription(self, user_id: str, days: int = 30) -> dict | None:
+        """续费：从 max(now, 当前到期时间) 起顺延 days 天。
+
+        以「较晚者」为基准，避免用户提前续费时把已购时长冲掉。
+        仅对已有订阅记录的用户生效（未订阅者返回 None）。
+        """
+        from datetime import datetime, timedelta
+
+        with self.get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM subscriptions WHERE user_id = ?", (user_id,),
+            ).fetchone()
+            if not row:
+                return None
+
+            base = _dt_now()
+            raw = row["expires_at"]
+            if raw:
+                try:
+                    current = datetime.fromisoformat(str(raw))
+                    if current.tzinfo is not None and base.tzinfo is None:
+                        current = current.replace(tzinfo=None)
+                    if current > base:
+                        base = current
+                except ValueError:
+                    pass
+
+            expires = (base + timedelta(days=days)).isoformat()
+            conn.execute(
+                """UPDATE subscriptions SET status = 'active', expires_at = ?,
+                   auto_renew = 1, updated_at = datetime('now') WHERE user_id = ?""",
+                (expires, user_id),
+            )
+            updated = conn.execute(
+                "SELECT * FROM subscriptions WHERE user_id = ?", (user_id,),
+            ).fetchone()
+        return dict(updated) if updated else None
+
     def cancel_subscription(self, user_id: str, at_period_end: bool = False) -> bool:
         with self.get_conn() as conn:
             cur = conn.execute(
@@ -4271,19 +4449,25 @@ END;
         return cur.rowcount > 0
 
     def expire_subscription(self, user_id: str) -> bool:
-        """Mark subscription as expired and downgrade user to free."""
+        """Mark subscription as expired and **recompute** the user's tier.
+
+        ⚠️ 旧实现在这里无条件 `UPDATE users SET tier='free'`，是 last-write-wins：
+        用户在另一条变现轨（Apple IAP / App 内购买）上**仍然有效**的订阅会被
+        本轨的到期动作连带抹掉 —— 已付费权益凭空消失。
+
+        现在改为：只把本轨订阅标记为 expired，tier 交给 `recompute_user_tier()`
+        裁决 —— 「没有任何未过期订阅」时才降级 free。
+        """
         with self.get_conn() as conn:
             cur = conn.execute(
                 """UPDATE subscriptions SET status = 'expired',
                    updated_at = datetime('now') WHERE user_id = ?""",
                 (user_id,),
             )
-            if cur.rowcount > 0:
-                conn.execute(
-                    "UPDATE users SET tier = 'free', updated_at = datetime('now') WHERE id = ?",
-                    (user_id,),
-                )
-        return cur.rowcount > 0
+            affected = cur.rowcount
+        if affected > 0:
+            self.recompute_user_tier(user_id)
+        return affected > 0
 
     # ============================================
     # Timeline: career time-series events
