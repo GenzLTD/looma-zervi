@@ -3,6 +3,8 @@
 
 Why not pytest: this hits the real ServBay sqlite ledger under data/looma.db;
 pytest fixtures use a tempfile DB and cannot validate ServBay wiring / schema drift.
+
+Exit codes: 0 PASS, 1 assertion FAIL, 2 environment / purge hygiene failure.
 """
 import os
 import secrets
@@ -42,9 +44,22 @@ from src.app import create_app
 from src.identity.ledger_subject import AmbiguousLedgerSubject, resolve_settlement_user_id
 
 
+def count_smoke_users(conn):
+    return conn.execute(
+        "SELECT COUNT(*) FROM users WHERE email LIKE ?",
+        (f"%{DOMAIN}",),
+    ).fetchone()[0]
+
+
 def purge(db):
-    """Delete DOMAIN smoke users and all FK-dependent rows; return cleaned_rows."""
+    """Delete DOMAIN smoke users and all FK-dependent rows.
+
+    Returns (cleaned_rows, users_left, errors). Row-level failures are counted in
+    `errors` instead of being swallowed, so the caller can fail loud (exit 2)
+    rather than report PASS on a DB that was never actually cleaned.
+    """
     cleaned = 0
+    errors = 0
     with db.get_conn() as conn:
         rows = conn.execute(
             "SELECT id FROM users WHERE email LIKE ?",
@@ -52,7 +67,7 @@ def purge(db):
         ).fetchall()
         uids = [r[0] for r in rows]
         if not uids:
-            return 0
+            return 0, 0, 0
         placeholders = ",".join("?" * len(uids))
 
         # Dynamic: every table whose FK points at users (avoids hardcode / fake names).
@@ -66,6 +81,7 @@ def purge(db):
             ]
         except Exception as e:
             print(f"WARN purge sqlite_master: {e}")
+            errors += 1
             tables = []
 
         for table in tables:
@@ -73,6 +89,7 @@ def purge(db):
                 fks = conn.execute(f'PRAGMA foreign_key_list("{table}")').fetchall()
             except Exception as e:
                 print(f"WARN purge pragma foreign_key_list({table}): {e}")
+                errors += 1
                 continue
             # PRAGMA cols: id, seq, table, from, to, on_update, on_delete, match
             cols = sorted({fk[3] for fk in fks if fk[2] == "users" and fk[3]})
@@ -86,6 +103,7 @@ def purge(db):
                     cleaned += n
                 except Exception as e:
                     print(f"WARN purge delete {table}.{col}: {e}")
+                    errors += 1
 
         try:
             conn.execute(
@@ -94,6 +112,7 @@ def purge(db):
             )
         except Exception as e:
             print(f"WARN purge null wechat_openid: {e}")
+            errors += 1
         try:
             cur = conn.execute(
                 f"DELETE FROM users WHERE id IN ({placeholders})",
@@ -102,7 +121,10 @@ def purge(db):
             cleaned += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         except Exception as e:
             print(f"WARN purge delete users: {e}")
-    return cleaned
+            errors += 1
+
+        left = count_smoke_users(conn)
+    return cleaned, left, errors
 
 
 def check(cond, label, passed, failed):
@@ -130,17 +152,20 @@ if cfg_norm != expect_norm:
 db = app._db
 
 with db.get_conn() as conn:
-    existing = conn.execute(
-        "SELECT COUNT(*) FROM users WHERE email LIKE ?",
-        (f"%{DOMAIN}",),
-    ).fetchone()[0]
+    existing = count_smoke_users(conn)
 print(f"TARGET DB: {db_path} existing_smoke_users={existing}")
 
-n0 = purge(db)
-print(f"purge(start) cleaned_rows={n0}")
+n0, left0, err0 = purge(db)
+print(f"purge(start) cleaned_rows={n0} users_left={left0} errors={err0}")
+if left0 or err0:
+    # Dirty DB would poison every later assertion (UNIQUE email/openid); fail now.
+    print(f"FATAL purge(start) incomplete: users_left={left0} purge_errors={err0}")
+    sys.exit(2)
 
 passed = 0
 failed = 0
+n1, left1, err1 = 0, 0, 0
+purge_crashed = False
 
 try:
     # --- unit-ish on live db ---
@@ -210,8 +235,12 @@ try:
     print("foreign openid", resp.status_code, resp.get_json())
     passed, failed = check(resp.status_code == 409, "foreign openid 409", passed, failed)
 finally:
-    n1 = purge(db)
-    print(f"purge(end) cleaned_rows={n1}")
+    try:
+        n1, left1, err1 = purge(db)
+        print(f"purge(end) cleaned_rows={n1} users_left={left1} errors={err1}")
+    except Exception as e:
+        print(f"FATAL purge(end) crashed: {e}")
+        purge_crashed = True
 
 total = passed + failed
 if total == 0:
@@ -219,4 +248,10 @@ if total == 0:
     sys.exit(1)
 verdict = "PASS" if failed == 0 else "FAIL"
 print(f"{verdict} {passed}/{total}")
+
+# Hygiene outranks assertions: a leaky purge makes the next run red for the
+# wrong reason, so report it separately with exit 2.
+if purge_crashed or left1 or err1:
+    print(f"FATAL purge(end) incomplete: users_left={left1} purge_errors={err1} crashed={purge_crashed}")
+    sys.exit(2)
 sys.exit(0 if failed == 0 else 1)
