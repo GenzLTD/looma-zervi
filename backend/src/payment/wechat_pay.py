@@ -364,16 +364,23 @@ def parse_notify_body(body: str) -> NotifyResult:
     )
 
 
-def build_notify_response(success: bool) -> tuple[str, int]:
+def build_notify_response(
+    success: bool,
+    *,
+    http_status: int | None = None,
+    message: str | None = None,
+) -> tuple[str, int]:
     """构建微信支付回调的应答体。
 
     成功 → {"code": "SUCCESS", "message": "OK"} 200
-    失败 → {"code": "FAIL", "message": "..."}     500
+    失败 → {"code": "FAIL", "message": "..."} 4xx（空/未签名/验签失败用 4xx，
+            避免空回调被记成 500 服务故障；真签成功路径仍 200）
     """
     if success:
         return json.dumps({"code": "SUCCESS", "message": "OK"}), 200
-    else:
-        return json.dumps({"code": "FAIL", "message": "Signature verification failed"}), 500
+    status = 400 if http_status is None else http_status
+    msg = message or "Signature verification failed"
+    return json.dumps({"code": "FAIL", "message": msg}), status
 
 
 # ============================================================

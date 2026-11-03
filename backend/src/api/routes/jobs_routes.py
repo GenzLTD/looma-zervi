@@ -507,6 +507,18 @@ def search_jobs():
     return jsonify(jobs=filtered, total=len(filtered))
 
 
+def _allow_seed_demo() -> bool:
+    """Admin always; non-production (dev/testing) also allowed for local demos."""
+    if g.get("user_role") == "admin":
+        return True
+    flask_env = (current_app.config.get("FLASK_ENV") or "").lower()
+    if flask_env in ("development", "testing"):
+        return True
+    if current_app.config.get("TESTING"):
+        return True
+    return False
+
+
 @jobs_bp.route("/seed-demo", methods=["POST"])
 @require_auth
 def seed_demo_jobs():
@@ -514,7 +526,16 @@ def seed_demo_jobs():
 
     Idempotent: skips job_ids that already exist in documents.
     Body optional: ``{ "jobs": [ {id,title,company,...} ] }`` — defaults to MOCK_JOBS.
+
+    Production: admin only. Free / non-admin on production → 403.
+    Development / testing: any authenticated user (local HR demos + pytest).
     """
+    if not _allow_seed_demo():
+        return jsonify(
+            error="forbidden",
+            message="seed-demo requires admin role in production",
+        ), 403
+
     user_id = str(g.user_id)
     data = request.get_json(silent=True) or {}
     raw_jobs = data.get("jobs") if isinstance(data.get("jobs"), list) else MOCK_JOBS

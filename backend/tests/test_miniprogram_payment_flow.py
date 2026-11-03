@@ -276,6 +276,8 @@ class TestProductionFlow:
             },
         })
 
+        # Headers required when WECHAT_API_V3_KEY is set (empty/unsigned → 401).
+        # verify_notify_sign is mocked True so values need only be non-empty.
         with patch(
             "src.api.routes.payment_routes.verify_notify_sign",
             return_value=True,
@@ -284,6 +286,12 @@ class TestProductionFlow:
                 "/v1/payment/wechat/notify",
                 data=notify_body,
                 content_type="application/json",
+                headers={
+                    "Wechatpay-Signature": "mock-signature",
+                    "Wechatpay-Timestamp": "1700000100",
+                    "Wechatpay-Nonce": "mock-nonce",
+                    "Wechatpay-Serial": "mock-serial",
+                },
             )
         assert resp.status_code == 200
         assert json.loads(resp.get_data(as_text=True))["code"] == "SUCCESS"

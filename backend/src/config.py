@@ -186,6 +186,9 @@ class Config:
     # Chain B fan-out — PlanetX → gfcc_kernel /v1/signal-ingest. Empty = skip.
     GFCC_SIGNAL_INGEST_URL = os.getenv("GFCC_SIGNAL_INGEST_URL", "")
     SIGNAL_INGEST_SECRET = os.getenv("SIGNAL_INGEST_SECRET", "")
+    # Circle identity bridge — same HS256 secret as gfcc_kernel ETHOS_AUTH_SECRET.
+    # Empty → POST /v1/auth/bridge?target=circle stays 501 (no fake mint).
+    ETHOS_AUTH_SECRET = os.getenv("ETHOS_AUTH_SECRET", "").strip()
 
     @property
     def is_production(self):
@@ -327,3 +330,4 @@ def _refresh_config():
     Config.DEMOPPI_SIGNAL_INGEST_URL = os.getenv("DEMOPPI_SIGNAL_INGEST_URL", "")
     Config.GFCC_SIGNAL_INGEST_URL = os.getenv("GFCC_SIGNAL_INGEST_URL", "")
     Config.SIGNAL_INGEST_SECRET = os.getenv("SIGNAL_INGEST_SECRET", "")
+    Config.ETHOS_AUTH_SECRET = os.getenv("ETHOS_AUTH_SECRET", "").strip()

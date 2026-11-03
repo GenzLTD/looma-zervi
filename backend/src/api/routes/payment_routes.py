@@ -532,14 +532,30 @@ def wechat_pay_notify():
 
     该端点由微信服务器回调，不走用户认证。
     需验证签名后才能处理业务逻辑。
+    空 body / 缺签名头 / 验签失败 → 稳定 4xx（非 500）。
     """
-    body = request.get_data(as_text=True)
+    body = request.get_data(as_text=True) or ""
     signature = request.headers.get(WECHAT_SIGNATURE_HEADER, "")
     serial = request.headers.get(WECHAT_SERIAL_HEADER, "")
     timestamp = request.headers.get(WECHAT_TIMESTAMP_HEADER, "")
     nonce = request.headers.get(WECHAT_NONCE_HEADER, "")
 
+    if not str(body).strip():
+        current_app.logger.warning("[wechat_pay] Notify empty body")
+        resp, code = build_notify_response(
+            False, http_status=400, message="empty body"
+        )
+        return resp, code, {"Content-Type": "application/json"}
+
     api_v3_key = current_app.config.get("WECHAT_API_V3_KEY", "")
+
+    # 生产密钥已配置时，缺签名头直接 401（不走 stub 放行）
+    if api_v3_key and not (signature and timestamp and nonce):
+        current_app.logger.warning("[wechat_pay] Notify missing signature headers")
+        resp, code = build_notify_response(
+            False, http_status=401, message="missing signature headers"
+        )
+        return resp, code, {"Content-Type": "application/json"}
 
     # 签名验证
     if not verify_notify_sign(
@@ -551,14 +567,18 @@ def wechat_pay_notify():
         api_v3_key=api_v3_key,
     ):
         current_app.logger.warning("[wechat_pay] Notify signature verification FAILED")
-        resp, code = build_notify_response(False)
+        resp, code = build_notify_response(
+            False, http_status=401, message="Signature verification failed"
+        )
         return resp, code, {"Content-Type": "application/json"}
 
     # 解析通知体
     result = parse_notify_body(body)
     if not result.success:
         current_app.logger.warning(f"[wechat_pay] Notify parse error: {result.error}")
-        resp, code = build_notify_response(False)
+        resp, code = build_notify_response(
+            False, http_status=400, message=result.error or "invalid notify body"
+        )
         return resp, code, {"Content-Type": "application/json"}
 
     # 处理业务逻辑：标记订单已支付 + 升级用户 tier + 创建订阅
