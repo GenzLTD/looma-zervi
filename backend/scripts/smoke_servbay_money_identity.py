@@ -43,7 +43,7 @@ from src.identity.ledger_subject import AmbiguousLedgerSubject, resolve_settleme
 
 
 def purge(db):
-    """Delete DOMAIN smoke users and dependent rows; return cleanup count."""
+    """Delete DOMAIN smoke users and all FK-dependent rows; return cleaned_rows."""
     cleaned = 0
     with db.get_conn() as conn:
         rows = conn.execute(
@@ -54,33 +54,54 @@ def purge(db):
         if not uids:
             return 0
         placeholders = ",".join("?" * len(uids))
-        for table in (
-            "subscriptions",
-            "orders",
-            "user_identities",
-            "credit_ledger",
-            "quota_usage",
-        ):
+
+        # Dynamic: every table whose FK points at users (avoids hardcode / fake names).
+        try:
+            tables = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name NOT LIKE 'sqlite_%' AND name != 'users'"
+                ).fetchall()
+            ]
+        except Exception as e:
+            print(f"WARN purge sqlite_master: {e}")
+            tables = []
+
+        for table in tables:
             try:
-                cur = conn.execute(
-                    f"DELETE FROM {table} WHERE user_id IN ({placeholders})",
-                    uids,
-                )
-                cleaned += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-            except Exception:
-                pass  # table may not exist
+                fks = conn.execute(f'PRAGMA foreign_key_list("{table}")').fetchall()
+            except Exception as e:
+                print(f"WARN purge pragma foreign_key_list({table}): {e}")
+                continue
+            # PRAGMA cols: id, seq, table, from, to, on_update, on_delete, match
+            cols = sorted({fk[3] for fk in fks if fk[2] == "users" and fk[3]})
+            for col in cols:
+                try:
+                    cur = conn.execute(
+                        f'DELETE FROM "{table}" WHERE "{col}" IN ({placeholders})',
+                        uids,
+                    )
+                    n = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                    cleaned += n
+                except Exception as e:
+                    print(f"WARN purge delete {table}.{col}: {e}")
+
         try:
             conn.execute(
                 f"UPDATE users SET wechat_openid=NULL WHERE id IN ({placeholders})",
                 uids,
             )
-        except Exception:
-            pass
-        cur = conn.execute(
-            f"DELETE FROM users WHERE id IN ({placeholders})",
-            uids,
-        )
-        cleaned += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        except Exception as e:
+            print(f"WARN purge null wechat_openid: {e}")
+        try:
+            cur = conn.execute(
+                f"DELETE FROM users WHERE id IN ({placeholders})",
+                uids,
+            )
+            cleaned += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        except Exception as e:
+            print(f"WARN purge delete users: {e}")
     return cleaned
 
 
@@ -100,7 +121,9 @@ r = client.get("/health")
 print("health", r.status_code, r.get_json())
 
 cfg_db = app.config.get("DATABASE_PATH")
-if str(cfg_db) != str(db_path):
+cfg_norm = os.path.normcase(os.path.abspath(str(cfg_db)))
+expect_norm = os.path.normcase(os.path.abspath(str(db_path)))
+if cfg_norm != expect_norm:
     print(f"FATAL DATABASE_PATH mismatch: app.config={cfg_db!r} expected={str(db_path)!r}")
     sys.exit(2)
 
@@ -114,7 +137,7 @@ with db.get_conn() as conn:
 print(f"TARGET DB: {db_path} existing_smoke_users={existing}")
 
 n0 = purge(db)
-print(f"purge(start) cleaned={n0}")
+print(f"purge(start) cleaned_rows={n0}")
 
 passed = 0
 failed = 0
@@ -188,7 +211,7 @@ try:
     passed, failed = check(resp.status_code == 409, "foreign openid 409", passed, failed)
 finally:
     n1 = purge(db)
-    print(f"purge(end) cleaned={n1}")
+    print(f"purge(end) cleaned_rows={n1}")
 
 total = passed + failed
 if total == 0:
