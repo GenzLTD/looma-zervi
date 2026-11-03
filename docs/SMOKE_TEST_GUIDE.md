@@ -80,6 +80,9 @@ chmod +x scripts/smoke_test.sh
 ### 脚本位置
 `scripts/smoke_test.sh`
 
+### ServBay 认钱认人实库冒烟（本机）
+在 `backend/` 下执行：`python scripts/smoke_servbay_money_identity.py`（需已有 `data/looma.db`；退出码 0=PASS，1=FAIL，2=库缺失/路径不符）。脚本只清理 `@servbay-smoke.local` 账号，开跑前后+异常 finally 清；与 pytest tempfile 无关。
+
 ### 测试阶段说明
 
 #### 阶段1: 网络连通性测试
