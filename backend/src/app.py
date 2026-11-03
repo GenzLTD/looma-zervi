@@ -231,6 +231,23 @@ def _git_commit() -> str:
     return "unknown"
 
 
+def _dual_track_health_ids() -> dict:
+    """Lock 4：/health 暴露 looma_sha；若注入则附 vultr_tag/stack_sha（CN 常为 null）。"""
+    commit = _git_commit()
+    looma_sha = (
+        os.getenv("LOOMA_SHA", "").strip()
+        or os.getenv("GIT_COMMIT", "").strip()
+        or commit
+    )
+    return {
+        "looma_sha": looma_sha if looma_sha != "unknown" else commit,
+        "vultr_tag": os.getenv("VULTR_TAG", "").strip()
+        or os.getenv("STACK_TAG", "").strip()
+        or None,
+        "stack_sha": os.getenv("STACK_SHA", "").strip() or None,
+    }
+
+
 def create_app(env="development"):
     app = Flask(__name__)
     _refresh_config()  # re-read env vars so per-test overrides are picked up
@@ -336,11 +353,15 @@ def create_app(env="development"):
             or has_deepseek
             or has_openai
         )
+        track_ids = _dual_track_health_ids()
         return jsonify(
             status="ok" if llm_ready else "degraded",
             service="looma-backend",
             version="v1",
             git_commit=_git_commit(),
+            looma_sha=track_ids["looma_sha"],
+            vultr_tag=track_ids["vultr_tag"],
+            stack_sha=track_ids["stack_sha"],
             llm_provider=primary_llm,
             llm_provider_order=llm_order,
             llm_configured=llm_ready,
