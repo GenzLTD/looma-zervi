@@ -116,12 +116,51 @@ def admin_create_user(openid: str, provider: str, full_name: str = "") -> dict:
     return resp.json()
 
 
+def admin_get_user_by_openid(openid: str):
+    """Find the one Auth user that already carries this openid.
+
+    一本帐的种子用户邮箱是真实邮箱，不能再按占位邮箱另建一号。
+    """
+    if not openid:
+        return None
+    headers = _admin_headers()
+    page = 1
+    per_page = 200
+    while True:
+        try:
+            resp = requests.get(
+                _auth_url("/admin/users"),
+                headers=headers,
+                params={"page": page, "per_page": per_page},
+                timeout=15,
+            )
+        except requests.RequestException as e:
+            logger.error(f"[supabase_admin] GET /admin/users failed: {e}")
+            raise
+        if resp.status_code != 200:
+            logger.error(
+                f"[supabase_admin] GET /admin/users status={resp.status_code}: {resp.text[:300]}"
+            )
+            return None
+        users = resp.json().get("users", [])
+        for user in users:
+            meta = user.get("user_metadata") or {}
+            if meta.get("wechat_openid") == openid or meta.get("huawei_openid") == openid:
+                return user
+        if len(users) < per_page:
+            return None
+        page += 1
+
+
 def upsert_supabase_user(openid: str, provider: str = "wechat",
                          full_name: str = "") -> dict:
     """Find-or-create a Supabase auth user by provider openid.
 
     Returns the Supabase auth user dict (has 'id' = supabase UUID).
     """
+    existing = admin_get_user_by_openid(openid)
+    if existing:
+        return existing
     email = placeholder_email(openid, provider)
     user = admin_get_user_by_email(email)
     if user:

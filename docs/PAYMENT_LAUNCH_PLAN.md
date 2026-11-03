@@ -2,7 +2,7 @@
 
 - 状态：**方案已定稿，Phase A 本地验收通过（247 passed），凭证后补执行**
 - 双仓同步：本文档 = `looma-zervi/docs/PAYMENT_LAUNCH_PLAN.md` = `szbolent-portal/docs/PAYMENT_LAUNCH_PLAN.md`
-- 相关文档：`COMMERCE_CLOSURE_STATUS.md`、`PAYMENT_TIER_CONTRACT.md`、`OVERSEAS_DEPLOY.md`、`DEPLOY_OVERSEAS_SETUP.md`（looma 侧）；`OPERATIONS_MANUAL.md`（szbolent-portal 侧）
+- 相关文档：`COMMERCE_CLOSURE_STATUS.md`、`PAYMENT_TIER_CONTRACT.md`、`PAYMENT_MULTIEND_GAPS.md`（2026-11-02 多端缺口与联测）、`OVERSEAS_DEPLOY.md`、`DEPLOY_OVERSEAS_SETUP.md`（looma 侧）；`OPERATIONS_MANUAL.md`（szbolent-portal 侧）
 - 日期：2026-09-02
 
 ## 0. 结论与路径

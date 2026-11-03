@@ -45,6 +45,8 @@ class Config:
     WECHAT_APPID = os.getenv("WECHAT_APPID", "")
     WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
     WECHAT_DEV_MODE = os.getenv("WECHAT_DEV_MODE", "false").lower() == "true"
+    # 本地一本帐：开发态微信登录固定落到这个 openid，不再按 wx.login code 各建一号
+    UNIFIED_SEED_OPENID = os.getenv("UNIFIED_SEED_OPENID", "").strip()
 
     # DeepSeek
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
@@ -222,6 +224,7 @@ def _refresh_config():
     Config.WECHAT_APPID = os.getenv("WECHAT_APPID", "")
     Config.WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
     Config.WECHAT_DEV_MODE = os.getenv("WECHAT_DEV_MODE", "false").lower() == "true"
+    Config.UNIFIED_SEED_OPENID = os.getenv("UNIFIED_SEED_OPENID", "").strip()
     Config.DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
     Config.DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
     Config.DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")

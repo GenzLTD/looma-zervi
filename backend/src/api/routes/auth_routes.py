@@ -124,10 +124,10 @@ def wechat_login():
     if not code:
         return jsonify(error="bad_request", message="wx.login code required"), 400
 
-    # Dev mode: skip WeChat API, use code as mock openid
+    # Dev mode: skip WeChat API. 配置了种子 openid 时，小程序和 App 进同一个用户。
     if current_app.config.get("WECHAT_DEV_MODE"):
-        openid = f"dev_{code[:20]}"
-        print(f"[DEV MODE] Wechat login - mock openid: {openid}")
+        openid = current_app.config.get("UNIFIED_SEED_OPENID") or f"dev_{code[:20]}"
+        print("[DEV MODE] Wechat login - unified seed" if current_app.config.get("UNIFIED_SEED_OPENID") else "[DEV MODE] Wechat login - mock openid")
     else:
         try:
             wechat_data = code2session(code)
@@ -151,7 +151,13 @@ def wechat_login():
             logger.error(f"[wechat_auth] Supabase upsert failed: {e}")
             return jsonify(error="upstream_error", message="identity provider unavailable"), 502
 
-        user = db.get_user_by_supabase_uid(sb_user["id"])
+        linked = db.get_user_by_openid(openid)
+        if linked:
+            if linked.get("supabase_uid") != sb_user["id"]:
+                db.bind_supabase_to_user(linked["id"], sb_user["id"])
+            user = db.get_user_by_id(linked["id"])
+        else:
+            user = db.get_user_by_supabase_uid(sb_user["id"])
         if not user:
             user, _ = db.get_or_create_user_by_supabase(
                 sb_user["id"],
