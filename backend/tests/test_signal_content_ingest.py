@@ -151,4 +151,5 @@ def test_signal_layer_disabled_without_secret(client, app):
     resp = client.post("/v1/signals/content",
                        json={"signal_type": "content_publish",
                              "publisher_id": "x", "nonce": "n", "data": {}})
-    assert resp.status_code == 503
+    assert resp.status_code == 501
+    assert resp.get_json()["error"] == "signal_layer_not_configured"

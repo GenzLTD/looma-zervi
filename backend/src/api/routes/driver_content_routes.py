@@ -264,9 +264,12 @@ def signal_content_ingest():
     """
     master_secret = current_app.config.get("SIGNAL_BRIDGE_SECRET", "")
     if not master_secret:
-        # fail-closed：信号层未配置即不开放写入面
-        return jsonify(error="signal_layer_disabled",
-                       message="SIGNAL_BRIDGE_SECRET is not configured"), 503
+        # fail-closed：信号层未配置即不开放写入面。
+        # 501（非 503）：未配置是部署态缺口，不是临时过载；明示原因避免「看起来像坏了」（#46-④）
+        return jsonify(error="signal_layer_not_configured",
+                       message="SIGNAL_BRIDGE_SECRET is not configured on this station; "
+                               "signal layer is disabled by fail-closed policy. "
+                               "Provision the secret and recreate backend to enable."), 501
 
     body = request.get_data()
     envelope = request.get_json(silent=True)

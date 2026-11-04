@@ -1060,6 +1060,11 @@ def signal_ingest():
     Header:
       X-Signal-Signature: HMAC-SHA256(raw_body, SIGNAL_BRIDGE_SECRET) as lowercase hex
     """
+    if not current_app.config.get("SIGNAL_BRIDGE_SECRET", ""):
+        # 明示部署态缺口（501），不与「签名错误 401」混同（#46-④）
+        return jsonify(error="signal_layer_not_configured",
+                       message="SIGNAL_BRIDGE_SECRET is not configured on this station; "
+                               "signal ingest is disabled by fail-closed policy."), 501
     if not _verify_signal_signature():
         return jsonify(error="unauthorized", message="invalid or missing signature"), 401
 
