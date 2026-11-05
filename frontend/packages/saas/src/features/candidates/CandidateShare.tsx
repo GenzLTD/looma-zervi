@@ -9,7 +9,7 @@ import {
   type ProfileShareView,
 } from "@looma/shared-core";
 import { createSaasApiClient } from "../../api/saasApiClient";
-import { parsePersonalityDetail } from "./personalityDetail";
+import { parsePersonalityDetail, textList } from "./personalityDetail";
 import TimelineL1Card from "./TimelineL1Card";
 import { MicroFeedbackBar } from "../../brand/components/MicroFeedbackBar";
 import { MICRO_FEEDBACK_CONTEXT } from "@looma/shared-core";
@@ -99,6 +99,8 @@ export default function CandidateShare() {
               {p.desc}
             </p>
           )}
+          <DetailList title="优势" items={textList(p.strengths)} />
+          <DetailList title="可以再长的地方" items={textList(p.growth)} />
         </div>
 
         <TimelineL1Card summary={data.timeline_l1} />
@@ -127,6 +129,26 @@ export default function CandidateShare() {
           question="这些信息够帮你做判断吗？"
           shareCode={code}
         />
+      </div>
+    </div>
+  );
+}
+
+function DetailList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="text-left mt-4">
+      <p className="text-xs mb-2" style={{ color: "var(--color-text-muted)" }}>{title}</p>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <span
+            key={item}
+            className="px-3 py-1 rounded-full text-xs"
+            style={{ backgroundColor: "var(--color-bg-surface)", color: "var(--color-text-secondary)" }}
+          >
+            {item}
+          </span>
+        ))}
       </div>
     </div>
   );

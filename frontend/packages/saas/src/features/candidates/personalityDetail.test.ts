@@ -48,4 +48,32 @@ describe("parsePersonalityDetail", () => {
     };
     expect(parsePersonalityDetail(view).name).toBe("星际探索者");
   });
+
+  it("keeps an MBTI name and its strengths beside an archetype name", () => {
+    const entj: ProfileShareView = {
+      ...base,
+      personality_type: "ENTJ",
+      personality_detail: {
+        name: "ENTJ",
+        strengths: ["领导力"],
+        growth: ["耐心倾听"],
+      },
+    };
+    expect(parsePersonalityDetail(entj)).toMatchObject({
+      name: "ENTJ",
+      strengths: ["领导力"],
+      growth: ["耐心倾听"],
+    });
+
+    const archetype: ProfileShareView = {
+      ...base,
+      personality_type: "星云艺术家",
+      personality_detail: JSON.stringify({
+        name: "星云艺术家",
+        traits: ["创造力爆表"],
+      }),
+    };
+    expect(parsePersonalityDetail(archetype).name).toBe("星云艺术家");
+    expect(parsePersonalityDetail(archetype).traits).toEqual(["创造力爆表"]);
+  });
 });

@@ -71,7 +71,15 @@ export default function CandidateDetail() {
 
   const profile = candidate.profile_data as {
     personality_type?: string;
-    personality_detail?: { name?: string; emoji?: string; tagline?: string; desc?: string; traits?: string[] };
+    personality_detail?: {
+      name?: string;
+      emoji?: string;
+      tagline?: string;
+      desc?: string;
+      traits?: string[];
+      strengths?: string[];
+      growth?: string[];
+    };
     xp?: number;
     level?: number;
   } | undefined;
@@ -126,6 +134,16 @@ export default function CandidateDetail() {
         {detail?.desc && (
           <p className="text-sm leading-relaxed" style={{ color: "var(--color-text-secondary)" }}>
             {detail.desc}
+          </p>
+        )}
+        {detail?.strengths && detail.strengths.length > 0 && (
+          <p className="text-sm mt-4" style={{ color: "var(--color-text-secondary)" }}>
+            优势：{detail.strengths.join("、")}
+          </p>
+        )}
+        {detail?.growth && detail.growth.length > 0 && (
+          <p className="text-sm mt-2" style={{ color: "var(--color-text-secondary)" }}>
+            可以再长的地方：{detail.growth.join("、")}
           </p>
         )}
       </div>

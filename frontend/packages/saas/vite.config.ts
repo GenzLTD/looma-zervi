@@ -5,16 +5,15 @@ import path from "path";
 
 /**
  * Dev API proxy target.
- * - Default: local Flask :5200
- * - Point at overseas without CORS pain (keep VITE_API_BASE unset so the
- *   browser stays same-origin and Vite proxies):
- *     VITE_PROXY_TARGET=https://api.genz.ltd pnpm --filter @looma/saas dev
- * - If VITE_API_BASE is set, the browser calls that host directly (needs CORS).
+ * - Default: local zervi-rust gateway :3333（浏览器仍访问 :5174，由 Vite 转发）
+ * - Flask :5200：VITE_PROXY_TARGET=http://127.0.0.1:5200
+ * - 海外：VITE_PROXY_TARGET=https://api.genz.ltd （保持 VITE_API_BASE 为空，避免浏览器跨域）
+ * - 若设置了 VITE_API_BASE，浏览器会直接打那个地址（需要 CORS）。
  */
 const proxyTarget =
   process.env.VITE_PROXY_TARGET ||
   process.env.VITE_API_BASE ||
-  "http://localhost:5200";
+  "http://127.0.0.1:3333";
 
 export default defineConfig({
   plugins: [
@@ -76,8 +75,8 @@ export default defineConfig({
   },
   server: {
     port: 5174,
-    host: "127.0.0.1",
-    allowedHosts: ["tspace.servbay.host"],
+    host: "0.0.0.0",
+    allowedHosts: true,
     proxy: {
       "/v1": {
         target: proxyTarget,
