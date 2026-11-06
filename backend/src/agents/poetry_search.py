@@ -10,7 +10,7 @@ logger = logging.getLogger("looma.poetry")
 
 
 def _search_chroma(query: str, n_results: int) -> list[dict]:
-    from src.rag.chroma_client import search_poetry_chroma
+    from src.thomas_core.rag.chroma_client import search_poetry_chroma
     results = search_poetry_chroma(query, n_results=n_results)
     poems = []
     for r in results:

@@ -16,7 +16,7 @@ import logging
 import re
 from flask import Blueprint, request, jsonify, g, current_app
 
-from src.api.auth.decorators import optional_auth, require_auth
+from src.thomas_core.auth.decorators import optional_auth, require_auth
 
 logger = logging.getLogger("looma.poetry")
 

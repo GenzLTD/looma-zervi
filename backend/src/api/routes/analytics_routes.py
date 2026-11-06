@@ -13,7 +13,7 @@ import logging
 
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth, optional_auth
+from src.thomas_core.auth.decorators import require_auth, optional_auth
 
 logger = logging.getLogger("looma.analytics")
 

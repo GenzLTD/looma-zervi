@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.identity.ledger_subject import (
+from src.thomas_core.identity.ledger_subject import (
     AmbiguousLedgerSubject,
     ensure_principal_sub,
     resolve_settlement_user_id,

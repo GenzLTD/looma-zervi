@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flask import Flask
 from src.config import Config
-from src.rag.chroma_client import add_documents
+from src.thomas_core.rag.chroma_client import add_documents
 
 
 def main():

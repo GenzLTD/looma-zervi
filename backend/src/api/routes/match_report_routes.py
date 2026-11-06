@@ -13,9 +13,9 @@ import logging
 
 from flask import Blueprint, current_app, g, jsonify, request
 
-from src.api.auth.decorators import require_auth
-from src.compliance.audit import AuditLogger
-from src.compliance.consent import require_consent
+from src.thomas_core.auth.decorators import require_auth
+from src.thomas_core.compliance.audit import AuditLogger
+from src.thomas_core.compliance.consent import require_consent
 from src.reports.match_report_manager import MatchReportManager
 
 logger = logging.getLogger("looma.match_report_routes")

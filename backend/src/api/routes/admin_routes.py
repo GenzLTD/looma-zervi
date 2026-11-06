@@ -16,7 +16,7 @@ import platform
 
 from flask import Blueprint, request, jsonify, current_app, g, render_template
 
-from src.api.auth.decorators import require_auth
+from src.thomas_core.auth.decorators import require_auth
 
 logger = logging.getLogger("looma.admin")
 
@@ -335,7 +335,7 @@ def admin_health():
 def _require_admin_manual():
     """JWT + admin role check for routes that must NOT run @require_auth
     (the HTML shell must be openable without a token; data stays protected)."""
-    from src.api.auth.jwt_handler import verify_token
+    from src.thomas_core.auth.jwt_handler import verify_token
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):

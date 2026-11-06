@@ -22,9 +22,9 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 
-from src.api.auth.decorators import require_auth
+from src.thomas_core.auth.decorators import require_auth
 from src.payment.plans import tier_for_product
-from src.identity.ledger_subject import (
+from src.thomas_core.identity.ledger_subject import (
     AmbiguousLedgerSubject,
     ensure_principal_sub,
     resolve_settlement_user_id,

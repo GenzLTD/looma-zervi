@@ -1,9 +1,9 @@
 """Tests for Compliance Gate modules."""
 from unittest.mock import MagicMock
 
-from src.compliance.consent import ConsentManager, ALL_SCOPES
-from src.compliance.redact import redact_pii, detect_pii
-from src.compliance.audit import AuditLogger, _anonymize_ip
+from src.thomas_core.compliance.consent import ConsentManager, ALL_SCOPES
+from src.thomas_core.compliance.redact import redact_pii, detect_pii
+from src.thomas_core.compliance.audit import AuditLogger, _anonymize_ip
 
 
 class TestConsentManager:

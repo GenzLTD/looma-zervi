@@ -15,7 +15,7 @@ import json
 
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth, require_tier
+from src.thomas_core.auth.decorators import require_auth, require_tier
 from src.utils.tier_limits import get_job_post_limit, is_at_limit
 
 job_post_bp = Blueprint("job_posts", __name__)

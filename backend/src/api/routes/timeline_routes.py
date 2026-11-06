@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, g, jsonify, request
 
-from src.api.auth.decorators import require_auth
+from src.thomas_core.auth.decorators import require_auth
 from src.timeline.constants import EVENT_KIND_MANUAL
 from src.timeline.events import (
     compute_growth_stub,

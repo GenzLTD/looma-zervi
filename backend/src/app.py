@@ -286,11 +286,11 @@ def create_app(env="development"):
     CORS(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)
 
     # --- Register blueprints ---
-    from src.api.routes.auth_routes import auth_bp
+    from src.thomas_core.routes.auth_routes import auth_bp
     from src.api.routes.game_routes import game_bp
     from src.api.routes.enterprise_routes import enterprise_bp
     from src.api.routes.job_post_routes import job_post_bp
-    from src.api.routes.ask_routes import ask_bp
+    from src.thomas_core.routes.ask_routes import ask_bp
     from src.api.routes.jobs_routes import jobs_bp
     from src.api.routes.application_routes import application_bp
     from src.api.routes.resume_routes import resume_bp
@@ -302,7 +302,7 @@ def create_app(env="development"):
     from src.api.routes.payment_routes import payment_bp
     from src.api.routes.poetry_routes import poetry_bp
     from src.api.routes.narrative_routes import narrative_bp
-    from src.api.routes.compliance_routes import compliance_bp
+    from src.thomas_core.routes.compliance_routes import compliance_bp
     from src.api.routes.analytics_routes import analytics_bp
     from src.api.routes.admin_routes import admin_bp
     from src.api.routes.social_routes import social_bp  # 六度分隔社交图谱

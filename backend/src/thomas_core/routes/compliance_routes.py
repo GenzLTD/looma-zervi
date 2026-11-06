@@ -4,15 +4,15 @@ Compliance Gate: Flask routes for consent management.
 from __future__ import annotations
 import logging
 from flask import Blueprint, request, jsonify, g
-from src.api.auth.decorators import require_auth
-from src.compliance.consent import (
+from src.thomas_core.auth.decorators import require_auth
+from src.thomas_core.compliance.consent import (
     get_consent_manager,
     ALL_SCOPES,
     PRIMARY_TIERS,
     CONSENT_PACKAGES,
     SCOPE_LABELS_ZH,
 )
-from src.compliance.audit import get_audit_logger
+from src.thomas_core.compliance.audit import get_audit_logger
 
 logger = logging.getLogger("looma.compliance.routes")
 compliance_bp = Blueprint("compliance", __name__)

@@ -18,8 +18,8 @@ from datetime import datetime, timezone, timedelta
 
 from flask import Blueprint, current_app, g, jsonify, request
 
-from src.api.auth.decorators import require_auth
-from src.compliance.consent import require_consent
+from src.thomas_core.auth.decorators import require_auth
+from src.thomas_core.compliance.consent import require_consent
 
 logger = logging.getLogger("looma.application")
 application_bp = Blueprint("application", __name__)

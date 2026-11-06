@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth
+from src.thomas_core.auth.decorators import require_auth
 from src.social.graph_builder import build_social_graph, get_graph_stats
 from src.social.social_bfs import (
     bfs_shortest_path,

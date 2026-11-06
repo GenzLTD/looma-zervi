@@ -14,8 +14,8 @@ import json
 import uuid
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth
-from src.api.auth.jwt_handler import sign_token_for_user
+from src.thomas_core.auth.decorators import require_auth
+from src.thomas_core.auth.jwt_handler import sign_token_for_user
 from src.analytics.events import (
     log_product_event,
     platform_from_request,
