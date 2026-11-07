@@ -2,7 +2,7 @@
 # Deploy SG — overseas track (tag -> Singapore Vultr only)
 #
 # Dual-track (2026-11):
-#   mainland = main -> deploy.yml -> Tianyi
+#   mainland = main -> deploy.yml -> CI only (Tianyi deploy retired 2026-11-07)
 #   overseas = stack-v* tag / workflow_dispatch -> this file
 #
 # Do NOT rsync from this repo to 139.180.184.25:
@@ -19,7 +19,7 @@
 #   On Vultr-Genzltd: git tag stack-vX.Y.Z && git push origin stack-vX.Y.Z
 #   -> that repo deploys vars.DEPLOY_HOST (139.180.184.25 / api.genz.ltd)
 #
-# Secrets (looma-zervi, isolated from TIANYI_*):
+# Secrets (looma-zervi, isolated from retired TIANYI_* secrets):
 #   VULTR_DEPLOY_DISPATCH_TOKEN — fine-grained PAT:
 #       owner=GenzLTD, repo=Vultr-Genzltd, Actions=write, Contents=read
 #
@@ -30,7 +30,7 @@
 #
 # Forbidden:
 #   - SSH_HOST / SSH_USER / SSH_PRIVATE_KEY (retired Tencent host)
-#   - this job must not push Tianyi or Frankfurt
+#   - this job must not push Tianyi (banned) or Frankfurt (separate staging script)
 # ============================================================
 name: Deploy SG
 
@@ -141,7 +141,7 @@ jobs:
           TIANYI_HOST: ${{ secrets.TIANYI_SSH_HOST }}
         run: |
           set -euo pipefail
-          echo "Overseas track does not use SSH_HOST (retired Tencent) or TIANYI_*."
+          echo "Overseas track does not use SSH_HOST (retired Tencent) or TIANYI_* (mainland deploy retired); guard kept against secret crosstalk."
           echo "Canonical SSH target lives in Vultr repo: vars.DEPLOY_HOST=139.180.184.25 (api.genz.ltd origin)."
           if [ -n "${LEGACY_HOST:-}" ]; then
             echo "note: SSH_HOST still set in this repo — rotate/delete; do not use for SG."
