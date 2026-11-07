@@ -507,10 +507,16 @@ def create_app(env="development"):
             db_path = app.config["DATABASE_PATH"]
             split = schema_loader.split_enabled()
             if split and db_path != ":memory:":
-                # product 侧外键/视图依赖 core 的 users → core 必须先建
-                if not schema_loader.core_ready(db_path):
+                # product 侧外键/视图依赖 core 的 users → core 必须先建。
+                # 空库（冷启动）是例外：此刻没有任何一方"拥有"表，宿主用同一份 loader
+                # 依次建 core → product，产出与 legacy 完全相同的 58 表 + 3 视图；
+                # 只有「库非空但缺 core」才 fail-fast（那通常意味着指错了库文件）。
+                if schema_loader.is_empty(db_path):
+                    boot = schema_loader.ensure_scope(db_path, "core")
+                    app.logger.info("[host] cold start → core scope bootstrapped: %s", boot)
+                elif not schema_loader.core_ready(db_path):
                     raise RuntimeError(
-                        "core schema missing: product scope 依赖 core 的 users 等 7 表。\n"
+                        "core schema missing: 库非空但缺 core 的 users 等 7 表。\n"
                         "请先启动核进程（backend/run_core.py，:5300）完成 core schema 初始化，"
                         "或临时设 THOMAS_SCHEMA_SPLIT=0 走 legacy 全量建表。"
                     )

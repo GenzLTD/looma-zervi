@@ -56,11 +56,22 @@ from src.app import create_app  # noqa: E402
 
 run("B host-after-core", core_db, create_app)
 
-# C) 宿主先起（库中无 core）：必须 fail-fast
+# C) 空库冷启动（宿主先起、库是空的）：允许，且产出与 legacy 相同 58 表 + 3 视图
+#    —— 这条是 CI / 单测路径（tests/conftest.py 每个 app 都是新的空 temp db）
+cold_db = os.path.join(TMP, "cold_start.db")
+if os.path.exists(cold_db):
+    os.remove(cold_db)
+run("C cold-start", cold_db, create_app)
+
+# C2) 库非空但缺 core：必须 fail-fast（防指错库）
 host_first = os.path.join(TMP, "host_first.db")
 if os.path.exists(host_first):
     os.remove(host_first)
-run("C host-without-core", host_first, create_app)
+_conn = sqlite3.connect(host_first)
+_conn.execute("CREATE TABLE stray_product_table (id INTEGER PRIMARY KEY)")
+_conn.commit()
+_conn.close()
+run("C2 host-without-core", host_first, create_app)
 
 # D) 版本记录
 for scope in ("core", "product"):

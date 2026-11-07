@@ -97,6 +97,24 @@ def core_ready(db_path: str) -> bool:
     return all(t in names for t in CORE_ANCHOR_TABLES)
 
 
+def is_empty(db_path: str) -> bool:
+    """库内是否还没有任何业务表（`schema_meta` 与 `sqlite_*` 不算）。
+
+    用于区分**冷启动**（空库，谁来建都行）与**指错库**（非空但缺 core，必须 fail-fast）。
+    """
+    if db_path == ":memory:" or not os.path.exists(db_path):
+        return True
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+            " AND name NOT LIKE 'sqlite_%' AND name != 'schema_meta'"
+        ).fetchall()
+    finally:
+        conn.close()
+    return not rows
+
+
 def ensure_scope(db_path: str, scope: str, strict: bool | None = None) -> dict:
     """确保某 scope 的对象存在（幂等），并记录/校验版本。
 
