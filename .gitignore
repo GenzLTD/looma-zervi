@@ -178,3 +178,6 @@ kb_inventory*.txt
 !*.css
 !*.scss
 !*.lock
+
+# schema 分权自测产物（scripts/verify_schema_split.py）
+backend/.tmp-split-probe/

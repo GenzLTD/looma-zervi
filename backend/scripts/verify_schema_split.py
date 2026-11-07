@@ -81,3 +81,28 @@ for scope in ("core", "product"):
         print("D schema_meta %-8s %s" % (scope, row))
     finally:
         conn.close()
+
+# E) 行尾归一：同一份 DDL 的 LF 副本与 CRLF 副本必须算出同一个版本号（坑 32）
+#    —— 否则 Windows（autocrlf=true）检出后会把 Linux/CI 建的库误判 drift
+from pathlib import Path  # noqa: E402
+
+from src.db import schema_loader  # noqa: E402
+
+_orig = dict(schema_loader.SCOPE_FILES)
+try:
+    _src = _orig["core"]
+    _lf = _src.read_bytes().replace(b"\r\n", b"\n")
+    _lf_path = Path(TMP) / "core_LF.sql"
+    _crlf_path = Path(TMP) / "core_CRLF.sql"
+    _lf_path.write_bytes(_lf)
+    _crlf_path.write_bytes(_lf.replace(b"\n", b"\r\n"))
+
+    schema_loader.SCOPE_FILES["core"] = _lf_path
+    _v_lf = schema_loader.file_version("core")
+    schema_loader.SCOPE_FILES["core"] = _crlf_path
+    _v_crlf = schema_loader.file_version("core")
+    print("E crlf-normalize      lf=%s crlf=%s %s" % (
+        _v_lf, _v_crlf, "SAME" if _v_lf == _v_crlf else "DIFF(FAIL)"))
+finally:
+    schema_loader.SCOPE_FILES.clear()
+    schema_loader.SCOPE_FILES.update(_orig)

@@ -7,7 +7,7 @@
 约束：
 1. **同库不拆文件**——两个 scope 写同一个 `looma.db`，只是建表权分开；
 2. product 侧外键 / 视图依赖 core 的 `users`，故 **core 必须先建**（split 模式下宿主启动时校验，缺则 fail-fast 给可执行提示）；
-3. 每次 ensure 记录 `schema_meta(scope, version, applied_at)`，`version = sha256(sql)[:12]`；
+3. 每次 ensure 记录 `schema_meta(scope, version, applied_at)`，`version = sha256(LF 归一后的 sql)[:12]`；
    文件变了而库没迁移 → 默认告警（drift），`THOMAS_SCHEMA_STRICT=1` 时直接抛错。
 
 行为不变纪律：`ensure_scope` 只做 `CREATE ... IF NOT EXISTS`（DDL 文件本身如此），不改任何既有表结构，
@@ -73,7 +73,15 @@ def sql_text(scope: str) -> str:
 
 
 def file_version(scope: str) -> str:
-    return hashlib.sha256(SCOPE_FILES[scope].read_bytes()).hexdigest()[:12]
+    """DDL 文件版本 = `sha256[:12]`，**按 LF 归一后**再算。
+
+    为什么必须归一：仓库里的 blob 存的是 LF，但 Windows（`core.autocrlf=true`）检出后
+    工作树是 CRLF。若直接对字节做 sha256，同一个 DDL 在两平台会算出两个版本号 ——
+    Linux/CI 建的库拿到 Windows 跑就会被误判 drift（`THOMAS_SCHEMA_STRICT=1` 时直接
+    抛 `SchemaDriftError` 起不来）。归一后两端同值，且与既有库记录一致。
+    """
+    raw = SCOPE_FILES[scope].read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(raw).hexdigest()[:12]
 
 
 def split_enabled(default: str = "1") -> bool:
