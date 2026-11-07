@@ -315,11 +315,22 @@ def create_app(env="development"):
         driver_content_bp, signal_content_bp,
     )
 
-    app.register_blueprint(auth_bp, url_prefix="/v1/auth")
+    # Phase 1：THOMAS_CORE_MODE=http 时，核面（auth/ask/compliance）不装进宿主进程，
+    # 改由 core_proxy 蓝图转发到核进程（:5300）；inprocess 为默认，行为与刀 4 前一致。
+    from src.thomas_core import client as core_client
+
+    if core_client.http_mode():
+        from src.api.routes.core_proxy_routes import core_proxy_bp
+
+        app.register_blueprint(core_proxy_bp)
+        app.logger.info("[host] core mode=http → proxy to %s", core_client.base_url())
+    else:
+        app.register_blueprint(auth_bp, url_prefix="/v1/auth")
     app.register_blueprint(game_bp, url_prefix="/v1/game")
     app.register_blueprint(enterprise_bp, url_prefix="/v1/enterprise")
     app.register_blueprint(job_post_bp, url_prefix="/v1")
-    app.register_blueprint(ask_bp, url_prefix="/v1")
+    if not core_client.http_mode():
+        app.register_blueprint(ask_bp, url_prefix="/v1")
     app.register_blueprint(jobs_bp, url_prefix="/v1/jobs")
     app.register_blueprint(application_bp, url_prefix="/v1")
     app.register_blueprint(resume_bp, url_prefix="/v1/resume")
@@ -327,7 +338,8 @@ def create_app(env="development"):
     app.register_blueprint(match_report_bp, url_prefix="/v1/match-reports")
     app.register_blueprint(referral_bp, url_prefix="/v1/referral")
     app.register_blueprint(credit_bp, url_prefix="/v1/credit")
-    app.register_blueprint(compliance_bp, url_prefix="/v1/compliance")
+    if not core_client.http_mode():
+        app.register_blueprint(compliance_bp, url_prefix="/v1/compliance")
     app.register_blueprint(quota_bp, url_prefix="/v1")
     app.register_blueprint(payment_bp, url_prefix="/v1")
     app.register_blueprint(poetry_bp, url_prefix="/v1/poetry")
@@ -486,13 +498,27 @@ def create_app(env="development"):
         return jsonify(error="server_error", message=str(e)), 500
 
     # --- Initialize database on first request ---
+    from src.db import schema_loader
     from src.db.manager import DatabaseManager
 
     @app.before_request
     def init_db():
         if not getattr(app, "_db_initialized", False):
-            db = DatabaseManager(app.config["DATABASE_PATH"])
-            db.init_schema()
+            db_path = app.config["DATABASE_PATH"]
+            split = schema_loader.split_enabled()
+            if split and db_path != ":memory:":
+                # product 侧外键/视图依赖 core 的 users → core 必须先建
+                if not schema_loader.core_ready(db_path):
+                    raise RuntimeError(
+                        "core schema missing: product scope 依赖 core 的 users 等 7 表。\n"
+                        "请先启动核进程（backend/run_core.py，:5300）完成 core schema 初始化，"
+                        "或临时设 THOMAS_SCHEMA_SPLIT=0 走 legacy 全量建表。"
+                    )
+                info = schema_loader.ensure_scope(db_path, "product")
+                app.logger.info("[host] schema scope=product ensured: %s", info)
+            db = DatabaseManager(db_path)
+            if not split or db_path == ":memory:":
+                db.init_schema()
 
             # Auto-seed beta users in dev mode
             if app.config.get("FLASK_ENV") == "development":
@@ -505,5 +531,12 @@ def create_app(env="development"):
 
             app._db = db
             app._db_initialized = True
+
+    # --- R1 键位强制（Phase 1）：in-process 模式下宿主同样要校验 X-User-Id ---
+    # http 模式由核进程校验（代理只透传该头），故此处不重复注册。
+    if not core_client.http_mode():
+        from src.thomas_core.keys import register_user_id_key_guard
+
+        register_user_id_key_guard(app)
 
     return app
