@@ -1,36 +1,30 @@
 # ============================================================
-# Deploy — 大陆轨（main → 天翼 only）
+# Deploy — 大陆轨已停用（main → 仅 CI，不部署任何主机）
 #
-# 双轨决策（2026-11）：
-#   mainland = push main / workflow_dispatch → 本文件 → 天翼 14.29.216.219
-#   overseas = git tag stack-v* → .github/workflows/deploy-sg.yml
-#              （派发 GenzLTD/Vultr-Genzltd Deploy stack，不在本 job SSH 新加坡）
+# 2026-11-07 裁决：天翼云 14.29.216.219 属「旧三 IP 禁跑清单」，
+#   本 workflow 不得再指向天翼 / 退役腾讯 1.14.202.161 / 新加坡。
+#   main push 只跑 backend-test；恢复自动部署须待新机参数齐并另行授权。
 #
-# 已退役：
+# 双轨现状：
+#   mainland = push main / workflow_dispatch → 本文件 → 仅 Backend Tests
+#   overseas = tag stack-v* → deploy-sg.yml（派发 GenzLTD/Vultr-Genzltd
+#              Deploy stack，不在本仓 SSH 任何主机）
+#
+# 已退役 / 禁止：
+#   - Deploy to Tianyi（14.29.216.219）— 2026-11-07 移除，禁跑清单
 #   - Deploy to Server（腾讯云 1.14.202.161）— 主机已下线
-#   - 勿再为该主机配置/使用 SSH_HOST / SSH_USER / SSH_PRIVATE_KEY
-#   - deploy-overseas.yml — 本仓 rsync 会盖掉海外会员蓝图；海外真源 = Vultr-Genzltd
+#   - deploy-overseas.yml — 本仓代码同步会盖掉海外会员蓝图
+#   - 不再读取任何主机 SSH / 天翼专用 Secrets
 #
-# 不在此 workflow 部署:
+# 不在此 workflow 部署：
 #   - genz.ltd 营销站 → genz-web + Vercel
 #   - Bolent 企业站   → 独立部署
-#   - 海外 Vultr SG   → deploy-sg.yml → Vultr-Genzltd（tag stack-v*）
+#   - 海外 Vultr SG   → deploy-sg.yml（tag stack-v*）
+#   - 法兰克福演练机  → 独立 staging-frankfurt 脚本，不走 main push
 #
-# 目标机:
-#   deploy-tianyi — 天翼云 14.29.216.219 (root, /opt/looma-zervi,
-#                   docker-compose.tianyi.full.yml, 宿主映射 :5203)
-#
-# 部署约定: 写 backend/git_commit.txt=<GITHUB_SHA>，
-#           health.git_commit == 目标 SHA。
-#
-# GitHub Secrets（大陆必填）:
-#   TIANYI_SSH_HOST          - 14.29.216.219
-#   TIANYI_SSH_USER          - root
-#   TIANYI_SSH_PRIVATE_KEY   - 天翼 root SSH 私钥全文
-#   TIANYI_DEPLOY_PATH       - /opt/looma-zervi
-#   TIANYI_COMPOSE_FILE      - docker-compose.tianyi.full.yml
-#
-# 与海外密钥隔离：VULTR_* / ENV_STRIPE_* 不进本 job。
+# 恢复自动部署的前置：新机 IP / SSH / SG 规则 / 健康检查 URL / 预发域名 /
+#   Python 版本 / 密钥注入方式齐备 + 生产 SECRET_KEY / JWT_SECRET 注入 +
+#   本地 dry-run 通过。详见 thomas-verification-chain-2026-11-06.md §16。
 # ============================================================
 name: Deploy
 
@@ -45,7 +39,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-tianyi
+  group: deploy-ci
   cancel-in-progress: false
 
 jobs:
@@ -81,114 +75,3 @@ jobs:
           DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
           CHROMA_PERSIST_DIR: /tmp/chroma_ci
         run: python -m pytest tests/ -v --tb=short
-
-  require-tianyi-config:
-    name: "Require Tianyi secrets"
-    runs-on: ubuntu-latest
-    needs: [backend-test]
-    if: success()
-    steps:
-      - name: Fail-fast — 缺一项就失败，禁止无鉴权静默跳过
-        env:
-          T_HOST: ${{ secrets.TIANYI_SSH_HOST }}
-          T_USER: ${{ secrets.TIANYI_SSH_USER }}
-          T_KEY: ${{ secrets.TIANYI_SSH_PRIVATE_KEY }}
-          T_PATH: ${{ secrets.TIANYI_DEPLOY_PATH }}
-          T_COMPOSE: ${{ secrets.TIANYI_COMPOSE_FILE }}
-        run: |
-          set -euo pipefail
-          missing=""
-          [ -n "$T_HOST" ] || missing="$missing TIANYI_SSH_HOST"
-          [ -n "$T_USER" ] || missing="$missing TIANYI_SSH_USER"
-          [ -n "$T_KEY" ] || missing="$missing TIANYI_SSH_PRIVATE_KEY"
-          [ -n "$T_PATH" ] || missing="$missing TIANYI_DEPLOY_PATH"
-          [ -n "$T_COMPOSE" ] || missing="$missing TIANYI_COMPOSE_FILE"
-          if [ -n "$missing" ]; then
-            echo "::error::大陆轨缺少 Secrets:$missing — 禁止静默跳过 Deploy to Tianyi"
-            exit 1
-          fi
-          case "$T_HOST" in
-            1.14.202.161)
-              echo "::error::TIANYI_SSH_HOST 指向已退役腾讯机 1.14.202.161"
-              exit 1
-              ;;
-            139.180.184.25|api.genz.ltd)
-              echo "::error::TIANYI_SSH_HOST 指向新加坡 — 大陆轨禁止推 SG"
-              exit 1
-              ;;
-          esac
-          echo "Tianyi target = ${T_USER}@${T_HOST} path=${T_PATH} compose=${T_COMPOSE}"
-
-  deploy-tianyi:
-    name: "Deploy to Tianyi (14.29.216.219)"
-    runs-on: ubuntu-latest
-    needs: [backend-test, require-tianyi-config]
-    if: success()
-    env:
-      T_HOST: ${{ secrets.TIANYI_SSH_HOST }}
-      T_USER: ${{ secrets.TIANYI_SSH_USER }}
-      T_PATH: ${{ secrets.TIANYI_DEPLOY_PATH }}
-      T_COMPOSE_FILE: ${{ secrets.TIANYI_COMPOSE_FILE }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup SSH (tianyi)
-        uses: webfactory/ssh-agent@v0.9.1
-        with:
-          ssh-private-key: ${{ secrets.TIANYI_SSH_PRIVATE_KEY }}
-
-      - name: Add host key (tianyi)
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ env.T_HOST }} >> ~/.ssh/known_hosts
-
-      - name: Setup SSH env
-        run: |
-          echo 'SSH_CMD=ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o StrictHostKeyChecking=accept-new' >> $GITHUB_ENV
-          echo "DEPLOY_TARGET=${{ env.T_USER }}@${{ env.T_HOST }}" >> $GITHUB_ENV
-
-      - name: Sync backend code (tianyi)
-        run: |
-          rsync -avz -e "$SSH_CMD" --delete \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='**/__pycache__' \
-            --exclude='**/*.pyc' \
-            --exclude='backend/venv' \
-            --exclude='backend/data' \
-            --exclude='backend/.env' \
-            --exclude='backend/poems_all.json.gz' \
-            --exclude='backend/open_items.json' \
-            --exclude='backend/git_commit.txt' \
-            --exclude='backend/src/rag/chroma_client.py.bak-*' \
-            backend/ \
-            ${{ env.DEPLOY_TARGET }}:${{ env.T_PATH }}/backend/
-
-      - name: Restart looma-backend + write git_commit (tianyi)
-        run: |
-          $SSH_CMD ${{ env.DEPLOY_TARGET }} "bash -s" << 'RESTART'
-          set -euo pipefail
-          T_PATH="${{ env.T_PATH }}"
-          COMPOSE="docker compose -f ${T_PATH}/docker/${{ env.T_COMPOSE_FILE }} -p looma-zervi"
-          echo "=== Write git_commit marker (${{ github.sha }}) ==="
-          echo "${{ github.sha }}" > "${T_PATH}/backend/git_commit.txt"
-          cat "${T_PATH}/backend/git_commit.txt"
-          echo "=== Recreate looma-backend (code via bind mount) ==="
-          ${COMPOSE} up -d --no-build --force-recreate backend
-          echo "=== Wait for backend health (:5203 host mapping) ==="
-          for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:5203/health >/dev/null 2>&1; then
-              echo "Backend healthy after ${i}s"
-              break
-            fi
-            sleep 2
-          done
-          curl -sf http://127.0.0.1:5203/health || { ${COMPOSE} logs --tail 40 backend; exit 1; }
-          RESTART
-
-      - name: Public health check (tianyi)
-        run: |
-          echo "=== Public http://${{ env.T_HOST }}/health ==="
-          curl -sf --connect-timeout 15 "http://${{ env.T_HOST }}/health"
-          echo ""
