@@ -3,13 +3,13 @@ Flask application factory.
 Registers all blueprints, middleware, and error handlers.
 """
 import os
-import subprocess
 from functools import lru_cache
 
 from flask import Flask, abort, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 
 from src.config import Config, _refresh_config
+from src.thomas_core.runtime import git_commit
 
 _HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 
@@ -200,35 +200,12 @@ def _collect_open_items(app):
 
 @lru_cache(maxsize=1)
 def _git_commit() -> str:
-    """Resolve the deployed commit hash for /health (三级回退).
+    """兼容壳：实现已收进核（刀 5a，`src/thomas_core/runtime.git_commit`）。
 
-    Priority: GIT_COMMIT env → backend/git_commit.txt → git rev-parse.
-    Cloud deploys rsync with --exclude='.git' (no git history), so deploy
-    scripts write backend/git_commit.txt at rsync time; local runs fall back
-    to rev-parse. Cached for the process lifetime.
+    保留本名字是因为宿主内多处（`/health`、`_dual_track_health_ids`）与既有测试
+    都在叫它；产品→核 的 import 方向是允许的。
     """
-    env = os.getenv("GIT_COMMIT", "").strip()
-    if env:
-        return env
-    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    marker = os.path.join(backend_dir, "git_commit.txt")
-    try:
-        with open(marker, encoding="utf-8") as f:
-            val = f.read().strip()
-            if val:
-                return val
-    except OSError:
-        pass
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, cwd=backend_dir, timeout=2,
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
-    except Exception:
-        pass
-    return "unknown"
+    return git_commit()
 
 
 def _dual_track_health_ids() -> dict:
