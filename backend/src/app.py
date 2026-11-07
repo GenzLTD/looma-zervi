@@ -522,4 +522,24 @@ def create_app(env="development"):
 
         register_user_id_key_guard(app)
 
+    # --- 核钩子注册（刀 5e/5f）：时间线埋点 / 匹配报告 / 意图大脑由宿主注入 ---
+    # 核不再硬 import 产品模块；这里把宿主实现挂上去。注册失败不阻断启动 ——
+    # 核的钩子本身有惰性缺省（宿主不在时不报错），所以 try/except 只是保险。
+    from src.thomas_core import brain as _core_brain
+    from src.thomas_core import hooks as _core_hooks
+
+    try:
+        from src.reports.match_report_manager import MatchReportManager as _MatchReportManager
+        from src.timeline.events import record_interaction_log as _record_interaction_log
+
+        _core_hooks.register_timeline_logger(_record_interaction_log)
+        _core_hooks.register_report_manager_factory(_MatchReportManager)
+
+        from src.agents.central_brain import dispatch as _brain_dispatch
+        from src.agents.central_brain import parse_intent as _brain_parse_intent
+
+        _core_brain.register_brain(_brain_parse_intent, _brain_dispatch)
+    except Exception:  # pragma: no cover - 裁剪部署时的保险
+        app.logger.warning("[core-hooks] 宿主实现注册失败，回落核的惰性缺省", exc_info=True)
+
     return app
