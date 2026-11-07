@@ -203,7 +203,8 @@ def _git_commit() -> str:
     """兼容壳：实现已收进核（刀 5a，`src/thomas_core/runtime.git_commit`）。
 
     保留本名字是因为宿主内多处（`/health`、`_dual_track_health_ids`）与既有测试
-    都在叫它；产品→核 的 import 方向是允许的。
+    都在叫它；产品→核 的 import 方向是允许的。缓存由核那侧按 env 值记忆，
+    这里不再叠一层 lru_cache（叠了会让 monkeypatch GIT_COMMIT 失效）。
     """
     return git_commit()
 
