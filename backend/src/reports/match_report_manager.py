@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from src.compliance.redact import redact_pii
+from src.thomas_core.compliance.redact import redact_pii
 
 logger = logging.getLogger("looma.match_reports")
 

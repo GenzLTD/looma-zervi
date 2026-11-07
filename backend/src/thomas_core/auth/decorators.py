@@ -8,7 +8,7 @@ Dual-token support (RFC docs/rfc/supabase-unified-auth-v1.md D6):
 """
 from functools import wraps
 from flask import request, jsonify, g, current_app
-from src.api.auth.jwt_handler import resolve_auth_token
+from src.thomas_core.auth.jwt_handler import resolve_auth_token
 
 
 def _resolve_user(db, source: str, payload: dict):

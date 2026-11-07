@@ -21,9 +21,9 @@ from datetime import datetime, timezone, timedelta
 
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth, optional_auth
-from src.compliance.consent import require_consent
-from src.utils.quota import consume_with_boost, RESOURCE_JOB_MATCH, build_upgrade_hint
+from src.thomas_core.auth.decorators import require_auth, optional_auth
+from src.thomas_core.compliance.consent import require_consent
+from src.thomas_core.quota import consume_with_boost, RESOURCE_JOB_MATCH, build_upgrade_hint
 
 logger = logging.getLogger("looma.jobs")
 jobs_bp = Blueprint("jobs", __name__)

@@ -326,7 +326,7 @@ def dispatch(
     # ── RAG 问答 ──
     if intent == "rag":
         try:
-            from src.rag.chroma_client import search_chroma
+            from src.thomas_core.rag.chroma_client import search_chroma
             preset = get_ask_mode_preset(context.get("ask_mode"))
             top_k = int(preset["top_k"])
             history_turns = int(preset["history_turns"])

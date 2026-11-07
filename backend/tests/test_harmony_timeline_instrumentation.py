@@ -72,13 +72,13 @@ def test_record_writers_do_not_raise_without_db(monkeypatch):
 
 def test_huawei_auth_uses_correct_identity_kwargs():
     """Static guard: auth_routes must call get_or_create_user_by_identity with name=/metadata_json=."""
-    src = (
-        Path(__file__).resolve().parents[1]
-        / "src"
-        / "api"
-        / "routes"
-        / "auth_routes.py"
-    ).read_text(encoding="utf-8")
+    # 按模块定位，不写死文件路径——抽核把 auth_routes 搬到 src/thomas_core/routes/ 后，
+    # 写死 src/api/routes 的版本会直接 FileNotFoundError（CI 抓到的第一个真实回归）。
+    import importlib.util
+
+    spec = importlib.util.find_spec("src.thomas_core.routes.auth_routes")
+    assert spec and spec.origin, "找不到 auth_routes 模块（抽核后路径应随模块走）"
+    src = Path(spec.origin).read_text(encoding="utf-8")
     # Regression: previously passed invalid extra_data= kwarg → TypeError at runtime
     assert "extra_data=" not in src.split("def huawei_login")[1].split("def ")[0]
     assert 'provider="huawei"' in src

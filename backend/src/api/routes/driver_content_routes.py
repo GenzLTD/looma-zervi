@@ -20,7 +20,7 @@ import logging
 
 from flask import Blueprint, current_app, g, jsonify, request
 
-from src.api.auth.decorators import require_auth, require_driver
+from src.thomas_core.auth.decorators import require_auth, require_driver
 
 logger = logging.getLogger(__name__)
 

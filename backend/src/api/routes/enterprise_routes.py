@@ -20,7 +20,7 @@ import os
 import uuid
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth, require_tier, optional_auth
+from src.thomas_core.auth.decorators import require_auth, require_tier, optional_auth
 from src.analytics.events import (
     log_product_event,
     platform_from_request,

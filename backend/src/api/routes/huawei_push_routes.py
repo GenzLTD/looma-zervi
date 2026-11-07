@@ -22,7 +22,7 @@ from typing import Optional
 import requests
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth
+from src.thomas_core.auth.decorators import require_auth
 from src.db.manager import DatabaseManager
 
 logger = logging.getLogger(__name__)

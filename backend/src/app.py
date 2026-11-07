@@ -286,11 +286,11 @@ def create_app(env="development"):
     CORS(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)
 
     # --- Register blueprints ---
-    from src.api.routes.auth_routes import auth_bp
+    from src.thomas_core.routes.auth_routes import auth_bp
     from src.api.routes.game_routes import game_bp
     from src.api.routes.enterprise_routes import enterprise_bp
     from src.api.routes.job_post_routes import job_post_bp
-    from src.api.routes.ask_routes import ask_bp
+    from src.thomas_core.routes.ask_routes import ask_bp
     from src.api.routes.jobs_routes import jobs_bp
     from src.api.routes.application_routes import application_bp
     from src.api.routes.resume_routes import resume_bp
@@ -302,7 +302,7 @@ def create_app(env="development"):
     from src.api.routes.payment_routes import payment_bp
     from src.api.routes.poetry_routes import poetry_bp
     from src.api.routes.narrative_routes import narrative_bp
-    from src.api.routes.compliance_routes import compliance_bp
+    from src.thomas_core.routes.compliance_routes import compliance_bp
     from src.api.routes.analytics_routes import analytics_bp
     from src.api.routes.admin_routes import admin_bp
     from src.api.routes.social_routes import social_bp  # 六度分隔社交图谱
@@ -315,11 +315,22 @@ def create_app(env="development"):
         driver_content_bp, signal_content_bp,
     )
 
-    app.register_blueprint(auth_bp, url_prefix="/v1/auth")
+    # Phase 1：THOMAS_CORE_MODE=http 时，核面（auth/ask/compliance）不装进宿主进程，
+    # 改由 core_proxy 蓝图转发到核进程（:5300）；inprocess 为默认，行为与刀 4 前一致。
+    from src.thomas_core import client as core_client
+
+    if core_client.http_mode():
+        from src.api.routes.core_proxy_routes import core_proxy_bp
+
+        app.register_blueprint(core_proxy_bp)
+        app.logger.info("[host] core mode=http → proxy to %s", core_client.base_url())
+    else:
+        app.register_blueprint(auth_bp, url_prefix="/v1/auth")
     app.register_blueprint(game_bp, url_prefix="/v1/game")
     app.register_blueprint(enterprise_bp, url_prefix="/v1/enterprise")
     app.register_blueprint(job_post_bp, url_prefix="/v1")
-    app.register_blueprint(ask_bp, url_prefix="/v1")
+    if not core_client.http_mode():
+        app.register_blueprint(ask_bp, url_prefix="/v1")
     app.register_blueprint(jobs_bp, url_prefix="/v1/jobs")
     app.register_blueprint(application_bp, url_prefix="/v1")
     app.register_blueprint(resume_bp, url_prefix="/v1/resume")
@@ -327,7 +338,8 @@ def create_app(env="development"):
     app.register_blueprint(match_report_bp, url_prefix="/v1/match-reports")
     app.register_blueprint(referral_bp, url_prefix="/v1/referral")
     app.register_blueprint(credit_bp, url_prefix="/v1/credit")
-    app.register_blueprint(compliance_bp, url_prefix="/v1/compliance")
+    if not core_client.http_mode():
+        app.register_blueprint(compliance_bp, url_prefix="/v1/compliance")
     app.register_blueprint(quota_bp, url_prefix="/v1")
     app.register_blueprint(payment_bp, url_prefix="/v1")
     app.register_blueprint(poetry_bp, url_prefix="/v1/poetry")
@@ -486,13 +498,33 @@ def create_app(env="development"):
         return jsonify(error="server_error", message=str(e)), 500
 
     # --- Initialize database on first request ---
+    from src.db import schema_loader
     from src.db.manager import DatabaseManager
 
     @app.before_request
     def init_db():
         if not getattr(app, "_db_initialized", False):
-            db = DatabaseManager(app.config["DATABASE_PATH"])
-            db.init_schema()
+            db_path = app.config["DATABASE_PATH"]
+            split = schema_loader.split_enabled()
+            if split and db_path != ":memory:":
+                # product 侧外键/视图依赖 core 的 users → core 必须先建。
+                # 空库（冷启动）是例外：此刻没有任何一方"拥有"表，宿主用同一份 loader
+                # 依次建 core → product，产出与 legacy 完全相同的 58 表 + 3 视图；
+                # 只有「库非空但缺 core」才 fail-fast（那通常意味着指错了库文件）。
+                if schema_loader.is_empty(db_path):
+                    boot = schema_loader.ensure_scope(db_path, "core")
+                    app.logger.info("[host] cold start → core scope bootstrapped: %s", boot)
+                elif not schema_loader.core_ready(db_path):
+                    raise RuntimeError(
+                        "core schema missing: 库非空但缺 core 的 users 等 7 表。\n"
+                        "请先启动核进程（backend/run_core.py，:5300）完成 core schema 初始化，"
+                        "或临时设 THOMAS_SCHEMA_SPLIT=0 走 legacy 全量建表。"
+                    )
+                info = schema_loader.ensure_scope(db_path, "product")
+                app.logger.info("[host] schema scope=product ensured: %s", info)
+            db = DatabaseManager(db_path)
+            if not split or db_path == ":memory:":
+                db.init_schema()
 
             # Auto-seed beta users in dev mode
             if app.config.get("FLASK_ENV") == "development":
@@ -505,5 +537,12 @@ def create_app(env="development"):
 
             app._db = db
             app._db_initialized = True
+
+    # --- R1 键位强制（Phase 1）：in-process 模式下宿主同样要校验 X-User-Id ---
+    # http 模式由核进程校验（代理只透传该头），故此处不重复注册。
+    if not core_client.http_mode():
+        from src.thomas_core.keys import register_user_id_key_guard
+
+        register_user_id_key_guard(app)
 
     return app

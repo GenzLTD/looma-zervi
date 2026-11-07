@@ -22,13 +22,13 @@ For production, set PAYMENT_STUB_MODE=false and configure payment credentials.
 from flask import Blueprint, jsonify, g, request, current_app
 import re
 
-from src.api.auth.decorators import require_auth
-from src.identity.ledger_subject import (
+from src.thomas_core.auth.decorators import require_auth
+from src.thomas_core.identity.ledger_subject import (
     AmbiguousLedgerSubject,
     ensure_principal_sub,
     resolve_settlement_user_id,
 )
-from src.api.auth.jwt_handler import sign_token_for_user
+from src.thomas_core.auth.jwt_handler import sign_token_for_user
 from src.analytics.events import (
     log_product_event,
     platform_from_request,

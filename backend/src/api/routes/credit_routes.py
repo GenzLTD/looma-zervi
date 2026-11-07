@@ -17,9 +17,9 @@ from collections import OrderedDict
 
 from flask import Blueprint, request, jsonify, g
 
-from src.api.auth.decorators import require_auth
+from src.thomas_core.auth.decorators import require_auth
 from src.agents.central_brain import _call_llm
-from src.compliance.consent import require_consent
+from src.thomas_core.compliance.consent import require_consent
 from src.credit.qcc_client import (
     check_company_credit,
     format_credit_summary,

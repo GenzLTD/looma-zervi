@@ -8,8 +8,8 @@ Endpoints:
 """
 from flask import Blueprint, jsonify, g
 
-from src.api.auth.decorators import require_auth
-from src.utils.quota import QUOTA_LIMITS, get_remaining, RESOURCE_ASK, RESOURCE_JOB_MATCH, RESOURCE_RESUME_PARSE, RESOURCE_RAG
+from src.thomas_core.auth.decorators import require_auth
+from src.thomas_core.quota import QUOTA_LIMITS, get_remaining, RESOURCE_ASK, RESOURCE_JOB_MATCH, RESOURCE_RESUME_PARSE, RESOURCE_RAG
 
 quota_bp = Blueprint("quota", __name__)
 

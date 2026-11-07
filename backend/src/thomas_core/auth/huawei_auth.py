@@ -7,7 +7,7 @@
 参考文档: https://developer.huawei.com/consumer/cn/doc/HMSCore-References/account-auth-openplatform-0000001050150169
 
 Usage (shared by auth_routes.py):
-    from src.api.auth.huawei_auth import exchange_authorization_code, HuaweiUserInfo
+    from src.thomas_core.auth.huawei_auth import exchange_authorization_code, HuaweiUserInfo
 """
 
 import time

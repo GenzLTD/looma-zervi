@@ -24,7 +24,7 @@ import json as _json
 import math
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth, optional_auth
+from src.thomas_core.auth.decorators import require_auth, optional_auth
 from src.agents.trust_agent import generate_attestations
 from src.timeline.events import record_mission_completed
 from src.signal_bridge.gfcc_fanout import send_gfcc_personality_beacon_outboxed

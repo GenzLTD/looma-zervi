@@ -15,9 +15,9 @@ from collections import OrderedDict
 
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth, optional_auth
-from src.compliance.consent import require_consent
-from src.utils.quota import (
+from src.thomas_core.auth.decorators import require_auth, optional_auth
+from src.thomas_core.compliance.consent import require_consent
+from src.thomas_core.quota import (
     consume_with_boost, refund_consumption, get_remaining, build_upgrade_hint,
     QUOTA_LIMITS, RESOURCE_ASK,
 )

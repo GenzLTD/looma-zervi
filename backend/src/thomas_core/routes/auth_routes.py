@@ -25,11 +25,11 @@ import time
 import bcrypt
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.jwt_handler import sign_token, verify_token, get_current_user_id, sign_token_for_user
-from src.api.auth.decorators import require_auth
-from src.api.auth.wechat_auth import code2session
-from src.api.auth.google_auth import verify_id_token, exchange_auth_code, GoogleUserInfo
-from src.api.auth.huawei_auth import exchange_authorization_code, fetch_user_info
+from src.thomas_core.auth.jwt_handler import sign_token, verify_token, get_current_user_id, sign_token_for_user
+from src.thomas_core.auth.decorators import require_auth
+from src.thomas_core.auth.wechat_auth import code2session
+from src.thomas_core.auth.google_auth import verify_id_token, exchange_auth_code, GoogleUserInfo
+from src.thomas_core.auth.huawei_auth import exchange_authorization_code, fetch_user_info
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +149,8 @@ def wechat_login():
 
     if supabase_enabled:
         # ---- Supabase 统一认证路径（THOMAS 生态） ----
-        from src.api.auth.supabase_auth import upsert_supabase_user
-        from src.api.auth.jwt_handler import sign_supabase_custom_token
+        from src.thomas_core.auth.supabase_auth import upsert_supabase_user
+        from src.thomas_core.auth.jwt_handler import sign_supabase_custom_token
 
         try:
             sb_user = upsert_supabase_user(openid, provider="wechat")
@@ -539,8 +539,8 @@ def auth_bridge():
                 },
             ), 501
 
-        from src.api.auth.jwt_handler import resolve_auth_token
-        from src.api.auth.decorators import _resolve_user
+        from src.thomas_core.auth.jwt_handler import resolve_auth_token
+        from src.thomas_core.auth.decorators import _resolve_user
 
         try:
             source, payload = resolve_auth_token(auth_header[7:])
@@ -552,7 +552,7 @@ def auth_bridge():
         if not user:
             return jsonify(error="unauthorized", message="user not found"), 401
 
-        from src.identity.ledger_subject import ensure_principal_sub
+        from src.thomas_core.identity.ledger_subject import ensure_principal_sub
 
         sub = ensure_principal_sub(db, user["id"])
         tier = user.get("tier") or "free"

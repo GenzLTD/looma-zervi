@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, request, jsonify, current_app, g
 
-from src.api.auth.decorators import require_auth
+from src.thomas_core.auth.decorators import require_auth
 from src.agents.trust_agent import generate_attestations
 from src.utils.crypto import sign_attestation, verify_attestation, get_public_key_pem
 
