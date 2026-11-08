@@ -10,8 +10,12 @@ ROOT = str(__import__("pathlib").Path(__file__).resolve().parents[1])
 CORE_SQL = os.path.join(ROOT, "src", "db", "core_schema.sql")
 PROD_SQL = os.path.join(ROOT, "src", "db", "product_schema.sql")
 LIVE_DB = os.path.join(ROOT, "data", "looma.db")
+# 锚表仍是原来 7 张。35f0465 在同一份 core_schema 里追加邀请和设备凭证。
 CORE = {"users", "user_identities", "consents", "audit_logs",
-        "signal_ingest", "signal_outbox", "signal_dlq"}
+        "signal_ingest", "signal_outbox", "signal_dlq",
+        "invitations", "invitation_redemptions", "tenant_audience_policies",
+        "device_challenges", "device_credentials", "device_counter", "pop_replay"}
+EXPECT_TABLES = 64
 
 fails = []
 
@@ -41,7 +45,7 @@ try:
     db2.executescript(load(CORE_SQL) + load(PROD_SQL))
     t = db2.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchone()[0]
     v = db2.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='view'").fetchone()[0]
-    check("② 同库依次建库", t == 57 and v == 3, "tables=%d(期望57) views=%d(期望3)" % (t, v))
+    check("② 同库依次建库", t == EXPECT_TABLES and v == 3, "tables=%d(期望%d) views=%d(期望3)" % (t, EXPECT_TABLES, v))
 except Exception as e:
     check("② 同库依次建库", False, str(e)[:120])
 
@@ -65,17 +69,21 @@ check("③b core FK 不指向 product", not core_bad, str(core_bad[:5]))
 viol = db2.execute("PRAGMA foreign_key_check").fetchall()
 check("④ foreign_key_check 零违规", not viol, "%d rows" % len(viol))
 
-# ⑤ 实库同扫描（防漂移）
-try:
-    live = sqlite3.connect("file:%s?mode=ro" % LIVE_DB.replace("\\", "/"), uri=True)
-    ml = fk_map(live)
-    lb = [(t, tgt) for t, tgts in ml.items() if t not in CORE
-          for tgt in tgts if tgt in CORE and tgt != "users"]
-    cb = [(t, tgt) for t, tgts in ml.items() if t in CORE
-          for tgt in tgts if tgt not in CORE]
-    check("⑤ 实库 FK 方向同门禁", not lb and not cb, "prod:%s core:%s" % (lb[:3], cb[:3]))
-except Exception as e:
-    check("⑤ 实库 FK 方向同门禁", False, str(e)[:120])
+# ⑤ 实库同扫描（防漂移）。CI 检出没有 looma.db 时跳过，不把缺文件当成结构失败。
+if not os.path.exists(LIVE_DB):
+    check("⑤ 实库 FK 方向同门禁", True, "无实库，跳过")
+else:
+    try:
+        live = sqlite3.connect(LIVE_DB)
+        live.execute("PRAGMA query_only=ON")
+        ml = fk_map(live)
+        lb = [(t, tgt) for t, tgts in ml.items() if t not in CORE
+              for tgt in tgts if tgt in CORE and tgt != "users"]
+        cb = [(t, tgt) for t, tgts in ml.items() if t in CORE
+              for tgt in tgts if tgt not in CORE]
+        check("⑤ 实库 FK 方向同门禁", not lb and not cb, "prod:%s core:%s" % (lb[:3], cb[:3]))
+    except Exception as e:
+        check("⑤ 实库 FK 方向同门禁", False, str(e)[:120])
 
 print()
 if fails:

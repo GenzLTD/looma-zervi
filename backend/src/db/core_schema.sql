@@ -121,3 +121,89 @@ FOR EACH ROW WHEN NEW.role IS NOT NULL
 BEGIN
     SELECT RAISE(ABORT, 'users.role must be one of: user enterprise admin driver');
 END;
+
+-- invitation.v1，not_required。opaque handle 不编码身份。策略只登记允许签发的组合。
+CREATE TABLE IF NOT EXISTS invitations (
+    id                TEXT PRIMARY KEY,
+    tenant            TEXT NOT NULL,
+    audience          TEXT NOT NULL,
+    purpose           TEXT NOT NULL,
+    issuer_sub        TEXT NOT NULL,
+    recipient_sub     TEXT,
+    status            TEXT NOT NULL DEFAULT 'active',
+    max_redemptions   INTEGER NOT NULL DEFAULT 1,
+    redemption_count  INTEGER NOT NULL DEFAULT 0,
+    device_policy     TEXT NOT NULL DEFAULT 'not_required',
+    extensions_json   TEXT NOT NULL DEFAULT '{}',
+    idempotency_key   TEXT NOT NULL UNIQUE,
+    issued_at         TEXT NOT NULL,
+    expires_at        TEXT NOT NULL,
+    created_at        TEXT DEFAULT (datetime('now')),
+    updated_at        TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_invitations_tenant_audience
+    ON invitations(tenant, audience, status);
+
+CREATE TABLE IF NOT EXISTS invitation_redemptions (
+    id                       TEXT PRIMARY KEY,
+    invitation_id            TEXT NOT NULL,
+    audience                 TEXT NOT NULL,
+    purpose                  TEXT NOT NULL,
+    redeemer_sub             TEXT NOT NULL,
+    device_verification_json TEXT NOT NULL DEFAULT '{}',
+    idempotency_key          TEXT NOT NULL UNIQUE,
+    redeemed_at              TEXT NOT NULL,
+    FOREIGN KEY (invitation_id) REFERENCES invitations(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_redemptions_invite_redeemer
+    ON invitation_redemptions(invitation_id, redeemer_sub);
+
+CREATE TABLE IF NOT EXISTS tenant_audience_policies (
+    tenant        TEXT NOT NULL,
+    audience      TEXT NOT NULL,
+    purpose       TEXT NOT NULL,
+    issue_allowed INTEGER NOT NULL DEFAULT 0,
+    device_policy TEXT NOT NULL DEFAULT 'not_required',
+    PRIMARY KEY (tenant, audience, purpose)
+);
+
+INSERT OR IGNORE INTO tenant_audience_policies
+    (tenant, audience, purpose, issue_allowed, device_policy)
+VALUES
+    ('genzer.terminal', 'genzer.terminal.registration', 'account_registration', 1, 'not_required');
+
+-- 设备证明信封。credential_id 只用于查找。默认策略仍是上面那条 not_required。
+CREATE TABLE IF NOT EXISTS device_challenges (
+    challenge_id      TEXT PRIMARY KEY,
+    nonce             TEXT NOT NULL,
+    audience          TEXT NOT NULL,
+    principal_binding TEXT NOT NULL,
+    purpose           TEXT NOT NULL,
+    invitation_id     TEXT NOT NULL,
+    expires_at        TEXT NOT NULL,
+    consumed          INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS device_credentials (
+    credential_id  TEXT PRIMARY KEY,
+    principal_sub  TEXT NOT NULL,
+    audience       TEXT NOT NULL,
+    verifier_ref   TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'active',
+    enrolled_at    TEXT DEFAULT (datetime('now'))
+);
+
+-- 认账最小闭环：计数器回滚即拒绝，jti 在有效期内不能再用。不是设备总表。
+CREATE TABLE IF NOT EXISTS device_counter (
+    credential_id TEXT PRIMARY KEY,
+    last_cnt      INTEGER NOT NULL DEFAULT 0,
+    updated_at    TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS pop_replay (
+    jti           TEXT PRIMARY KEY,
+    credential_id TEXT NOT NULL,
+    expire_at     TEXT NOT NULL,
+    seen_at       TEXT DEFAULT (datetime('now'))
+);

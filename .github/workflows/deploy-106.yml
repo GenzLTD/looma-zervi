@@ -1,0 +1,56 @@
+# looma 宿主 → 新机。与 thomas-core 的 deploy-106 分开：
+# 那个工作流只部署核（5300）。本文件只部署合拢宿主（127.0.0.1:5200 + 宿主机 Nginx :80）。
+# 天翼工作流 deploy.yml 保持退役，不要把新机写进它。
+# 主机、用户、密钥、指纹都走 GitHub variables/secrets，仓库里不写裸 IP。
+
+name: deploy-106
+
+on:
+  push:
+    branches: [feat/core-selfcontained]
+    paths:
+      - 'backend/**'
+      - 'scripts/**'
+      - '.github/workflows/deploy-106.yml'
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: '部署指定 commit（留空 = 当前提交）'
+        required: false
+
+concurrency:
+  group: looma-deploy-106
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.event_name == 'push' || github.event.inputs.sha == ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 钉版必须是已验收的核
+        run: |
+          set -euo pipefail
+          pin=$(head -n 1 backend/THOMAS_CORE_PIN | tr -d '[:space:]')
+          test "$pin" = "35f04659718edb3518e14d97a84e237dfa1307a9"
+          test -f backend/src/thomas_core/routes/invitation_routes.py
+          python backend/scripts/validate_schema_gate.py
+
+  deploy:
+    needs: test
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.sha || github.sha }}
+      - name: 同步宿主到新机并启动
+        env:
+          DEPLOY106_HOST: ${{ vars.DEPLOY106_HOST }}
+          DEPLOY106_USER: ${{ vars.DEPLOY106_USER }}
+          DEPLOY106_SSH_KEY: ${{ secrets.DEPLOY106_SSH_KEY }}
+          DEPLOY106_HOST_FINGERPRINT: ${{ secrets.DEPLOY106_HOST_FINGERPRINT }}
+        run: ./scripts/ci-ssh.sh deploy "${{ github.event.inputs.sha || github.sha }}"
