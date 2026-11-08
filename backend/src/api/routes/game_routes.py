@@ -1008,6 +1008,19 @@ def quiz_result():
             )
         except Exception as e:
             logger.warning("timeline: learning_activity skipped for %s: %s", g.user_id, e)
+
+        try:
+            from src.thomas_core.profile.engine import record_quiz_result
+            record_quiz_result(
+                user_id=g.user_id,
+                session_id=session_id,
+                result_type=result_type,
+                total_score=session["total_score"],
+                correct_count=session["correct_count"],
+                total_questions=session["total_questions"],
+            )
+        except Exception as e:
+            logger.warning("profile: quiz_result skipped for %s: %s", g.user_id, e)
     import json as _json
     insights = _json.loads(session.get("insights_json") or "[]")
 

@@ -266,6 +266,7 @@ def create_app(env="development"):
     # --- Register blueprints ---
     from src.thomas_core.routes.auth_routes import auth_bp
     from src.api.routes.game_routes import game_bp
+    from src.thomas_core.routes.profile_routes import profile_bp
     from src.api.routes.enterprise_routes import enterprise_bp
     from src.api.routes.job_post_routes import job_post_bp
     from src.thomas_core.routes.ask_routes import ask_bp
@@ -305,6 +306,7 @@ def create_app(env="development"):
     else:
         app.register_blueprint(auth_bp, url_prefix="/v1/auth")
     app.register_blueprint(game_bp, url_prefix="/v1/game")
+    app.register_blueprint(profile_bp, url_prefix="/v1/profile")
     app.register_blueprint(enterprise_bp, url_prefix="/v1/enterprise")
     app.register_blueprint(job_post_bp, url_prefix="/v1")
     if not core_client.http_mode():
@@ -500,6 +502,8 @@ def create_app(env="development"):
                     )
                 info = schema_loader.ensure_scope(db_path, "product")
                 app.logger.info("[host] schema scope=product ensured: %s", info)
+                profile_info = schema_loader.ensure_scope(db_path, "profile")
+                app.logger.info("[host] schema scope=profile ensured: %s", profile_info)
             db = DatabaseManager(db_path)
             if not split or db_path == ":memory:":
                 db.init_schema()
