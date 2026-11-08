@@ -47,10 +47,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.sha || github.sha }}
+      # 配置来源容错：HOST/USER 既可建成 Variable，也可建成 Secret。
+      # 2026-11-08 事故：DEPLOY106_HOST 被建成 Secret，workflow 却只读 vars，
+      # 于是拿到空值，ci-ssh.sh 只报 "missing host, key, or fingerprint"，
+      # 三个变量里到底缺哪个看不出来。这里先点名缺哪项，再进部署。
+      - name: 预检部署目标
+        env:
+          HOST: ${{ vars.DEPLOY106_HOST || secrets.DEPLOY106_HOST }}
+          SSH_USER: ${{ vars.DEPLOY106_USER || secrets.DEPLOY106_USER }}
+          SSH_KEY: ${{ secrets.DEPLOY106_SSH_KEY }}
+          FINGERPRINT: ${{ secrets.DEPLOY106_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "$HOST" ]        || missing="$missing DEPLOY106_HOST"
+          [ -n "$SSH_KEY" ]     || missing="$missing DEPLOY106_SSH_KEY"
+          [ -n "$FINGERPRINT" ] || missing="$missing DEPLOY106_HOST_FINGERPRINT"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少部署配置:$missing（HOST/USER 建为仓库 Variable，KEY/FINGERPRINT 建为 Secret）"
+            exit 1
+          fi
+          echo "目标主机与凭据齐全；SSH 用户=${SSH_USER:-ubuntu}（留空则用 ubuntu）"
+
       - name: 同步宿主到新机并启动
         env:
-          DEPLOY106_HOST: ${{ vars.DEPLOY106_HOST }}
-          DEPLOY106_USER: ${{ vars.DEPLOY106_USER }}
+          DEPLOY106_HOST: ${{ vars.DEPLOY106_HOST || secrets.DEPLOY106_HOST }}
+          DEPLOY106_USER: ${{ vars.DEPLOY106_USER || secrets.DEPLOY106_USER }}
           DEPLOY106_SSH_KEY: ${{ secrets.DEPLOY106_SSH_KEY }}
           DEPLOY106_HOST_FINGERPRINT: ${{ secrets.DEPLOY106_HOST_FINGERPRINT }}
         run: ./scripts/ci-ssh.sh deploy "${{ github.event.inputs.sha || github.sha }}"

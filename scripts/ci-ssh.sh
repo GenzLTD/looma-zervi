@@ -11,10 +11,31 @@ expected="${DEPLOY106_HOST_FINGERPRINT:-}"
 action="${1:-}"
 sha="${2:-}"
 
-if [ -z "$host" ] || [ -z "$key_text" ] || [ -z "$expected" ]; then
-  echo "missing host, key, or fingerprint" >&2
+# 缺哪项就点名哪项。原先是三合一提示，看不出是配置没建还是建错了位置。
+missing=()
+[ -n "$host" ]     || missing+=("DEPLOY106_HOST")
+[ -n "$key_text" ] || missing+=("DEPLOY106_SSH_KEY")
+[ -n "$expected" ] || missing+=("DEPLOY106_HOST_FINGERPRINT")
+if [ "${#missing[@]}" -gt 0 ]; then
+  echo "missing env: ${missing[*]}" >&2
   exit 1
 fi
+
+# host 只接受裸主机名/IP：挡掉 scheme、路径、以及以 - 开头被当成 ssh 选项的情况。
+case "$host" in
+  *[!A-Za-z0-9.:_-]*|-*)
+    echo "invalid DEPLOY106_HOST format" >&2
+    exit 1
+    ;;
+esac
+
+# 用户名校验，挡掉 user@host 或带选项注入的写法。
+case "$user" in
+  *[!A-Za-z0-9._-]*|-*|"")
+    echo "invalid DEPLOY106_USER format" >&2
+    exit 1
+    ;;
+esac
 
 case "$action" in
   deploy)
