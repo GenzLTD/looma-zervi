@@ -40,6 +40,77 @@ def _get_db():
     return current_app._db
 
 
+def _real_email(user: dict) -> str:
+    """占位邮箱 <openid>@wechat.thomas.local 不是这个人的登录邮箱。"""
+    email = (user.get("email") or "").strip().lower()
+    if email.endswith(".thomas.local"):
+        return ""
+    return email
+
+
+def _claim_email(db, subject_id: str, email: str, password: str):
+    """用邮箱密码证明「我是这个人」。
+
+    邮箱已属于别人且密码正确：返回那个人，调用方再把当前入口挂过去。
+    邮箱还没人用：写到 subject 上，之后 iOS / 鸿蒙用这组邮箱密码进来就是 subject。
+    失败时返回 (None, (response, status))。
+    """
+    email = (email or "").strip().lower()
+    password = password or ""
+    if not email or not password:
+        return None, (jsonify(error="bad_request", message="email and password required"), 400)
+    if len(password) < 8:
+        return None, (jsonify(error="bad_request", message="password must be at least 8 characters"), 400)
+
+    subject = db.get_user_by_id(subject_id)
+    if not subject:
+        return None, (jsonify(error="not_found", message="user not found"), 404)
+
+    owner = db.get_user_by_email(email)
+    if owner and owner["id"] != subject_id:
+        stored = owner.get("password_hash") or ""
+        if not stored or not bcrypt.checkpw(password.encode(), stored.encode()):
+            return None, (jsonify(error="unauthorized", message="invalid credentials"), 401)
+        try:
+            db.link_identity(owner["id"], "email", email, email, owner.get("name") or "")
+        except ValueError:
+            logger.warning("[auth] email identity already linked elsewhere: %s", email)
+        return db.get_user_by_id(owner["id"]), None
+
+    current = _real_email(subject)
+    if current and current != email:
+        return None, (jsonify(error="conflict", message="this account already has an email"), 409)
+    if current == email and subject.get("password_hash"):
+        if not bcrypt.checkpw(password.encode(), subject["password_hash"].encode()):
+            return None, (jsonify(error="unauthorized", message="invalid credentials"), 401)
+    else:
+        password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        db.set_email_password(subject_id, email, password_hash)
+    try:
+        db.link_identity(subject_id, "email", email, email, subject.get("name") or "")
+    except ValueError:
+        logger.warning("[auth] email identity already linked elsewhere: %s", email)
+    return db.get_user_by_id(subject_id), None
+
+
+def _token_response(db, user: dict, message: str, joined_existing: bool):
+    token = sign_token_for_user(db, user["id"])
+    return jsonify(
+        message=message,
+        joined_existing=joined_existing,
+        access_token=token,
+        token_type="bearer",
+        expires_in=current_app.config["JWT_EXPIRY_HOURS"] * 3600,
+        user={
+            "id": user["id"],
+            "email": user.get("email"),
+            "name": user.get("name", ""),
+            "tier": user.get("tier", "free"),
+            "role": user.get("role", "user"),
+        },
+    )
+
+
 # ============================================
 # Web registration
 # ============================================
@@ -63,6 +134,10 @@ def register():
 
     password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     user_id = db.create_user(email=email, password_hash=password_hash, name=name)
+    try:
+        db.link_identity(user_id, "email", email, email, name)
+    except ValueError:
+        logger.warning("[auth] email identity already linked at register: %s", email)
 
     token = sign_token(user_id, extra_claims={"tier": "free", "email": email})
     return jsonify(
@@ -112,6 +187,52 @@ def login():
     )
 
 
+def _login_new_wechat(db, openid: str):
+    """openid 还没挂到任何人时才走到这里。返回 (user, token)，失败时 (response, None)。"""
+    cfg = current_app.config
+    supabase_enabled = bool(cfg.get("SUPABASE_URL") and cfg.get("SUPABASE_SECRET_KEY")
+                            and cfg.get("SUPABASE_JWT_SECRET"))
+    if supabase_enabled:
+        from src.thomas_core.auth.supabase_auth import upsert_supabase_user
+        from src.thomas_core.auth.jwt_handler import sign_supabase_custom_token
+
+        try:
+            sb_user = upsert_supabase_user(openid, provider="wechat")
+        except Exception as e:
+            logger.error(f"[wechat_auth] Supabase upsert failed: {e}")
+            return jsonify(error="upstream_error", message="identity provider unavailable"), None
+
+        user = db.get_user_by_supabase_uid(sb_user["id"])
+        if not user:
+            user, _ = db.get_or_create_user_by_supabase(
+                sb_user["id"],
+                email=sb_user.get("email", ""),
+                name=(sb_user.get("user_metadata") or {}).get("full_name") or "",
+                wechat_openid=openid,
+            )
+        if not user:
+            return jsonify(error="server_error", message="failed to resolve user"), None
+        try:
+            db.link_identity(user["id"], "wechat", openid)
+        except ValueError:
+            logger.warning("[auth] wechat identity already linked to another user")
+        token = sign_supabase_custom_token(
+            sb_user["id"],
+            email=sb_user.get("email", ""),
+            provider="wechat",
+            user_metadata={"wechat_openid": openid},
+        )
+        return user, token
+
+    user_id = db.create_user(wechat_openid=openid)
+    user = db.get_user_by_id(user_id)
+    try:
+        db.link_identity(user["id"], "wechat", openid)
+    except ValueError:
+        logger.warning("[auth] wechat identity already linked to another user")
+    return user, sign_token_for_user(db, user["id"])
+
+
 # ============================================
 # WeChat miniprogram login
 # ============================================
@@ -143,48 +264,18 @@ def wechat_login():
         openid = wechat_data["openid"]
     db = _get_db()
 
-    cfg = current_app.config
-    supabase_enabled = bool(cfg.get("SUPABASE_URL") and cfg.get("SUPABASE_SECRET_KEY")
-                            and cfg.get("SUPABASE_JWT_SECRET"))
-
-    if supabase_enabled:
-        # ---- Supabase 统一认证路径（THOMAS 生态） ----
-        from src.thomas_core.auth.supabase_auth import upsert_supabase_user
-        from src.thomas_core.auth.jwt_handler import sign_supabase_custom_token
-
+    # 绑定之后 openid 挂在邮箱那个人身上。先认这一列，避免再去 Supabase 找回原来的空壳用户。
+    user = db.get_user_by_openid(openid)
+    if user:
         try:
-            sb_user = upsert_supabase_user(openid, provider="wechat")
-        except Exception as e:
-            logger.error(f"[wechat_auth] Supabase upsert failed: {e}")
-            return jsonify(error="upstream_error", message="identity provider unavailable"), 502
-
-        user = db.get_user_by_supabase_uid(sb_user["id"])
-        if not user:
-            user, _ = db.get_or_create_user_by_supabase(
-                sb_user["id"],
-                email=sb_user.get("email", ""),
-                name=(sb_user.get("user_metadata") or {}).get("full_name") or "",
-                wechat_openid=openid,
-            )
-        if not user:
-            return jsonify(error="server_error", message="failed to resolve user"), 500
-
-        token = sign_supabase_custom_token(
-            sb_user["id"],
-            email=sb_user.get("email", ""),
-            provider="wechat",
-            user_metadata={"wechat_openid": openid},
-        )
+            db.link_identity(user["id"], "wechat", openid)
+        except ValueError:
+            logger.warning("[auth] wechat identity already linked to another user")
+        token = sign_token_for_user(db, user["id"])
     else:
-        # ---- 旧路径：looma 自签 JWT（Supabase 未配置时的兼容/开发环境） ----
-        user = db.get_user_by_openid(openid)
-        if not user:
-            user_id = db.create_user(wechat_openid=openid)
-            user = db.get_user_by_id(user_id)
-
-        token = sign_token(user["id"], extra_claims={
-            "tier": user.get("tier", "free"),
-        })
+        user, token = _login_new_wechat(db, openid)
+        if token is None:
+            return user
 
     return jsonify(
         access_token=token,
@@ -349,22 +440,39 @@ def huawei_login():
     if not user:
         return jsonify(error="server_error", message="Failed to create/find user"), 500
 
+    # 登录页同时填了邮箱密码时，和 iOS / 小程序认的是同一个人。
+    claim_email = (data.get("email") or "").strip()
+    claim_password = data.get("password") or ""
+    if claim_email or claim_password:
+        claimed, err = _claim_email(db, user["id"], claim_email, claim_password)
+        if err:
+            return err
+        if claimed["id"] != user["id"]:
+            db.reassign_identity(
+                "huawei", hw_user.open_id, claimed["id"],
+                provider_name=hw_user.display_name or "",
+                metadata_json=_json.dumps(meta, ensure_ascii=False),
+            )
+            user = claimed
+            created = False
+
     logger.info(
         f"[huawei_auth] Login {'(new)' if created else '(existing)'}: "
         f"user={user['id']} huawei_open_id={hw_user.open_id}"
     )
 
     # --- Step 4: 签发 JWT ---
-    token = sign_token(user["id"], extra_claims={
-        "tier": user.get("tier", "free"),
-        "provider": "huawei",
-    })
+    extra = {"tier": user.get("tier", "free"), "provider": "huawei"}
+    if user.get("email"):
+        extra["email"] = user["email"]
+    token = sign_token(user["id"], extra_claims=extra)
     return jsonify(
         access_token=token,
         token_type="bearer",
         expires_in=current_app.config["JWT_EXPIRY_HOURS"] * 3600,
         user={
             "id": user["id"],
+            "email": user.get("email"),
             "name": user.get("name", ""),
             "tier": user.get("tier", "free"),
             "role": user.get("role", "user"),
@@ -379,13 +487,11 @@ def huawei_login():
 @auth_bp.route("/bind", methods=["POST"])
 @require_auth
 def bind_account():
-    """
-    Bind WeChat openid to an existing email-based account.
-    User must be authenticated (has looma JWT).
-    After binding, the user can login from both Web and MiniApp.
+    """把微信入口挂到邮箱密码证明的那个人身上。
 
-    只认 code → openid。小程序多传的 email / password 当前不参与绑定
-    （identity.v1.json 未为该接口定义这两个字段），一律忽略，不做隐式改密或改邮箱。
+    当前 JWT 是小程序刚用微信建出来的会话。body 里的 email + password：
+    - 邮箱已有账号且密码正确：openid 改挂到那个人，响应里的 token 也换成那个人。
+    - 邮箱还没人用：写到当前用户上，之后用这组邮箱密码登录就是这个人。
     """
     data = request.get_json() or {}
     code = data.get("code", "")
@@ -406,12 +512,19 @@ def bind_account():
         openid = wechat_data["openid"]
     db = _get_db()
 
-    existing = db.get_user_by_openid(openid)
-    if existing and existing["id"] != g.user_id:
+    claimed, err = _claim_email(db, g.user_id, data.get("email", ""), data.get("password", ""))
+    if err:
+        return err
+
+    owner = db.get_user_by_openid(openid)
+    if owner and owner["id"] not in (g.user_id, claimed["id"]):
         return jsonify(error="conflict", message="this WeChat account is already bound to another user"), 409
 
-    db.bind_wechat_to_user(g.user_id, openid)
-    return jsonify(message="WeChat account bound successfully")
+    db.assign_wechat_openid(claimed["id"], openid)
+    db.reassign_identity("wechat", openid, claimed["id"], provider_email=claimed.get("email") or "")
+    joined = claimed["id"] != g.user_id
+    message = "Joined the existing account" if joined else "Email saved on this account"
+    return _token_response(db, db.get_user_by_id(claimed["id"]), message, joined)
 
 
 # ============================================

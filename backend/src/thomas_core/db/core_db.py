@@ -204,10 +204,36 @@ class CoreDB:
 
     def bind_wechat_to_user(self, user_id: str, wechat_openid: str):
         """Bind a WeChat openid to an existing user (cross-platform account linking)."""
+        self.assign_wechat_openid(user_id, wechat_openid)
+
+    def assign_wechat_openid(self, user_id: str, openid: str) -> None:
+        """把 openid 归到 user_id。原先挂在别人身上的先清空，避免 UNIQUE 冲突。"""
         with self.get_conn() as conn:
             conn.execute(
+                """UPDATE users SET wechat_openid = NULL, updated_at = datetime('now')
+                   WHERE wechat_openid = ? AND id != ?""",
+                (openid, user_id),
+            )
+            conn.execute(
                 "UPDATE users SET wechat_openid = ?, updated_at = datetime('now') WHERE id = ?",
-                (wechat_openid, user_id)
+                (openid, user_id),
+            )
+
+    def set_email_password(self, user_id: str, email: str, password_hash: str) -> None:
+        """把邮箱和密码写到这个用户上。邮箱已被别人占用时抛 ValueError。"""
+        email = (email or "").strip().lower()
+        with self.get_conn() as conn:
+            taken = conn.execute(
+                "SELECT id FROM users WHERE email = ? AND id != ?",
+                (email, user_id),
+            ).fetchone()
+            if taken:
+                raise ValueError("email already registered")
+            conn.execute(
+                """UPDATE users
+                   SET email = ?, email_hash = ?, password_hash = ?, updated_at = datetime('now')
+                   WHERE id = ?""",
+                (email, email_hash(email), password_hash, user_id),
             )
 
     def get_user_by_identity(self, provider: str, provider_uid: str):
@@ -241,6 +267,33 @@ class CoreDB:
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (str(uuid.uuid4()), user_id, provider, provider_uid,
                  provider_email, provider_name, metadata_json)
+            )
+
+    def reassign_identity(self, provider: str, provider_uid: str, user_id: str,
+                          provider_email: str = "", provider_name: str = "",
+                          metadata_json: str = "{}") -> None:
+        """把已有的第三方身份改挂到 user_id。没有这条身份时新建。"""
+        with self.get_conn() as conn:
+            existing = conn.execute(
+                "SELECT user_id FROM user_identities WHERE provider = ? AND provider_uid = ?",
+                (provider, provider_uid),
+            ).fetchone()
+            if existing and existing["user_id"] == user_id:
+                return
+            if existing:
+                conn.execute(
+                    """UPDATE user_identities
+                       SET user_id = ?, provider_email = ?, provider_name = ?
+                       WHERE provider = ? AND provider_uid = ?""",
+                    (user_id, provider_email, provider_name, provider, provider_uid),
+                )
+                return
+            conn.execute(
+                """INSERT INTO user_identities (id, user_id, provider, provider_uid,
+                   provider_email, provider_name, metadata_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), user_id, provider, provider_uid,
+                 provider_email, provider_name, metadata_json),
             )
 
     def get_user_identities(self, user_id: str):
