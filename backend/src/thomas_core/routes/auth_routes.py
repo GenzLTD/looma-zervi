@@ -188,48 +188,20 @@ def login():
 
 
 def _login_new_wechat(db, openid: str):
-    """openid 还没挂到任何人时才走到这里。返回 (user, token)，失败时 (response, None)。"""
-    cfg = current_app.config
-    supabase_enabled = bool(cfg.get("SUPABASE_URL") and cfg.get("SUPABASE_SECRET_KEY")
-                            and cfg.get("SUPABASE_JWT_SECRET"))
-    if supabase_enabled:
-        from src.thomas_core.auth.supabase_auth import upsert_supabase_user
-        from src.thomas_core.auth.jwt_handler import sign_supabase_custom_token
+    """openid 还没挂到任何人时才走到这里。返回 (user, token)，失败时 (response, None)。
 
-        try:
-            sb_user = upsert_supabase_user(openid, provider="wechat")
-        except Exception as e:
-            logger.error(f"[wechat_auth] Supabase upsert failed: {e}")
-            return jsonify(error="upstream_error", message="identity provider unavailable"), None
-
-        user = db.get_user_by_supabase_uid(sb_user["id"])
-        if not user:
-            user, _ = db.get_or_create_user_by_supabase(
-                sb_user["id"],
-                email=sb_user.get("email", ""),
-                name=(sb_user.get("user_metadata") or {}).get("full_name") or "",
-                wechat_openid=openid,
-            )
-        if not user:
-            return jsonify(error="server_error", message="failed to resolve user"), None
-        try:
-            db.link_identity(user["id"], "wechat", openid)
-        except ValueError:
-            logger.warning("[auth] wechat identity already linked to another user")
-        token = sign_supabase_custom_token(
-            sb_user["id"],
-            email=sb_user.get("email", ""),
-            provider="wechat",
-            user_metadata={"wechat_openid": openid},
-        )
-        return user, token
-
-    user_id = db.create_user(wechat_openid=openid)
-    user = db.get_user_by_id(user_id)
-    try:
-        db.link_identity(user["id"], "wechat", openid)
-    except ValueError:
-        logger.warning("[auth] wechat identity already linked to another user")
+    与 /v1/auth/huawei 同一条账本：user_identities 找/建 looma 用户 + looma 自签 JWT。
+    不再走 Supabase Admin API——那条路签的 custom token sub 是 Supabase UUID，
+    与鸿蒙端认的不是同一个人，绑定流程也会把它当「空壳用户」丢掉；
+    且 Admin key 失效时会把小程序整个挡在登录之外（502 identity provider unavailable）。
+    """
+    user, _created = db.get_or_create_user_by_identity(
+        provider="wechat", provider_uid=openid,
+    )
+    if not user:
+        return jsonify(error="server_error", message="failed to resolve user"), None
+    # users.wechat_openid 列是旧认人面，保持镜像，get_user_by_openid 才能认出这个人。
+    db.assign_wechat_openid(user["id"], openid)
     return user, sign_token_for_user(db, user["id"])
 
 
@@ -243,8 +215,9 @@ def wechat_login():
     1. Client calls wx.login() -> gets code
     2. Client sends code to this endpoint
     3. Backend calls WeChat API to exchange code for openid
-    4. THOMAS 统一认证 (RFC supabase-unified-auth-v1): Admin API upsert Supabase 用户
-       → 签发 custom Supabase JWT；未配置 Supabase 时回退旧 looma JWT 路径
+    4. 与 /v1/auth/huawei 同一条账本：user_identities（含 users.wechat_openid 列镜像）
+       找/建 looma 用户，签 looma JWT；不再依赖 Supabase Admin API。
+       跨端认人统一走邮箱密码 claim（/v1/auth/bind 或登录体里的 email+password）。
     """
     data = request.get_json() or {}
     code = data.get("code", "")

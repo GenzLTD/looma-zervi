@@ -313,3 +313,54 @@ def test_bind_wechat_saves_new_email_on_wechat_user():
             os.unlink(path)
         except OSError:
             pass
+
+
+def test_wechat_new_user_does_not_depend_on_supabase():
+    """SUPABASE 三件套配置齐全时，微信新用户也必须走 looma 账本（与华为同一条）。
+
+    旧实现此时会调 Supabase Admin API：key 失效即 502 identity provider
+    unavailable，小程序整个挡在登录之外；且签的是 Supabase custom token
+    （sub=Supabase UUID），与鸿蒙端认的不是同一个人。现在无论 Supabase 是否
+    配置，新 openid 一律 user_identities 找/建 + looma JWT。这里把三件套写成
+    假地址——若回归到 Supabase 分支，本用例会因上游失败而挂。
+    """
+    from src.app import create_app
+    from src.thomas_core.auth.jwt_handler import verify_token
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    saved = {k: os.environ.get(k) for k in
+             ("WECHAT_DEV_MODE", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_JWT_SECRET")}
+    try:
+        os.environ["DATABASE_PATH"] = path
+        os.environ["JWT_SECRET"] = "test-jwt-secret-for-local-testing-only-2026"
+        os.environ["WECHAT_DEV_MODE"] = "true"
+        os.environ["SUPABASE_URL"] = "https://supabase.invalid"
+        os.environ["SUPABASE_SECRET_KEY"] = "sb_secret_invalid"
+        os.environ["SUPABASE_JWT_SECRET"] = "invalid-supabase-jwt-secret"
+
+        c = create_app("testing").test_client()
+
+        resp = c.post("/v1/auth/wechat", json={"code": "no-supabase"})
+        assert resp.status_code == 200, resp.get_json()
+        body = resp.get_json()
+        token = body["access_token"]
+        with c.application.app_context():
+            payload = verify_token(token)
+        assert payload["iss"] == "looma"
+        assert payload["sub"] == body["user"]["id"]
+
+        # 同一个 openid 再来一次，必须还是这一个人（认人稳定，不产生第二个号）
+        resp = c.post("/v1/auth/wechat", json={"code": "no-supabase"})
+        assert resp.status_code == 200
+        assert resp.get_json()["user"]["id"] == body["user"]["id"]
+    finally:
+        for key, prev in saved.items():
+            if prev is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = prev
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
