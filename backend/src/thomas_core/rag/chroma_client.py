@@ -11,6 +11,16 @@ from flask import current_app
 
 logger = logging.getLogger("looma.chroma")
 
+_ONNX_FILES = (
+    "config.json",
+    "model.onnx",
+    "special_tokens_map.json",
+    "tokenizer_config.json",
+    "tokenizer.json",
+    "vocab.txt",
+)
+_onnx_skip_logged = False
+
 
 def _data_dir(config) -> Path:
     """库文件所在目录的绝对路径。相对 DATABASE_PATH 也先 resolve，避免写进发布目录的 cwd。"""
@@ -30,6 +40,38 @@ def _poetry_dir(config) -> Path:
     return _data_dir(config) / path
 
 _chroma_client = None
+
+
+def _onnx_ready() -> bool:
+    """与 chromadb 默认模型同一目录。缺任一文件就视为未安装，禁止在请求里下载。"""
+    folder = Path.home() / ".cache" / "chroma" / "onnx_models" / "all-MiniLM-L6-v2" / "onnx"
+    return all((folder / name).is_file() for name in _ONNX_FILES)
+
+
+def _note_onnx_skip() -> None:
+    global _onnx_skip_logged
+    if not _onnx_skip_logged:
+        logger.warning("onnx model not cached; skip vector search instead of downloading")
+        _onnx_skip_logged = True
+
+
+def _embedding_function():
+    """只使用已经解压好的模型。请求线程不下载 onnx.tar.gz。"""
+    if not _onnx_ready():
+        _note_onnx_skip()
+        return None
+    from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+
+    return DefaultEmbeddingFunction()
+
+
+def _open_collection(client, name: str, *, create: bool):
+    embedding = _embedding_function()
+    if embedding is None:
+        return None
+    if create:
+        return client.get_or_create_collection(name, embedding_function=embedding)
+    return client.get_collection(name, embedding_function=embedding)
 
 
 def _get_client():
@@ -85,7 +127,9 @@ def search_chroma(query: str, n_results: int = 5, collection: str | None = None)
     collection_name = collection or config.get("CHROMA_COLLECTION", "looma_knowledge")
 
     try:
-        coll = client.get_or_create_collection(collection_name)
+        coll = _open_collection(client, collection_name, create=True)
+        if coll is None:
+            return []
         results = coll.query(
             query_texts=[query],
             n_results=min(n_results, max(1, n_results)),
@@ -132,7 +176,9 @@ def add_documents(texts: list[str], metadatas: list[dict] | None = None,
 
     try:
         import uuid as _uuid
-        coll = client.get_or_create_collection(collection_name)
+        coll = _open_collection(client, collection_name, create=True)
+        if coll is None:
+            return
         if ids is None:
             ids = [str(_uuid.uuid4()) for _ in texts]
         if metadatas is None:
@@ -154,7 +200,9 @@ def get_collection_stats(collection: str | None = None) -> dict:
     collection_name = collection or config.get("CHROMA_COLLECTION", "looma_knowledge")
 
     try:
-        coll = client.get_or_create_collection(collection_name)
+        coll = _open_collection(client, collection_name, create=False)
+        if coll is None:
+            return {"count": 0, "name": collection_name}
         return {"count": coll.count(), "name": collection_name}
     except Exception:
         return {"count": 0, "name": collection_name}
@@ -251,7 +299,9 @@ def search_poetry_chroma(query: str, n_results: int = 5) -> list[dict]:
         from src.thomas_core.utils.textnorm import to_traditional
 
         normalized = to_traditional(query)
-        coll = client.get_collection("poetry_full")
+        coll = _open_collection(client, "poetry_full", create=False)
+        if coll is None:
+            return []
         results = coll.query(
             query_texts=[normalized],
             n_results=min(n_results, max(1, n_results)),
