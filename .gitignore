@@ -62,11 +62,9 @@ frontend/packages/miniprogram/**/*.js
 # Data files (large binaries)
 data/
 
-# Smoke test state
-*.smoke_state*.json
+# Smoke test state —— 规则见文件末尾（反选块之后才生效）
 
-# Root package-lock (frontend uses pnpm)
-package-lock.json
+# package-lock.json 采用「跟踪」策略（本仓已跟踪 4 份）；原忽略规则因反选块失效且与实际不符，已移除。
 
 # Reports archive
 reports.zip
@@ -183,5 +181,5 @@ kb_inventory*.txt
 # 必须在文件末尾：gitignore 是「最后一条匹配胜出」，
 # 上面的 !*.md / !*.json 反选会覆盖前面同主题的规则（历史坑：第 66/95 行长期失效）
 # ============================================================
-.smoke_state*.json
+*.smoke_state*.json
 docs/内测志愿者账号与入口.md
