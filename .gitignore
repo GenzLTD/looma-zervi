@@ -62,11 +62,10 @@ frontend/packages/miniprogram/**/*.js
 # Data files (large binaries)
 data/
 
-# Smoke test state
-*.smoke_state*.json
+# Smoke test state —— 规则写在文件末尾（反选块之后才生效，原先在本行下方长期失效）
 
-# Root package-lock (frontend uses pnpm)
-package-lock.json
+# package-lock.json 采用「跟踪」策略：仓库实际跟踪 frontend/ 与
+# frontend/packages/shared-core/ 两份 lock；原第 69 行的忽略规则因反选块失效且与实际不符，已移除。
 
 # Reports archive
 reports.zip
@@ -181,3 +180,10 @@ kb_inventory*.txt
 
 # schema 分权自测产物（scripts/verify_schema_split.py）
 backend/.tmp-split-probe/
+
+# ============================================================
+# 必须在反选块（!*.md / !*.json）之后：gitignore 最后一条匹配胜出
+# 原先写在 66/95 行，被末尾反选静默覆盖，长期失效
+# ============================================================
+*.smoke_state*.json
+docs/内测志愿者账号与入口.md
