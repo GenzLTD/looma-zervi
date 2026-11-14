@@ -10,6 +10,48 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+# ============================================================================
+# LLM provider 合规基线
+# ============================================================================
+# 合规底线：模型与语料不跨区互发，两边都保留本地 Ollama 作离线兜底。
+#   境内版：deepseek（云端主） + ollama（本地兜底）
+#   海外版：openai  （云端主） + ollama（本地兜底）
+# LLM_PROVIDER_ORDER 可显式覆盖顺序；未设置时按 DEPLOY_REGION 推导
+# （DEPLOY_REGION 未设置时按境内处理，与历史默认 deepseek,ollama 保持一致）。
+LLM_PROVIDER_POLICY = {
+    "CN": "deepseek,ollama",
+    "OVERSEAS": "openai,ollama",
+}
+OVERSEAS_REGIONS = frozenset({"US", "EU", "SG", "HK", "JP", "UK", "AU", "OVERSEAS"})
+
+
+def deploy_region() -> str:
+    """当前部署区域大写串；未设置返回 CN（LLM 合规基线默认境内）。"""
+    return (os.getenv("DEPLOY_REGION") or "CN").strip().upper()
+
+
+def llm_policy_baseline(region: str | None = None) -> str:
+    """区域对应的合规 provider 基线（含本地 ollama 兜底）。"""
+    r = (region or deploy_region()).strip().upper()
+    return LLM_PROVIDER_POLICY["OVERSEAS" if r in OVERSEAS_REGIONS else "CN"]
+
+
+def resolve_llm_provider_order(region: str | None = None) -> str:
+    """生效的 provider 顺序：显式 env 优先，否则按区域基线推导。"""
+    explicit = (os.getenv("LLM_PROVIDER_ORDER") or "").strip()
+    return explicit or llm_policy_baseline(region)
+
+
+def llm_policy_violations(order: str, region: str | None = None) -> list[str]:
+    """返回越区 provider（境内调 openai / 海外调 deepseek），供日志告警。
+
+    只报告不拦截：海外机器上误配 deepseek,ollama 时若强行剔除会连 ollama 一起
+    降级成不可用，属运维事故；这里是配置告警，拦截交给人。
+    """
+    allowed = {p.strip() for p in llm_policy_baseline(region).split(",") if p.strip()}
+    return [p.strip() for p in (order or "").split(",") if p.strip() and p.strip() not in allowed]
+
+
 class Config:
     """Flask config that reads env vars dynamically.
 
@@ -82,8 +124,9 @@ class Config:
     SUPPORTER_DAILY_LIMIT = int(os.getenv("SUPPORTER_DAILY_LIMIT", "999999"))
     PRO_DAILY_LIMIT = int(os.getenv("PRO_DAILY_LIMIT", "999999"))
 
-    # LLM Provider (deepseek primary, ollama local fallback; set env to override)
-    LLM_PROVIDER_ORDER = os.getenv("LLM_PROVIDER_ORDER", "deepseek,ollama")
+    # LLM Provider — 合规基线见文件头 LLM_PROVIDER_POLICY：
+    # 境内 deepseek,ollama / 海外 openai,ollama；env 可显式覆盖顺序。
+    LLM_PROVIDER_ORDER = resolve_llm_provider_order()
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -247,7 +290,7 @@ def _refresh_config():
     Config.FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "30"))
     Config.SUPPORTER_DAILY_LIMIT = int(os.getenv("SUPPORTER_DAILY_LIMIT", "999999"))
     Config.PRO_DAILY_LIMIT = int(os.getenv("PRO_DAILY_LIMIT", "999999"))
-    Config.LLM_PROVIDER_ORDER = os.getenv("LLM_PROVIDER_ORDER", "deepseek,ollama")
+    Config.LLM_PROVIDER_ORDER = resolve_llm_provider_order()
     Config.OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
     Config.OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
     Config.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

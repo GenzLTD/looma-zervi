@@ -136,6 +136,33 @@ def _poetry_is_recommendation_query(text: str) -> bool:
     return bool(re.search(r"推荐|来一句|来首|随便.*诗|一句诗", t))
 
 
+_LLM_POLICY_WARNED = False
+
+
+def _warn_llm_policy_once(provider_order: list[str]) -> None:
+    """合规护栏（只告警，不拦截调用）：境内 = deepseek+ollama，海外 = openai+ollama。
+
+    跨区 provider 出现在同一份 LLM_PROVIDER_ORDER 里属于配置违规（语料/请求跨区），
+    每个进程只提示一次，避免每次 ask 都刷日志。
+    """
+    global _LLM_POLICY_WARNED
+    if _LLM_POLICY_WARNED:
+        return
+    try:
+        from src.config import llm_policy_violations
+
+        violations = llm_policy_violations(",".join(provider_order))
+    except Exception:
+        return
+    if violations:
+        _LLM_POLICY_WARNED = True
+        logger.warning(
+            "LLM 合规告警：当前区域不允许 provider %s（境内=deepseek,ollama；海外=openai,ollama），"
+            "请检查 LLM_PROVIDER_ORDER / DEPLOY_REGION",
+            ",".join(violations),
+        )
+
+
 def _call_llm(
     prompt: str,
     *,
@@ -146,7 +173,13 @@ def _call_llm(
     Returns response text or None on failure.
     Every call is audited into llm_usage (provider/model/tokens/cost/latency)."""
     config = current_app.config
-    provider_order = [p.strip().lower() for p in config.get("LLM_PROVIDER_ORDER", "deepseek").split(",")]
+    # 注意 config.get(k, default) 在值为空串时不会回落，必须用 or。
+    provider_order = [
+        p.strip().lower()
+        for p in (config.get("LLM_PROVIDER_ORDER") or "deepseek,ollama").split(",")
+        if p.strip()
+    ]
+    _warn_llm_policy_once(provider_order)
     db = getattr(current_app, "_db", None)
 
     for provider in provider_order:
@@ -169,8 +202,12 @@ def _call_llm(
                     payload["max_tokens"] = max_tokens
                 resp = requests.post(url, json=payload, headers=headers, timeout=float(config.get("API_REQUEST_TIMEOUT", 90)))
                 resp.raise_for_status()
-                msg = resp.json()["choices"][0]["message"]
-                return msg.get("content") or msg.get("reasoning_content") or ""
+                data = resp.json()
+                msg = data["choices"][0]["message"]
+                text = msg.get("content") or msg.get("reasoning_content") or ""
+                # 不在这里 return：统一落到函数尾部的 _record_llm_usage，
+                # 否则 DeepSeek 成功的调用不进 llm_usage 审计（只剩 ollama 记录，
+                # 会被误读成「主 provider 从未生效」）。
 
             elif provider == "openai":
                 openai_key = (config.get("OPENAI_API_KEY") or "").strip()
@@ -203,6 +240,10 @@ def _call_llm(
                 resp.raise_for_status()
                 data = resp.json()
                 text = data.get("response", "")
+
+            else:
+                logger.warning(f"Unknown LLM provider in LLM_PROVIDER_ORDER: {provider}")
+                continue
 
             _record_llm_usage(db, provider, model, data, t0, status="ok")
             return text

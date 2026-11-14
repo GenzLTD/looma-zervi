@@ -356,11 +356,12 @@ def _require_admin_manual():
 def _llm_providers_probe():
     """Probe LLM providers in LLM_PROVIDER_ORDER (shape matches app._collect_dependencies)."""
     from src.app import _probe_base
+    from src.config import resolve_llm_provider_order
 
     config = current_app.config
     order = [
         p.strip().lower()
-        for p in (config.get("LLM_PROVIDER_ORDER") or os.getenv("LLM_PROVIDER_ORDER") or "deepseek").split(",")
+        for p in (config.get("LLM_PROVIDER_ORDER") or resolve_llm_provider_order()).split(",")
         if p.strip()
     ]
     out = []

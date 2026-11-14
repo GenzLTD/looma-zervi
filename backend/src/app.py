@@ -9,7 +9,7 @@ from functools import lru_cache
 from flask import Flask, abort, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 
-from src.config import Config, _refresh_config
+from src.config import Config, _refresh_config, resolve_llm_provider_order
 
 _HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 
@@ -156,9 +156,7 @@ def _collect_dependencies(app):
     order = [
         p.strip().lower()
         for p in (
-            app.config.get("LLM_PROVIDER_ORDER")
-            or os.getenv("LLM_PROVIDER_ORDER")
-            or "deepseek"
+            app.config.get("LLM_PROVIDER_ORDER") or resolve_llm_provider_order()
         ).split(",")
         if p.strip()
     ]
@@ -304,8 +302,7 @@ def create_app(env="development"):
 
         llm_order_raw = (
             app.config.get("LLM_PROVIDER_ORDER")
-            or os.getenv("LLM_PROVIDER_ORDER")
-            or "deepseek"
+            or resolve_llm_provider_order()
         )
         llm_order = [
             p.strip().lower()
@@ -392,8 +389,7 @@ def create_app(env="development"):
                 env=os.getenv("FLASK_ENV", "development"),
                 llm_provider=(
                     app.config.get("LLM_PROVIDER_ORDER")
-                    or os.getenv("LLM_PROVIDER_ORDER")
-                    or "deepseek"
+                    or resolve_llm_provider_order()
                 ).split(",")[0].strip(),
                 route_total=route_total,
                 product_lines=lines,
