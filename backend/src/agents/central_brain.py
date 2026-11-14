@@ -231,7 +231,7 @@ def _call_llm(
             elif provider == "ollama":
                 host = config.get("OLLAMA_HOST", "http://127.0.0.1:11434")
                 url = f"{host.rstrip('/')}/api/generate"
-                model = config.get("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
+                model = (config.get("OLLAMA_MODEL") or "qwen2.5-coder:1.5b")
                 options: dict[str, Any] = {"temperature": temperature}
                 if max_tokens is not None:
                     options["num_predict"] = max_tokens
