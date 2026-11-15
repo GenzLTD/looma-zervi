@@ -213,9 +213,9 @@ def _call_llm(
                 openai_key = (config.get("OPENAI_API_KEY") or "").strip()
                 if not openai_key or openai_key.lower() in ("skip", "your-openai-api-key"):
                     continue
-                url = f"{config.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')}/chat/completions"
+                url = f"{(config.get('OPENAI_BASE_URL') or 'https://api.openai.com/v1').rstrip('/')}/chat/completions"
                 headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
-                model = config.get("OPENAI_MODEL", "gpt-3.5-turbo")
+                model = (config.get("OPENAI_MODEL") or "gpt-4o-mini")
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
