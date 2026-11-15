@@ -83,9 +83,20 @@ class CoreDB:
         """
         if include_product is None:
             include_product = not schema_loader.split_enabled()
-        info = schema_loader.ensure_scope(self.db_path, "core")
+
+        def _ensure(scope: str) -> dict:
+            try:
+                return schema_loader.ensure_scope(self.db_path, scope)
+            except schema_loader.SchemaDriftError as exc:
+                # 幂等 DDL 已经写入，schema_meta 也已改到新版本，然后才抛。
+                # 已有库第一次请求若把这个异常冒出去，/health 会 500，部署轮询可能判回滚。
+                logger.warning("[core] schema drift already applied scope=%s: %s", scope, exc)
+                return {"scope": scope, "drift": True, "applied": True}
+
+        info = _ensure("core")
+        _ensure("profile")
         if include_product:
-            schema_loader.ensure_scope(self.db_path, "product")
+            _ensure("product")
         return info
 
     @contextmanager
@@ -193,10 +204,36 @@ class CoreDB:
 
     def bind_wechat_to_user(self, user_id: str, wechat_openid: str):
         """Bind a WeChat openid to an existing user (cross-platform account linking)."""
+        self.assign_wechat_openid(user_id, wechat_openid)
+
+    def assign_wechat_openid(self, user_id: str, openid: str) -> None:
+        """把 openid 归到 user_id。原先挂在别人身上的先清空，避免 UNIQUE 冲突。"""
         with self.get_conn() as conn:
             conn.execute(
+                """UPDATE users SET wechat_openid = NULL, updated_at = datetime('now')
+                   WHERE wechat_openid = ? AND id != ?""",
+                (openid, user_id),
+            )
+            conn.execute(
                 "UPDATE users SET wechat_openid = ?, updated_at = datetime('now') WHERE id = ?",
-                (wechat_openid, user_id)
+                (openid, user_id),
+            )
+
+    def set_email_password(self, user_id: str, email: str, password_hash: str) -> None:
+        """把邮箱和密码写到这个用户上。邮箱已被别人占用时抛 ValueError。"""
+        email = (email or "").strip().lower()
+        with self.get_conn() as conn:
+            taken = conn.execute(
+                "SELECT id FROM users WHERE email = ? AND id != ?",
+                (email, user_id),
+            ).fetchone()
+            if taken:
+                raise ValueError("email already registered")
+            conn.execute(
+                """UPDATE users
+                   SET email = ?, email_hash = ?, password_hash = ?, updated_at = datetime('now')
+                   WHERE id = ?""",
+                (email, email_hash(email), password_hash, user_id),
             )
 
     def get_user_by_identity(self, provider: str, provider_uid: str):
@@ -230,6 +267,33 @@ class CoreDB:
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (str(uuid.uuid4()), user_id, provider, provider_uid,
                  provider_email, provider_name, metadata_json)
+            )
+
+    def reassign_identity(self, provider: str, provider_uid: str, user_id: str,
+                          provider_email: str = "", provider_name: str = "",
+                          metadata_json: str = "{}") -> None:
+        """把已有的第三方身份改挂到 user_id。没有这条身份时新建。"""
+        with self.get_conn() as conn:
+            existing = conn.execute(
+                "SELECT user_id FROM user_identities WHERE provider = ? AND provider_uid = ?",
+                (provider, provider_uid),
+            ).fetchone()
+            if existing and existing["user_id"] == user_id:
+                return
+            if existing:
+                conn.execute(
+                    """UPDATE user_identities
+                       SET user_id = ?, provider_email = ?, provider_name = ?
+                       WHERE provider = ? AND provider_uid = ?""",
+                    (user_id, provider_email, provider_name, provider, provider_uid),
+                )
+                return
+            conn.execute(
+                """INSERT INTO user_identities (id, user_id, provider, provider_uid,
+                   provider_email, provider_name, metadata_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (str(uuid.uuid4()), user_id, provider, provider_uid,
+                 provider_email, provider_name, metadata_json),
             )
 
     def get_user_identities(self, user_id: str):
@@ -410,3 +474,186 @@ class CoreDB:
                 (user_id,),
             ).fetchone()
         return row[0] if row else None
+
+    def open_immediate(self):
+        """独占写事务。邀请的兑换和吊销必须抢到锁再读状态。"""
+        conn = self._connect()
+        conn.commit()
+        conn.isolation_level = None
+        conn.execute("BEGIN IMMEDIATE")
+        return conn
+
+    def finish_immediate(self, conn, *, commit: bool) -> None:
+        try:
+            if commit:
+                conn.commit()
+            else:
+                conn.rollback()
+        finally:
+            conn.close()
+
+    def get_audience_policy(self, conn, tenant: str, audience: str, purpose: str):
+        """只按租户、受众、用途查一条策略。没有列表接口。"""
+        row = conn.execute(
+            """SELECT tenant, audience, purpose, issue_allowed, device_policy
+               FROM tenant_audience_policies
+               WHERE tenant = ? AND audience = ? AND purpose = ?""",
+            (tenant, audience, purpose),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def find_invitation(self, conn, invitation_id: str):
+        row = conn.execute(
+            "SELECT * FROM invitations WHERE id = ?",
+            (invitation_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def find_invitation_by_idempotency(self, conn, idempotency_key: str):
+        row = conn.execute(
+            "SELECT * FROM invitations WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def find_redemption_by_idempotency(self, conn, idempotency_key: str):
+        row = conn.execute(
+            "SELECT * FROM invitation_redemptions WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def find_redemption_for_principal(self, conn, invitation_id: str, redeemer_sub: str):
+        row = conn.execute(
+            """SELECT * FROM invitation_redemptions
+               WHERE invitation_id = ? AND redeemer_sub = ?""",
+            (invitation_id, redeemer_sub),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def count_redemptions(self, conn, invitation_id: str) -> int:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM invitation_redemptions WHERE invitation_id = ?",
+            (invitation_id,),
+        ).fetchone()
+        return int(row[0])
+
+    def insert_invitation(self, conn, row: dict) -> None:
+        conn.execute(
+            """INSERT INTO invitations (
+                   id, tenant, audience, purpose, issuer_sub, recipient_sub, status,
+                   max_redemptions, redemption_count, device_policy, extensions_json,
+                   idempotency_key, issued_at, expires_at
+               ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, 0, ?, ?, ?, ?, ?)""",
+            (
+                row["id"], row["tenant"], row["audience"], row["purpose"],
+                row["issuer_sub"], row["recipient_sub"], row["max_redemptions"],
+                row["device_policy"], row["extensions_json"], row["idempotency_key"],
+                row["issued_at"], row["expires_at"],
+            ),
+        )
+
+    def insert_redemption(self, conn, row: dict) -> None:
+        conn.execute(
+            """INSERT INTO invitation_redemptions (
+                   id, invitation_id, audience, purpose, redeemer_sub,
+                   device_verification_json, idempotency_key, redeemed_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                row["id"], row["invitation_id"], row["audience"], row["purpose"],
+                row["redeemer_sub"], row["device_verification_json"],
+                row["idempotency_key"], row["redeemed_at"],
+            ),
+        )
+
+    def audience_is_issuable(self, conn, audience: str) -> bool:
+        row = conn.execute(
+            """SELECT 1 FROM tenant_audience_policies
+               WHERE audience = ? AND issue_allowed = 1 LIMIT 1""",
+            (audience,),
+        ).fetchone()
+        return row is not None
+
+    def find_device_credential(self, conn, credential_id: str):
+        row = conn.execute(
+            """SELECT credential_id, principal_sub, audience, verifier_ref, status
+               FROM device_credentials WHERE credential_id = ?""",
+            (credential_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def insert_device_credential(self, conn, row: dict) -> None:
+        conn.execute(
+            """INSERT INTO device_credentials (
+                   credential_id, principal_sub, audience, verifier_ref, status
+               ) VALUES (?, ?, ?, ?, 'active')""",
+            (row["credential_id"], row["principal_sub"], row["audience"], row["verifier_ref"]),
+        )
+
+    def insert_device_challenge(self, conn, row: dict) -> None:
+        conn.execute(
+            """INSERT INTO device_challenges (
+                   challenge_id, nonce, audience, principal_binding, purpose,
+                   invitation_id, expires_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                row["challenge_id"], row["nonce"], row["audience"], row["principal_binding"],
+                row["purpose"], row["invitation_id"], row["expires_at"],
+            ),
+        )
+
+    def find_device_challenge(self, conn, challenge_id: str):
+        row = conn.execute(
+            "SELECT * FROM device_challenges WHERE challenge_id = ?",
+            (challenge_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def consume_device_challenge(self, conn, challenge_id: str) -> bool:
+        cursor = conn.execute(
+            """UPDATE device_challenges SET consumed = 1
+               WHERE challenge_id = ? AND consumed = 0""",
+            (challenge_id,),
+        )
+        return cursor.rowcount == 1
+
+    def pop_jti_seen(self, conn, jti: str) -> bool:
+        row = conn.execute("SELECT 1 FROM pop_replay WHERE jti = ?", (jti,)).fetchone()
+        return row is not None
+
+    def insert_pop_replay(self, conn, row: dict) -> None:
+        conn.execute(
+            """INSERT INTO pop_replay (jti, credential_id, expire_at)
+               VALUES (?, ?, ?)""",
+            (row["jti"], row["credential_id"], row["expire_at"]),
+        )
+
+    def bump_device_counter(self, conn, credential_id: str, cnt: int) -> bool:
+        row = conn.execute(
+            "SELECT last_cnt FROM device_counter WHERE credential_id = ?",
+            (credential_id,),
+        ).fetchone()
+        last = int(row["last_cnt"]) if row else 0
+        if cnt <= last:
+            return False
+        if row:
+            conn.execute(
+                """UPDATE device_counter
+                   SET last_cnt = ?, updated_at = datetime('now')
+                   WHERE credential_id = ?""",
+                (cnt, credential_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO device_counter (credential_id, last_cnt) VALUES (?, ?)",
+                (credential_id, cnt),
+            )
+        return True
+
+    def update_invitation_state(self, conn, invitation_id: str, *, status: str, redemption_count: int) -> None:
+        conn.execute(
+            """UPDATE invitations
+               SET status = ?, redemption_count = ?, updated_at = datetime('now')
+               WHERE id = ?""",
+            (status, redemption_count, invitation_id),
+        )

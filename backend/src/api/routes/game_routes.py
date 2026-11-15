@@ -953,8 +953,12 @@ def quiz_result():
     if session["user_id"] != g.user_id:
         return jsonify(error="forbidden", message="not your session"), 403
 
-    # Auto-complete if still active (last answer submitted but session not closed)
-    if session["status"] != "completed":
+    # Backfill result metadata. Two cases:
+    #  1. session still active (last answer submitted but session not closed)
+    #  2. session completed via /answer — submit_quiz_answer marks status
+    #     'completed' but never writes result_type/insights; backfill on the
+    #     first /result fetch (guard on empty result_type keeps it once-only)
+    if session["status"] != "completed" or not (session.get("result_type") or "").strip():
         # Determine result_type from score percentage
         total = session["total_questions"] or 1
         pct = session["total_score"] / (total * 10) if total > 0 else 0
@@ -1004,6 +1008,19 @@ def quiz_result():
             )
         except Exception as e:
             logger.warning("timeline: learning_activity skipped for %s: %s", g.user_id, e)
+
+        try:
+            from src.thomas_core.profile.engine import record_quiz_result
+            record_quiz_result(
+                user_id=g.user_id,
+                session_id=session_id,
+                result_type=result_type,
+                total_score=session["total_score"],
+                correct_count=session["correct_count"],
+                total_questions=session["total_questions"],
+            )
+        except Exception as e:
+            logger.warning("profile: quiz_result skipped for %s: %s", g.user_id, e)
     import json as _json
     insights = _json.loads(session.get("insights_json") or "[]")
 

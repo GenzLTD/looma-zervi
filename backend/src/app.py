@@ -8,7 +8,7 @@ from functools import lru_cache
 from flask import Flask, abort, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 
-from src.config import Config, _refresh_config
+from src.config import Config, _refresh_config, resolve_llm_provider_order
 from src.thomas_core.runtime import git_commit
 
 _HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
@@ -156,9 +156,7 @@ def _collect_dependencies(app):
     order = [
         p.strip().lower()
         for p in (
-            app.config.get("LLM_PROVIDER_ORDER")
-            or os.getenv("LLM_PROVIDER_ORDER")
-            or "deepseek"
+            app.config.get("LLM_PROVIDER_ORDER") or resolve_llm_provider_order()
         ).split(",")
         if p.strip()
     ]
@@ -266,6 +264,7 @@ def create_app(env="development"):
     # --- Register blueprints ---
     from src.thomas_core.routes.auth_routes import auth_bp
     from src.api.routes.game_routes import game_bp
+    from src.thomas_core.routes.profile_routes import profile_bp
     from src.api.routes.enterprise_routes import enterprise_bp
     from src.api.routes.job_post_routes import job_post_bp
     from src.thomas_core.routes.ask_routes import ask_bp
@@ -305,6 +304,7 @@ def create_app(env="development"):
     else:
         app.register_blueprint(auth_bp, url_prefix="/v1/auth")
     app.register_blueprint(game_bp, url_prefix="/v1/game")
+    app.register_blueprint(profile_bp, url_prefix="/v1/profile")
     app.register_blueprint(enterprise_bp, url_prefix="/v1/enterprise")
     app.register_blueprint(job_post_bp, url_prefix="/v1")
     if not core_client.http_mode():
@@ -340,8 +340,7 @@ def create_app(env="development"):
 
         llm_order_raw = (
             app.config.get("LLM_PROVIDER_ORDER")
-            or os.getenv("LLM_PROVIDER_ORDER")
-            or "deepseek"
+            or resolve_llm_provider_order()
         )
         llm_order = [
             p.strip().lower()
@@ -434,8 +433,7 @@ def create_app(env="development"):
                 env=os.getenv("FLASK_ENV", "development"),
                 llm_provider=(
                     app.config.get("LLM_PROVIDER_ORDER")
-                    or os.getenv("LLM_PROVIDER_ORDER")
-                    or "deepseek"
+                    or resolve_llm_provider_order()
                 ).split(",")[0].strip(),
                 route_total=route_total,
                 product_lines=lines,
@@ -500,6 +498,8 @@ def create_app(env="development"):
                     )
                 info = schema_loader.ensure_scope(db_path, "product")
                 app.logger.info("[host] schema scope=product ensured: %s", info)
+                profile_info = schema_loader.ensure_scope(db_path, "profile")
+                app.logger.info("[host] schema scope=profile ensured: %s", profile_info)
             db = DatabaseManager(db_path)
             if not split or db_path == ":memory:":
                 db.init_schema()
@@ -532,8 +532,10 @@ def create_app(env="development"):
     try:
         from src.reports.match_report_manager import MatchReportManager as _MatchReportManager
         from src.timeline.events import record_interaction_log as _record_interaction_log
+        from src.timeline.events import record_learning_activity as _record_learning_activity
 
         _core_hooks.register_timeline_logger(_record_interaction_log)
+        _core_hooks.register_learning_activity_logger(_record_learning_activity)
         _core_hooks.register_report_manager_factory(_MatchReportManager)
 
         from src.agents.central_brain import dispatch as _brain_dispatch
