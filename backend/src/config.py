@@ -7,7 +7,7 @@ always picks up the latest env values (not cached at import time).
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 class Config:

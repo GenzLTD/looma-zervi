@@ -146,6 +146,7 @@ def test_require_auth_rejects_unknown_user(client):
 
     db = client.application._db
     with db.get_conn() as conn:
+        conn.execute("DELETE FROM user_identities WHERE user_id = ?", (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
     resp = client.get("/v1/auth/profile", headers={
@@ -179,12 +180,11 @@ def test_payment_upgrade_returns_fresh_token(client):
     assert resp.get_json()["tier"] == "pro"
 
 
-def test_bind_wechat_dev_mode_short_circuit():
-    """WECHAT_DEV_MODE 下 /v1/auth/bind 与 /v1/auth/wechat 同约定：不调 code2session。
+def test_bind_wechat_dev_mode_joins_email_account():
+    """WECHAT_DEV_MODE 下 /v1/auth/bind 不调 code2session，并用邮箱密码认人。
 
-    本机没有 AppID/Secret 时绑定链路也应跑通（由 code 派生 mock openid），
-    否则绑定邮箱永远 400，小程序全量验证里这一项就只能长期挂起。
-    小程序多传的 email/password 该接口不读，也不得因此报错。
+    微信先建出来的人和邮箱注册的人，绑定后必须是同一个 user id。
+    密码不对不得改挂 openid。同一个 openid 不能再挂到第三人。
     """
     from src.app import create_app
 
@@ -195,7 +195,8 @@ def test_bind_wechat_dev_mode_short_circuit():
         os.environ["DATABASE_PATH"] = path
         os.environ["JWT_SECRET"] = "test-jwt-secret-for-local-testing-only-2026"
         os.environ["WECHAT_DEV_MODE"] = "true"
-        for key in ("WECHAT_APPID", "WECHAT_SECRET"):
+        for key in ("WECHAT_APPID", "WECHAT_SECRET", "WECHAT_APP_SECRET",
+                    "SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_JWT_SECRET"):
             os.environ.pop(key, None)
 
         c = create_app("testing").test_client()
@@ -205,18 +206,44 @@ def test_bind_wechat_dev_mode_short_circuit():
             "password": "password123",
         })
         assert resp.status_code == 201
-        token = resp.get_json()["access_token"]
+        email_user = resp.get_json()["user"]["id"]
+
+        resp = c.post("/v1/auth/wechat", json={"code": "mock-wx-code"})
+        assert resp.status_code == 200, resp.get_json()
+        wechat_token = resp.get_json()["access_token"]
+        wechat_user = resp.get_json()["user"]["id"]
+        assert wechat_user != email_user
 
         resp = c.post(
             "/v1/auth/bind",
-            json={"code": "mock-wx-code", "email": "ignored@test.com", "password": "ignored"},
-            headers={"Authorization": f"Bearer {token}"},
+            json={"code": "mock-wx-code", "email": "bind-dev@test.com", "password": "wrong-pass"},
+            headers={"Authorization": f"Bearer {wechat_token}"},
+        )
+        assert resp.status_code == 401
+        assert resp.get_json()["error"] == "unauthorized"
+
+        resp = c.post(
+            "/v1/auth/bind",
+            json={"code": "mock-wx-code", "email": "bind-dev@test.com", "password": "password123"},
+            headers={"Authorization": f"Bearer {wechat_token}"},
         )
         assert resp.status_code == 200, resp.get_json()
-        assert resp.get_json()["message"] == "WeChat account bound successfully"
+        body = resp.get_json()
+        assert body["joined_existing"] is True
+        assert body["user"]["id"] == email_user
+        assert body["user"]["email"] == "bind-dev@test.com"
 
-        # 同一个 mock openid 绑给另一个用户必须 409（dev 模式下 openid=dev_<code>，
-        # 两个账号用同一个 code 即同一个 openid）
+        resp = c.post("/v1/auth/login", json={
+            "email": "bind-dev@test.com",
+            "password": "password123",
+        })
+        assert resp.status_code == 200
+        assert resp.get_json()["user"]["id"] == email_user
+
+        resp = c.post("/v1/auth/wechat", json={"code": "mock-wx-code"})
+        assert resp.status_code == 200
+        assert resp.get_json()["user"]["id"] == email_user
+
         resp = c.post("/v1/auth/register", json={
             "email": "bind-dev-2@test.com",
             "password": "password123",
@@ -225,7 +252,7 @@ def test_bind_wechat_dev_mode_short_circuit():
         token2 = resp.get_json()["access_token"]
         resp = c.post(
             "/v1/auth/bind",
-            json={"code": "mock-wx-code"},
+            json={"code": "mock-wx-code", "email": "bind-dev-2@test.com", "password": "password123"},
             headers={"Authorization": f"Bearer {token2}"},
         )
         assert resp.status_code == 409
@@ -235,6 +262,104 @@ def test_bind_wechat_dev_mode_short_circuit():
             os.environ.pop("WECHAT_DEV_MODE", None)
         else:
             os.environ["WECHAT_DEV_MODE"] = prev_dev_mode
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def test_bind_wechat_saves_new_email_on_wechat_user():
+    """邮箱还没人注册时，绑定把邮箱写到当前微信用户上，iOS 再用这组密码能进同一个人。"""
+    from src.app import create_app
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    prev_dev_mode = os.environ.get("WECHAT_DEV_MODE")
+    try:
+        os.environ["DATABASE_PATH"] = path
+        os.environ["JWT_SECRET"] = "test-jwt-secret-for-local-testing-only-2026"
+        os.environ["WECHAT_DEV_MODE"] = "true"
+        for key in ("WECHAT_APPID", "WECHAT_SECRET", "WECHAT_APP_SECRET",
+                    "SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_JWT_SECRET"):
+            os.environ.pop(key, None)
+
+        c = create_app("testing").test_client()
+        resp = c.post("/v1/auth/wechat", json={"code": "fresh-wx"})
+        assert resp.status_code == 200, resp.get_json()
+        wechat_user = resp.get_json()["user"]["id"]
+        token = resp.get_json()["access_token"]
+
+        resp = c.post(
+            "/v1/auth/bind",
+            json={"code": "fresh-wx", "email": "new-on-wechat@test.com", "password": "password123"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, resp.get_json()
+        assert resp.get_json()["joined_existing"] is False
+        assert resp.get_json()["user"]["id"] == wechat_user
+
+        resp = c.post("/v1/auth/login", json={
+            "email": "new-on-wechat@test.com",
+            "password": "password123",
+        })
+        assert resp.status_code == 200
+        assert resp.get_json()["user"]["id"] == wechat_user
+    finally:
+        if prev_dev_mode is None:
+            os.environ.pop("WECHAT_DEV_MODE", None)
+        else:
+            os.environ["WECHAT_DEV_MODE"] = prev_dev_mode
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def test_wechat_new_user_does_not_depend_on_supabase():
+    """SUPABASE 三件套配置齐全时，微信新用户也必须走 looma 账本（与华为同一条）。
+
+    旧实现此时会调 Supabase Admin API：key 失效即 502 identity provider
+    unavailable，小程序整个挡在登录之外；且签的是 Supabase custom token
+    （sub=Supabase UUID），与鸿蒙端认的不是同一个人。现在无论 Supabase 是否
+    配置，新 openid 一律 user_identities 找/建 + looma JWT。这里把三件套写成
+    假地址——若回归到 Supabase 分支，本用例会因上游失败而挂。
+    """
+    from src.app import create_app
+    from src.thomas_core.auth.jwt_handler import verify_token
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    saved = {k: os.environ.get(k) for k in
+             ("WECHAT_DEV_MODE", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_JWT_SECRET")}
+    try:
+        os.environ["DATABASE_PATH"] = path
+        os.environ["JWT_SECRET"] = "test-jwt-secret-for-local-testing-only-2026"
+        os.environ["WECHAT_DEV_MODE"] = "true"
+        os.environ["SUPABASE_URL"] = "https://supabase.invalid"
+        os.environ["SUPABASE_SECRET_KEY"] = "sb_secret_invalid"
+        os.environ["SUPABASE_JWT_SECRET"] = "invalid-supabase-jwt-secret"
+
+        c = create_app("testing").test_client()
+
+        resp = c.post("/v1/auth/wechat", json={"code": "no-supabase"})
+        assert resp.status_code == 200, resp.get_json()
+        body = resp.get_json()
+        token = body["access_token"]
+        with c.application.app_context():
+            payload = verify_token(token)
+        assert payload["iss"] == "looma"
+        assert payload["sub"] == body["user"]["id"]
+
+        # 同一个 openid 再来一次，必须还是这一个人（认人稳定，不产生第二个号）
+        resp = c.post("/v1/auth/wechat", json={"code": "no-supabase"})
+        assert resp.status_code == 200
+        assert resp.get_json()["user"]["id"] == body["user"]["id"]
+    finally:
+        for key, prev in saved.items():
+            if prev is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = prev
         try:
             os.unlink(path)
         except OSError:

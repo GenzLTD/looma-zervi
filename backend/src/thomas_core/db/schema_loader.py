@@ -1,7 +1,7 @@
 """Scope-aware schema loader（Phase 1 刀 5：把两份 DDL 接进启动流程）。
 
 分工（RFC 裁决 2 / R1）：
-- `core`    → `core_schema.sql`（7 表：users / user_identities / consents / audit_logs / signal_ingest|outbox|dlq）
+- `core`    → `core_schema.sql`（锚表仍是 7 张；invitation 三表与种子策略同文件追加）
 - `product` → `product_schema.sql`（50 表 + 3 个 signal_* 只读视图）
 
 约束：
@@ -46,6 +46,7 @@ _DB_DIR = _sql_dir()
 SCOPE_FILES = {
     "core": _DB_DIR / "core_schema.sql",
     "product": _DB_DIR / "product_schema.sql",
+    "profile": _DB_DIR / "profile_schema.sql",
 }
 # core 侧「在不在」的判定锚（宿主 split 启动时校验用）
 CORE_ANCHOR_TABLES = (

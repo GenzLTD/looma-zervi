@@ -21,6 +21,7 @@
 #   - Bolent 企业站   → 独立部署
 #   - 海外 Vultr SG   → deploy-sg.yml（tag stack-v*）
 #   - 法兰克福演练机  → 独立 staging-frankfurt 脚本，不走 main push
+#   - 106 新机宿主   → deploy-106.yml（release kit，与本文件隔离）
 #
 # 恢复自动部署的前置：新机 IP / SSH / SG 规则 / 健康检查 URL / 预发域名 /
 #   Python 版本 / 密钥注入方式齐备 + 生产 SECRET_KEY / JWT_SECRET 注入 +
