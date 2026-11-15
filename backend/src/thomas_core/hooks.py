@@ -17,6 +17,7 @@ logger = logging.getLogger("looma.core.hooks")
 
 # 注册位（进程级；宿主在 create_app() 里注册一次即可）
 _timeline_logger = None
+_learning_activity_logger = None
 _report_manager_factory = None
 
 
@@ -24,6 +25,12 @@ def register_timeline_logger(fn) -> None:
     """注册 `fn(db, user_id, **kwargs) -> None`（时间线 AI 交互埋点）。"""
     global _timeline_logger
     _timeline_logger = fn
+
+
+def register_learning_activity_logger(fn) -> None:
+    """注册 `fn(db, user_id, **kwargs) -> dict | None`（学习活动时间线埋点）。"""
+    global _learning_activity_logger
+    _learning_activity_logger = fn
 
 
 def register_report_manager_factory(fn) -> None:
@@ -34,8 +41,9 @@ def register_report_manager_factory(fn) -> None:
 
 def reset_hooks() -> None:
     """清空注册位（测试用；不影响缺省惰性实现）。"""
-    global _timeline_logger, _report_manager_factory
+    global _timeline_logger, _learning_activity_logger, _report_manager_factory
     _timeline_logger = None
+    _learning_activity_logger = None
     _report_manager_factory = None
 
 
@@ -46,6 +54,16 @@ def _default_timeline_logger():
         return record_interaction_log
     except Exception:  # ImportError / 宿主缺失
         logger.debug("timeline hook 未注册且宿主实现不可用 → no-op")
+        return None
+
+
+def _default_learning_activity_logger():
+    try:
+        from src.timeline.events import record_learning_activity as _host_record_learning_activity
+
+        return _host_record_learning_activity
+    except Exception:  # ImportError / 宿主缺失
+        logger.debug("learning_activity hook 未注册且宿主实现不可用 → no-op")
         return None
 
 
@@ -68,6 +86,18 @@ def record_interaction_log(db, user_id, **kwargs) -> None:
         fn(db, user_id, **kwargs)
     except Exception:
         logger.debug("timeline hook 执行失败（已忽略）", exc_info=True)
+
+
+def record_learning_activity(db, user_id, **kwargs):
+    """骨架调用点：学习活动时间线埋点（best-effort，异常不抛出）。"""
+    fn = _learning_activity_logger or _default_learning_activity_logger()
+    if fn is None:
+        return None
+    try:
+        return fn(db, user_id, **kwargs)
+    except Exception:
+        logger.debug("learning_activity hook 执行失败（已忽略）", exc_info=True)
+        return None
 
 
 def report_manager(db):

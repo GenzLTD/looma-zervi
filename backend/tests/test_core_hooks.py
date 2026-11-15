@@ -44,6 +44,37 @@ def test_timeline_hook_swallows_failures():
     assert hooks.record_interaction_log("DB", "u-1", query="hi") is None
 
 
+def test_learning_activity_hook_receives_registered_callable():
+    seen = {}
+
+    def fake_logger(db, user_id, **kwargs):
+        seen.update(db=db, user_id=user_id, kwargs=kwargs)
+        return {"ok": True}
+
+    hooks.register_learning_activity_logger(fake_logger)
+    out = hooks.record_learning_activity(
+        "DB",
+        "u-1",
+        source_ref="sess-1",
+        activity_type="harmony_quiz",
+        title="完成鸿蒙答题",
+    )
+
+    assert out == {"ok": True}
+    assert seen["db"] == "DB"
+    assert seen["user_id"] == "u-1"
+    assert seen["kwargs"]["source_ref"] == "sess-1"
+    assert seen["kwargs"]["activity_type"] == "harmony_quiz"
+
+
+def test_learning_activity_hook_swallows_failures():
+    def boom(db, user_id, **kwargs):
+        raise RuntimeError("timeline down")
+
+    hooks.register_learning_activity_logger(boom)
+    assert hooks.record_learning_activity("DB", "u-1", source_ref="sess-1") is None
+
+
 def test_report_manager_factory_injection():
     class FakeMgr:
         def __init__(self, db):

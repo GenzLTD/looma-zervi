@@ -532,8 +532,10 @@ def create_app(env="development"):
     try:
         from src.reports.match_report_manager import MatchReportManager as _MatchReportManager
         from src.timeline.events import record_interaction_log as _record_interaction_log
+        from src.timeline.events import record_learning_activity as _record_learning_activity
 
         _core_hooks.register_timeline_logger(_record_interaction_log)
+        _core_hooks.register_learning_activity_logger(_record_learning_activity)
         _core_hooks.register_report_manager_factory(_MatchReportManager)
 
         from src.agents.central_brain import dispatch as _brain_dispatch

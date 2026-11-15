@@ -12,6 +12,7 @@ import logging
 
 from flask import Blueprint, current_app, g, jsonify, request
 
+from src.thomas_core import hooks
 from src.thomas_core.auth.decorators import require_auth
 from src.thomas_core.db import quiz_store
 
@@ -221,9 +222,8 @@ def _record_side_effects(db, session_id: str, result_type: str, session: dict) -
     except Exception as exc:
         logger.warning("trust_agent: harmonyos quiz memory skipped for %s: %s", g.user_id, exc)
     try:
-        from src.timeline.events import record_learning_activity
-
-        record_learning_activity(
+        # 经 hooks 桥接宿主 timeline；禁止字面量 import src.timeline.*（核自足门禁）
+        hooks.record_learning_activity(
             db,
             g.user_id,
             source_ref=session_id,
