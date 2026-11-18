@@ -38,29 +38,17 @@ def chat_completion(messages: list, stream: bool = False, temperature: float = 0
 
 def rag_answer(question: str, context_chunks: list) -> str:
     """
-    Generate a RAG answer using retrieved context chunks.
+    DEPRECATED — do not use for Ask/RAG.
 
-    Args:
-        question: user's question
-        context_chunks: list of text chunks from ChromaDB search
+    Live Ask path is ``central_brain.dispatch`` → ``_call_llm`` with
+    ``rag_egress_for_collection`` (dual-track privacy). This helper always
+    ships retrieved chunks to DeepSeek and bypasses local-only egress.
 
-    Returns:
-        Generated answer string
+    Raises:
+        RuntimeError: always — hard guard against accidental cloud egress.
     """
-    context_text = "\n\n---\n\n".join(context_chunks) if context_chunks else "(no context found)"
-
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful assistant. Answer the user's question based on the "
-                "provided context. If the context doesn't contain relevant information, "
-                "say so honestly. Always cite which context chunk you used.\n\n"
-                f"Context:\n{context_text}"
-            ),
-        },
-        {"role": "user", "content": question},
-    ]
-
-    result = chat_completion(messages)
-    return result["choices"][0]["message"]["content"]
+    raise RuntimeError(
+        "deepseek_client.rag_answer is disabled: RAG generation must go through "
+        "central_brain._call_llm with rag egress policy (privacy dual-track). "
+        "Do not send retrieved corpus chunks directly to DeepSeek."
+    )
