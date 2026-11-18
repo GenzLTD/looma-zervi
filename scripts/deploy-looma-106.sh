@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 say() { echo "[looma-deploy] $*"; }
 
-# 唯一真相源：backend/THOMAS_CORE_PIN 第一行（thomas-core 合入后的 squash SHA）。
+# 唯一真相源：backend/THOMAS_CORE_PIN 第一行（thomas-core 合入后 main tip（merge/squash 后的有效 SHA））。
 # 不再在脚本里硬编码 PIN_EXPECTED —— 那是双点不同步的根源。
 # check_tree 只接受合法 40 位 hex SHA；TODO/占位符/短 SHA 一律拒绝（fail-closed）。
 read_pin() {
