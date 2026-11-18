@@ -168,10 +168,20 @@ def _call_llm(
     *,
     temperature: float = 0.3,
     max_tokens: int | None = None,
+    allowed_providers: tuple[str, ...] | list[str] | None = None,
+    meta: dict[str, Any] | None = None,
 ) -> str | None:
-    """Call the configured LLM provider via DeepSeek/OpenAI API.
+    """Call the configured LLM provider via DeepSeek/OpenAI/Ollama API.
+
     Returns response text or None on failure.
-    Every call is audited into llm_usage (provider/model/tokens/cost/latency)."""
+    Every call is audited into llm_usage (provider/model/tokens/cost/latency).
+
+    ``allowed_providers`` — when set, only those providers may be tried (privacy
+    egress gate). Providers listed here but missing from LLM_PROVIDER_ORDER are
+    still attempted in the allowed order (so local_only can force ollama even if
+    order forgot it). Cloud providers never run when not in the allow list.
+    ``meta`` — optional dict; on success writes ``provider`` / ``model``.
+    """
     config = current_app.config
     # 注意 config.get(k, default) 在值为空串时不会回落，必须用 or。
     provider_order = [
@@ -179,6 +189,18 @@ def _call_llm(
         for p in (config.get("LLM_PROVIDER_ORDER") or "deepseek,ollama").split(",")
         if p.strip()
     ]
+    if allowed_providers is not None:
+        allow_list = [
+            p.strip().lower()
+            for p in allowed_providers
+            if p and str(p).strip()
+        ]
+        allow_set = set(allow_list)
+        filtered = [p for p in provider_order if p in allow_set]
+        for p in allow_list:
+            if p not in filtered:
+                filtered.append(p)
+        provider_order = filtered
     _warn_llm_policy_once(provider_order)
     db = getattr(current_app, "_db", None)
 
@@ -246,6 +268,9 @@ def _call_llm(
                 continue
 
             _record_llm_usage(db, provider, model, data, t0, status="ok")
+            if meta is not None:
+                meta["provider"] = provider
+                meta["model"] = model
             return text
 
         except Exception as e:
@@ -254,6 +279,8 @@ def _call_llm(
             continue
 
     logger.error("All LLM providers unavailable")
+    if meta is not None:
+        meta.setdefault("provider", None)
     return None
 
 
@@ -393,6 +420,29 @@ def dispatch(
                 )
             )
 
+            from src.config import rag_egress_for_collection
+
+            collection = (
+                (current_app.config.get("CHROMA_COLLECTION") or "looma_knowledge")
+                if results
+                else ""
+            )
+            # 含检索正文 → 按集合分轨；无命中纯闲聊可走云
+            egress = (
+                rag_egress_for_collection(collection)
+                if results
+                else "cloud_ok"
+            )
+            privacy_mode = (
+                current_app.config.get("RAG_PRIVACY_MODE") or "dual"
+            )
+            llm_kwargs: dict[str, Any] = {
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if egress == "local_only":
+                llm_kwargs["allowed_providers"] = ("ollama",)
+
             if results:
                 # Use retrieved context as the primary source. The LLM is told it may
                 # still fall back on general knowledge when the context is incomplete.
@@ -424,14 +474,43 @@ def dispatch(
                     f"回答："
                 )
             t_llm = time.time()
-            answer = _call_llm(
-                prompt, temperature=temperature, max_tokens=max_tokens
-            ) or "知识库检索失败，请稍后再试"
+            llm_meta: dict[str, Any] = {}
+            answer = _call_llm(prompt, meta=llm_meta, **llm_kwargs)
             _timing["rag_llm"] = int((time.time() - t_llm) * 1000)
 
-            sources = [{"chunk_text": r.get("content", "")[:200], "score": r.get("score")} for r in results]
+            if answer is None and egress == "local_only":
+                # fail-closed：隐私轨禁止回落云；只回 meta（id/score），不把正文当答案
+                sources_meta = [
+                    {
+                        "id": r.get("id"),
+                        "score": r.get("score"),
+                        "chunk_text": "",
+                    }
+                    for r in results
+                ]
+                return {
+                    "answer": (
+                        "当前知识库内容需在本地模型生成；本地模型暂不可用，"
+                        "请稍后重试或联系管理员启用 Ollama。"
+                    ),
+                    "error": "rag_local_required",
+                    "egress": egress,
+                    "rag_privacy": privacy_mode,
+                    "llm_provider": None,
+                    "_sources": sources_meta,
+                    "slots": slots,
+                    "ask_mode": resolve_ask_mode(context.get("ask_mode")),
+                }
+
+            sources = [
+                {"chunk_text": r.get("content", "")[:200], "score": r.get("score")}
+                for r in results
+            ]
             return {
-                "answer": answer,
+                "answer": answer or "知识库检索失败，请稍后再试",
+                "egress": egress,
+                "rag_privacy": privacy_mode,
+                "llm_provider": llm_meta.get("provider"),
                 "_sources": sources,
                 "slots": slots,
                 "ask_mode": resolve_ask_mode(context.get("ask_mode")),
@@ -505,6 +584,15 @@ def dispatch(
                 poetry_k = int(get_ask_mode_preset(context.get("ask_mode"))["top_k"])
                 poems = search_poems(search_query, n_results=poetry_k)
                 if poems:
+                    from src.config import rag_egress_for_collection
+
+                    egress = rag_egress_for_collection("poetry_full")
+                    privacy_mode = (
+                        current_app.config.get("RAG_PRIVACY_MODE") or "dual"
+                    )
+                    llm_kwargs: dict[str, Any] = {}
+                    if egress == "local_only":
+                        llm_kwargs["allowed_providers"] = ("ollama",)
                     context_text = "\n\n".join(
                         f"【{p.get('dynasty', '')}】{p.get('title', '')} — {p.get('author', '')}\n{p.get('content', '')}"
                         for p in poems
@@ -514,7 +602,21 @@ def dispatch(
                         f"候选诗词：\n{context_text}\n\n"
                         f"请以 JSON 格式返回：title、author、dynasty、content（选最有代表性的两句）、theme。只输出 JSON。"
                     )
-                    response = _call_llm(prompt)
+                    llm_meta: dict[str, Any] = {}
+                    response = _call_llm(prompt, meta=llm_meta, **llm_kwargs)
+                    if response is None and egress == "local_only":
+                        return {
+                            "message": "诗词推荐需本地模型",
+                            "answer": (
+                                "当前诗词推荐需在本地模型生成；本地模型暂不可用，"
+                                "请稍后重试或联系管理员启用 Ollama。"
+                            ),
+                            "error": "rag_local_required",
+                            "egress": egress,
+                            "rag_privacy": privacy_mode,
+                            "llm_provider": None,
+                            "slots": slots,
+                        }
                     if response:
                         resp_text = response.strip()
                         if "```" in resp_text:
@@ -526,11 +628,19 @@ def dispatch(
                             if isinstance(extracted.get("content"), list):
                                 extracted["content"] = "\n".join(extracted["content"])
                             answer = f"{extracted.get('title', '')} · {extracted.get('author', '')}（{extracted.get('dynasty', '')}）\n\n{extracted.get('content', '')}\n\n{extracted.get('theme', '')}".strip()
-                            return {"message": "已为您推荐诗词", "answer": answer, "extracted": extracted, "slots": slots}
+                            return {
+                                "message": "已为您推荐诗词",
+                                "answer": answer,
+                                "extracted": extracted,
+                                "egress": egress,
+                                "rag_privacy": privacy_mode,
+                                "llm_provider": llm_meta.get("provider"),
+                                "slots": slots,
+                            }
                         except json.JSONDecodeError:
                             pass
 
-                    # LLM failed, return first poem from search
+                    # LLM failed, return first poem from search (no cloud fallback of corpus)
                     best = poems[0]
                     extracted = {
                         "title": best.get("title", ""), "author": best.get("author", ""),
@@ -542,6 +652,9 @@ def dispatch(
                     return {
                         "answer": answer,
                         "extracted": extracted,
+                        "egress": egress,
+                        "rag_privacy": privacy_mode,
+                        "llm_provider": llm_meta.get("provider"),
                         "slots": slots,
                     }
                 return {"message": "未找到匹配的诗词", "status": "pending", "slots": slots,

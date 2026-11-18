@@ -52,6 +52,53 @@ def llm_policy_violations(order: str, region: str | None = None) -> list[str]:
     return [p.strip() for p in (order or "").split(",") if p.strip() and p.strip() not in allowed]
 
 
+# ============================================================================
+# RAG 生成出境分轨（Ask 隐私纪律）
+# ============================================================================
+# 承诺：检索可在机内完成；带正文的 RAG 生成不得在未授权情况下出境到云 LLM。
+#   dual（默认）     — 集合 ∈ RAG_CLOUD_ALLOWED_COLLECTIONS 可云；其余仅 ollama，失败拒答
+#   local_only       — 凡含检索正文一律仅本地
+#   off              — 兼容旧行为（回滚开关）；不按集合限制云生成
+# 默认 allowlist 仅 poetry_full（公开古典）；looma_knowledge 等默认隐私轨。
+RAG_PRIVACY_MODES = frozenset({"dual", "local_only", "off"})
+RAG_CLOUD_ALLOWED_COLLECTIONS_DEFAULT = "poetry_full"
+
+
+def resolve_rag_privacy_mode() -> str:
+    m = (os.getenv("RAG_PRIVACY_MODE") or "dual").strip().lower()
+    return m if m in RAG_PRIVACY_MODES else "dual"
+
+
+def resolve_rag_cloud_allowed_collections() -> list[str]:
+    raw = os.getenv("RAG_CLOUD_ALLOWED_COLLECTIONS")
+    if raw is None:
+        raw = RAG_CLOUD_ALLOWED_COLLECTIONS_DEFAULT
+    return [c.strip() for c in raw.split(",") if c.strip()]
+
+
+def rag_egress_for_collection(
+    collection: str,
+    *,
+    mode: str | None = None,
+    allowed: list[str] | None = None,
+) -> str:
+    """Return ``cloud_ok`` or ``local_only`` for a retrieved corpus collection."""
+    mode_v = (mode or resolve_rag_privacy_mode()).strip().lower()
+    if mode_v == "off":
+        return "cloud_ok"
+    if mode_v == "local_only":
+        return "local_only"
+    allow = (
+        allowed
+        if allowed is not None
+        else resolve_rag_cloud_allowed_collections()
+    )
+    coll = (collection or "").strip()
+    if coll and coll in allow:
+        return "cloud_ok"
+    return "local_only"
+
+
 class Config:
     """Flask config that reads env vars dynamically.
 
@@ -130,6 +177,10 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
     OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
+
+    # RAG Ask 生成出境分轨（见 rag_egress_for_collection）
+    RAG_PRIVACY_MODE = resolve_rag_privacy_mode()
+    RAG_CLOUD_ALLOWED_COLLECTIONS = ",".join(resolve_rag_cloud_allowed_collections())
 
     # Embedding provider (overseas: openai embeddings first)
     EMBED_PROVIDER_ORDER = os.getenv("EMBED_PROVIDER_ORDER", "openai,ollama,deepseek")
@@ -296,6 +347,8 @@ def _refresh_config():
     Config.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     Config.OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
     Config.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
+    Config.RAG_PRIVACY_MODE = resolve_rag_privacy_mode()
+    Config.RAG_CLOUD_ALLOWED_COLLECTIONS = ",".join(resolve_rag_cloud_allowed_collections())
     Config.EMBED_PROVIDER_ORDER = os.getenv("EMBED_PROVIDER_ORDER", "openai,ollama,deepseek")
     Config.EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text:latest")
     Config.EMBED_DIM = int(os.getenv("EMBED_DIM", "768"))

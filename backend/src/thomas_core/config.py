@@ -28,6 +28,22 @@ _DEFAULT_CORS = (
     "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:3000"
 )
 
+# 与 src.config 同语义（核仓不可 import 宿主 config；parity 测试锁死）
+_RAG_PRIVACY_MODES = frozenset({"dual", "local_only", "off"})
+_RAG_CLOUD_ALLOWED_DEFAULT = "poetry_full"
+
+
+def _resolve_rag_privacy_mode() -> str:
+    m = (os.getenv("RAG_PRIVACY_MODE") or "dual").strip().lower()
+    return m if m in _RAG_PRIVACY_MODES else "dual"
+
+
+def _resolve_rag_cloud_allowed_collections_csv() -> str:
+    raw = os.getenv("RAG_CLOUD_ALLOWED_COLLECTIONS")
+    if raw is None:
+        raw = _RAG_CLOUD_ALLOWED_DEFAULT
+    return ",".join(c.strip() for c in raw.split(",") if c.strip())
+
 
 class CoreConfig:
     """核侧 Flask config（`app.config.from_object(CoreConfig)`）。
@@ -73,6 +89,9 @@ class CoreConfig:
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
+    # RAG Ask 出境分轨（与宿主 Config 同键同默认）
+    RAG_PRIVACY_MODE = _resolve_rag_privacy_mode()
+    RAG_CLOUD_ALLOWED_COLLECTIONS = _resolve_rag_cloud_allowed_collections_csv()
 
     # Embedding
     EMBED_PROVIDER_ORDER = os.getenv("EMBED_PROVIDER_ORDER", "openai,ollama,deepseek")
@@ -134,6 +153,8 @@ class CoreConfig:
         cls.OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
         cls.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
         cls.OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
+        cls.RAG_PRIVACY_MODE = _resolve_rag_privacy_mode()
+        cls.RAG_CLOUD_ALLOWED_COLLECTIONS = _resolve_rag_cloud_allowed_collections_csv()
         cls.EMBED_PROVIDER_ORDER = os.getenv("EMBED_PROVIDER_ORDER", "openai,ollama,deepseek")
         cls.EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text:latest")
         cls.CHROMA_MODE = os.getenv("CHROMA_MODE", "local")

@@ -175,13 +175,19 @@ def ask_question():
                 )
             except Exception:
                 pass
-        return jsonify(
-            answer=cached["answer"],
-            intent=cached["intent"],
-            intent_confidence=cached.get("intent_confidence"),
-            sources=cached["sources"],
-            mode=ask_mode,
-        )
+        cached_payload = {
+            "answer": cached["answer"],
+            "intent": cached["intent"],
+            "intent_confidence": cached.get("intent_confidence"),
+            "sources": cached["sources"],
+            "mode": ask_mode,
+            "egress": cached.get("egress"),
+            "rag_privacy": cached.get("rag_privacy"),
+            "llm_provider": cached.get("llm_provider"),
+        }
+        if cached.get("error"):
+            cached_payload["error"] = cached["error"]
+        return jsonify(cached_payload)
 
     quota_result = consume_with_boost(user_id, tier, RESOURCE_ASK)
     if not quota_result["ok"]:
@@ -237,14 +243,25 @@ def ask_question():
 
     # Build response
     sources_raw = result.get("_sources") or result.get("sources") or []
-    sources = [
-        {"chunk_text": s.get("chunk_text", "")[:200] if isinstance(s, dict) else str(s)[:200],
-         "score": s.get("score") if isinstance(s, dict) else None}
-        for s in sources_raw
-    ]
+    sources = []
+    for s in sources_raw:
+        if isinstance(s, dict):
+            entry = {
+                "chunk_text": (s.get("chunk_text") or "")[:200],
+                "score": s.get("score"),
+            }
+            if s.get("id") is not None:
+                entry["id"] = s.get("id")
+            sources.append(entry)
+        else:
+            sources.append({"chunk_text": str(s)[:200], "score": None})
 
     answer = result.get("answer") or result.get("message") or ""
     extracted = result.get("extracted")
+    egress = result.get("egress")
+    rag_privacy = result.get("rag_privacy")
+    llm_provider = result.get("llm_provider")
+    error = result.get("error")
 
     # Cache the result (report-scoped to avoid cross-report pollution)
     _cache_set(
@@ -254,17 +271,21 @@ def ask_question():
             "intent_confidence": confidence,
             "answer": answer,
             "sources": sources,
+            "egress": egress,
+            "rag_privacy": rag_privacy,
+            "llm_provider": llm_provider,
+            "error": error,
         },
         ask_mode,
         cache_report_id,
     )
 
-    # Log query for data flywheel
+    # Log query for data flywheel — provider = 实际生成通道，勿写死 deepseek
     try:
         db = current_app._db
         db.log_query(
             query_text=query,
-            provider="deepseek",
+            provider=str(llm_provider or "none"),
             response_time_ms=elapsed,
             chunk_count=len(sources),
             user_id=user_id if tier != "guest" else None,
@@ -284,15 +305,21 @@ def ask_question():
     except Exception:
         pass
 
-    return jsonify(
-        answer=answer,
-        intent=intent_str,
-        intent_confidence=round(confidence, 3),
-        sources=sources,
-        tokens_used=elapsed,
-        extracted=extracted,
-        mode=ask_mode,
-    )
+    payload = {
+        "answer": answer,
+        "intent": intent_str,
+        "intent_confidence": round(confidence, 3),
+        "sources": sources,
+        "tokens_used": elapsed,
+        "extracted": extracted,
+        "mode": ask_mode,
+        "egress": egress,
+        "rag_privacy": rag_privacy,
+        "llm_provider": llm_provider,
+    }
+    if error:
+        payload["error"] = error
+    return jsonify(payload)
 
 
 @ask_bp.route("/feedback/rate", methods=["POST"])

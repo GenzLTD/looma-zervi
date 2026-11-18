@@ -372,6 +372,25 @@ def create_app(env="development"):
             or has_openai
         )
         track_ids = _dual_track_health_ids()
+        ollama_host = (
+            app.config.get("OLLAMA_HOST") or os.getenv("OLLAMA_HOST") or "http://127.0.0.1:11434"
+        )
+        ollama_probe = _probe_base(ollama_host, "")
+        ollama_ok = ollama_probe == "ok"
+        rag_privacy_mode = (
+            app.config.get("RAG_PRIVACY_MODE")
+            or os.getenv("RAG_PRIVACY_MODE")
+            or "dual"
+        )
+        rag_cloud_allowed = [
+            c.strip()
+            for c in str(
+                app.config.get("RAG_CLOUD_ALLOWED_COLLECTIONS")
+                or os.getenv("RAG_CLOUD_ALLOWED_COLLECTIONS")
+                or "poetry_full"
+            ).split(",")
+            if c.strip()
+        ]
         return jsonify(
             status="ok" if llm_ready else "degraded",
             service="looma-backend",
@@ -391,6 +410,10 @@ def create_app(env="development"):
                 "deepseek": has_deepseek,
                 "ollama": has_ollama,
             },
+            ollama_ok=ollama_ok,
+            ollama_status=ollama_probe,
+            rag_privacy_mode=str(rag_privacy_mode).strip().lower() or "dual",
+            rag_cloud_allowed_collections=rag_cloud_allowed,
             qcc_configured=has_qcc and qcc_enabled,
         )
 
