@@ -553,8 +553,11 @@ def act1_make_choice():
                 imprint_points = int(result.get("imprint_points") or 0)
                 target_domain = "诗域" if is_cross else state.domain
                 imprint_name = result.get("imprint_name", "")
+                # 涌现策略检测匹配的是选择原文（「拒绝。这不是我。」）而非印记名
+                # （「自我定义」），故 engine history 记 label，印记体系仍走 imprint_*
+                choice_label = result.get("choice_label") or ""
 
-                engine.record_choice(session_id, target_domain, imprint_name, user_id)
+                engine.record_choice(session_id, target_domain, choice_label or imprint_name, user_id)
                 engine.add_imprint(
                     user_id, target_domain, imprint_points, axis=imprint_axis,
                 )
@@ -582,10 +585,23 @@ def act1_make_choice():
                 choice=result.get("imprint_name", ""),
                 metadata={
                     "choice_index": choice_index,
+                    "choice_label": result.get("choice_label", ""),
                     "imprint_axis": result.get("imprint_axis"),
                     "is_cross_choice": is_cross,
                 },
             )
+        except Exception:
+            pass
+
+        # 涌现策略检测（MBTI 拒绝者等）——与 /engine/choice 路由对齐；
+        # 只落未入库的策略，避免阈值达成后每次 choice 重复插入
+        try:
+            from src.agents.domain_engine import get_domain_engine
+            strategies = get_domain_engine(db=db).detect_strategies(user_id)
+            known = set(db.get_emergent_strategies(user_id))
+            for s in strategies:
+                if s["strategy"] not in known:
+                    db.log_emergent_strategy(user_id, s["strategy"])
         except Exception:
             pass
 
@@ -628,6 +644,24 @@ def act1_reset():
     except Exception as e:
         logger.error(f"act1_reset failed: {e}", exc_info=True)
         return jsonify(error="engine_error", message=str(e)), 500
+
+
+@narrative_bp.route("/engine/emergent-strategies", methods=["GET"])
+@optional_auth
+def engine_get_emergent_strategies():
+    """Get strategies detected for the current user (DB-persisted).
+
+    画像页等消费方据此渲染涌现策略回声（如 MBTI 拒绝者隐藏路径）。
+    """
+    user_id = _user_id()
+    if not user_id:
+        return jsonify(strategies=[])
+    db = _get_db()
+    try:
+        return jsonify(strategies=db.get_emergent_strategies(user_id))
+    except Exception as e:
+        logger.error(f"get_emergent_strategies failed: {e}", exc_info=True)
+        return jsonify(strategies=[])
 
 
 @narrative_bp.route("/engine/act1/content", methods=["GET"])

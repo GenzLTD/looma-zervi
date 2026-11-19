@@ -391,6 +391,16 @@ class DomainEngine:
         """Record a choice made in a domain."""
         history = self.get_history(session_id)
         history.record_choice(domain, choice)
+        # act1 流程不经过 record_domain_enter：补记访问域，使按
+        # visited_domains 判定的涌现策略（诗域避难所/迷雾速通）不落空
+        if domain not in history.visited_domains:
+            history.visited_domains.append(domain)
+        # 建立 user→session 映射，detect_strategies 据此跨会话聚合
+        if user_id:
+            if user_id not in self._user_histories:
+                self._user_histories[user_id] = []
+            if session_id not in self._user_histories[user_id]:
+                self._user_histories[user_id].append(session_id)
 
     # ---- Cross-Domain Echo ----
 
@@ -499,19 +509,32 @@ class DomainEngine:
         if user_id not in self._imprints:
             return []
 
-        history = self.get_history("latest")
         imprint = self._imprints[user_id]
         detected: list[dict] = []
 
+        # 跨会话聚合该用户全部历史：拒绝 ≥2 次等规则本就跨次生效；
+        # （旧实现读 get_history("latest")，key 恒不匹配真实 session_id，
+        #  五类策略检测全部空转——本切片修复的根因）
+        all_choices: list[dict] = []
+        visited_domains: list[str] = []
+        echo_chain_length = 0
+        for sid in self._user_histories.get(user_id, []):
+            h = self._histories.get(sid)
+            if not h:
+                continue
+            all_choices.extend(h.domain_choices)
+            visited_domains.extend(h.visited_domains)
+            echo_chain_length = max(echo_chain_length, h.echo_chain_length)
+
         # Strategy 1: 诗域避难所 — 连续3次进入诗域且有职业域上下文
-        if len(history.visited_domains) >= 3:
-            last3 = history.visited_domains[-3:]
-            if all(d == "诗域" for d in last3) and "职业域" in history.visited_domains:
+        if len(visited_domains) >= 3:
+            last3 = visited_domains[-3:]
+            if all(d == "诗域" for d in last3) and "职业域" in visited_domains:
                 s = EmergentStrategy.POETRY_REFUGE
                 detected.append({"strategy": s.value, **EMERGENT_RULES[s]})
 
         # Strategy 2: 信任域刷分 — 连续3次在信任域做"正面"选择
-        trust_choices = [c for c in history.domain_choices if c["domain"] == "信任域"]
+        trust_choices = [c for c in all_choices if c["domain"] == "信任域"]
         if len(trust_choices) >= 3:
             positive_keywords = ["信任", "诚实", "坦白", "帮助", "支持"]
             positive_count = sum(
@@ -523,7 +546,7 @@ class DomainEngine:
                 detected.append({"strategy": s.value, **EMERGENT_RULES[s]})
 
         # Strategy 3: 迷雾域速通 — 只走迷雾域，跳过至少3个其他域
-        unique = set(history.visited_domains)
+        unique = set(visited_domains)
         skipped = len(set(DOMAINS) - unique - {"迷雾域"})
         if len(unique) == 1 and "迷雾域" in unique and skipped >= 3:
             s = EmergentStrategy.UNKNOWN_SPEEDRUN
@@ -531,7 +554,7 @@ class DomainEngine:
 
         # Strategy 4: MBTI拒绝者 — 自我域拒绝标签至少2次
         reject_choices = [
-            c for c in history.domain_choices
+            c for c in all_choices
             if c["domain"] == "自我域" and any(
                 kw in str(c["choice"]) for kw in ["拒绝", "不接受", "不认同", "不是我", "不对"]
             )
@@ -541,7 +564,7 @@ class DomainEngine:
             detected.append({"strategy": s.value, **EMERGENT_RULES[s]})
 
         # Strategy 5: 跨域黑客 — 回声链长度 >=3
-        if history.echo_chain_length >= 3:
+        if echo_chain_length >= 3:
             s = EmergentStrategy.CROSS_DOMAIN_HACKER
             detected.append({"strategy": s.value, **EMERGENT_RULES[s]})
 

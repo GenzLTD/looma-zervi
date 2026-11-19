@@ -255,6 +255,7 @@ class Act1StateMachine:
             result = {
                 "step": state.step,
                 "chosen_option": choice_index,
+                "choice_label": choice_data.get("label", ""),
                 "imprint_name": choice_data.get("imprint_name", ""),
                 "imprint_axis": choice_data.get("imprint_axis", ""),
                 "imprint_points": choice_data.get("imprint_points", 2),
@@ -278,6 +279,7 @@ class Act1StateMachine:
             result = {
                 "step": state.step,
                 "chosen_option": choice_index,
+                "choice_label": choice_data.get("label", ""),
                 "imprint_name": choice_data.get("imprint_name", ""),
                 "imprint_axis": choice_data.get("imprint_axis", ""),
                 "imprint_points": choice_data.get("imprint_points", 2),
