@@ -647,6 +647,8 @@ _L1_KIND_LABELS = {
     "interaction_log": "对话沉淀",
     "mission_completed": "任务完成",
     "learning_activity": "学习行为",
+    "identity_snapshot": "身份重构",
+    "career_decision": "职业抉择",
 }
 
 

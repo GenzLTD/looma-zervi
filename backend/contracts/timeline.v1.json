@@ -15,7 +15,8 @@
         "match_scan",
         "resume_ingest",
         "mission_completed",
-        "learning_activity"
+        "learning_activity",
+        "identity_snapshot"
       ],
       "phase1_stub": [
         "career_decision",

@@ -12,12 +12,14 @@ EVENT_KIND_PHASE1 = frozenset({
     "resume_ingest",
     "mission_completed",
     "learning_activity",
+    "identity_snapshot",  # 身份域 Layer 0 快照（宣言+标签），多次重构留痕
 })
 
 EVENT_KIND_MANUAL = frozenset({
     "project_record",
     "check_in",
     "career_decision",
+    "identity_snapshot",
 })
 
 # kinds that may appear more than once for same source_ref
