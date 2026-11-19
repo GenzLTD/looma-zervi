@@ -5,17 +5,28 @@
 #   scripts/deploy-looma-106.sh <sha>              # 在服务器上执行，代码已由 CI rsync 到 releases/<sha>
 set -euo pipefail
 
-PIN_EXPECTED="35f04659718edb3518e14d97a84e237dfa1307a9"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 say() { echo "[looma-deploy] $*"; }
 
+# 唯一真相源：backend/THOMAS_CORE_PIN 第一行（thomas-core 合入后 main tip（merge/squash 后的有效 SHA））。
+# 不再在脚本里硬编码 PIN_EXPECTED —— 那是双点不同步的根源。
+# check_tree 只接受合法 40 位 hex SHA；TODO/占位符/短 SHA 一律拒绝（fail-closed）。
+read_pin() {
+  head -n 1 "$1/backend/THOMAS_CORE_PIN" | tr -d '[:space:]'
+}
+
+valid_sha() {
+  [[ "$1" =~ ^[0-9a-fA-F]{40}$ ]]
+}
+
 check_tree() {
   local root="$1"
   local pin
-  pin="$(head -n 1 "$root/backend/THOMAS_CORE_PIN" | tr -d '[:space:]')"
-  if [ "$pin" != "$PIN_EXPECTED" ]; then
-    echo "FATAL: THOMAS_CORE_PIN=$pin ，需要 $PIN_EXPECTED" >&2
+  pin="$(read_pin "$root")"
+  if ! valid_sha "$pin"; then
+    echo "FATAL: THOMAS_CORE_PIN=[$pin] 不是合法 40 位 SHA（占位符/未填/格式错）；" >&2
+    echo "       须在 Mac squash 合入 thomas PR #2 后，填入 main 上的 merge SHA。" >&2
     exit 1
   fi
   [ -f "$root/backend/src/thomas_core/routes/invitation_routes.py" ] || {
@@ -35,7 +46,7 @@ check_tree() {
 if [ "${DRY_RUN:-0}" = "1" ]; then
   check_tree "$ROOT"
   say "dry-run OK"
-  say "pin=$PIN_EXPECTED"
+  say "pin=$(read_pin "$ROOT") (from backend/THOMAS_CORE_PIN)"
   say "process=127.0.0.1:5200 via gunicorn"
   say "nginx=host :80 -> 127.0.0.1:5200"
   say "untouched=~/thomas and gfcc-kernel"
