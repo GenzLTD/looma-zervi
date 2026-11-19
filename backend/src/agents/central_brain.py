@@ -358,6 +358,39 @@ def _parse_intent_rules(message: str) -> str:
     return "unknown"
 
 
+# 企业名提取：优先完整工商名（XX有限公司/有限责任公司），退而求其次「XX公司/集团/银行」
+_COMPANY_RE = re.compile(
+    r"([\u4e00-\u9fa5A-Za-z0-9·（）()]{2,30}?(?:股份)?有限(?:责任)?公司"
+    r"|[\u4e00-\u9fa5A-Za-z0-9·（）()]{2,20}(?:公司|集团|银行|控股))"
+)
+
+
+def _extract_company_name(text: str) -> str:
+    """Best-effort company name extraction from a natural-language query."""
+    if not text:
+        return ""
+    # 去掉「请/麻烦/帮我 + 查一下/看看/了解一下…」等查询动词前缀
+    cleaned = re.sub(
+        r"^(?:请|麻烦|帮我|帮忙|给我)?(?:查一下|查查|查询|查下|查查看|查|看看|看一下|瞧一瞧|"
+        r"了解|了解一下|搜一下|搜索|评估|分析)(?:一下)?",
+        "",
+        text.strip(),
+    )
+    m = _COMPANY_RE.search(cleaned)
+    if m:
+        return m.group(1).strip("的了吗呢吧，。？！?!,. ")
+    # 「查一下腾讯科技的信用」→ 腾讯科技（无「公司」后缀的简称）
+    m2 = re.search(
+        r"([\u4e00-\u9fa5A-Za-z0-9·（）()]{2,30}?)(?:的)?(?:企业)?(?:信用|征信|风险|背景|工商|经营)",
+        cleaned,
+    )
+    if m2:
+        name = m2.group(1).strip("的了吗呢吧，。？！?!,. ")
+        if name:
+            return name
+    return ""
+
+
 def parse_intent(message: str, navigator_mode: bool = False) -> tuple[str, float, dict[str, Any]]:
     """Parse user message → intent + confidence + slots.
     Strategy: rules first (reliable), LLM as enhancement."""
@@ -706,6 +739,86 @@ def dispatch(
             return {"message": f"已生成{type_cn}报告", "answer": f"{type_cn}已生成，请查看。", "path": str(path), "slots": slots}
         except Exception as e:
             return {"message": "报告生成失败", "error": str(e), "answer": "报告生成暂时不可用，请稍后重试。", "slots": slots}
+
+    # ── 企业征信查询（QCC 企查查，方案 B：/v1/ask 自然语言查企）──
+    # /v1/ask 入口已 require_auth；本进程启动时已加载 backend/.env（含 QCC_AUTH_TOKEN）。
+    if intent == "credit":
+        from src.credit.qcc_client import check_company_credit, QccMcpError
+
+        company_name = str(
+            slots.get("company_name") or slots.get("company") or ""
+        ).strip()
+        if not company_name:
+            company_name = _extract_company_name(text or query)
+
+        if not company_name:
+            return {
+                "message": "请提供公司名称",
+                "answer": "我可以帮你查询企业工商与信用信息（企查查数据源）。"
+                "请告诉我公司名称，例如「查一下腾讯科技的信用」。",
+                "slots": slots,
+            }
+
+        try:
+            t_qcc = time.time()
+            report = check_company_credit(
+                company_name=company_name,
+                include_risk=True,
+                include_operation=True,
+                include_executives=True,
+                include_ipr=False,
+                include_history=False,
+                include_legal_cases=False,
+                include_documents=False,
+            )
+            _timing["credit_qcc"] = int((time.time() - t_qcc) * 1000)
+
+            c = report.company
+            if not c.company_name:
+                return {
+                    "message": f"未找到企业 {company_name}",
+                    "answer": f"没有在企查查数据源中找到「{company_name}」，请确认公司名称后重试。",
+                    "slots": slots,
+                }
+
+            risk_count = len(report.risk.risk_items)
+            lines = [f"已为你查询「{c.company_name}」（企查查数据）："]
+            if c.status:
+                lines.append(f"· 经营状态：{c.status}")
+            if c.legal_person:
+                lines.append(f"· 法定代表人：{c.legal_person}")
+            if c.registered_capital:
+                lines.append(f"· 注册资本：{c.registered_capital}")
+            if c.established_date:
+                lines.append(f"· 成立日期：{c.established_date}")
+            if c.address:
+                lines.append(f"· 注册地址：{c.address}")
+            if risk_count > 0:
+                risk_desc = report.risk.summary or f"共 {risk_count} 项风险记录"
+                lines.append(f"· 风险提示：{risk_desc}")
+            else:
+                lines.append("· 风险提示：未见公开风险记录")
+
+            return {
+                "answer": "\n".join(lines),
+                "source": report.source,
+                "extracted": {"entity_name": c.company_name},
+                "slots": {**slots, "company_name": c.company_name},
+            }
+        except QccMcpError as e:
+            logger.warning(f"[Credit] QCC unavailable for '{company_name}': {e}")
+            return {
+                "message": "企查查服务暂不可用",
+                "answer": f"「{company_name}」的征信查询暂时不可用（数据源连接异常），请稍后重试。",
+                "slots": slots,
+            }
+        except Exception as e:
+            logger.error(f"[Credit] unexpected error for '{company_name}': {e}")
+            return {
+                "message": "征信查询异常",
+                "answer": "征信查询出现异常，请稍后重试。",
+                "slots": slots,
+            }
 
     # ── Navigator 对话模式 ──
     if context.get("navigator_mode") and intent == "unknown":
