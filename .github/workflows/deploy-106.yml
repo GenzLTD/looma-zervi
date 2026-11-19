@@ -35,8 +35,14 @@ jobs:
       - name: 钉版必须是已验收的核
         run: |
           set -euo pipefail
+          # 与 scripts/deploy-looma-106.sh 同口径：PIN 单点真相源，禁第二处硬编码
+          # （#56 合入后 PIN=bfe7b1c…，旧断言 35f04659… 会假失败并 skip deploy）
           pin=$(head -n 1 backend/THOMAS_CORE_PIN | tr -d '[:space:]')
-          test "$pin" = "35f04659718edb3518e14d97a84e237dfa1307a9"
+          if ! [[ "$pin" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::THOMAS_CORE_PIN=[$pin] 不是合法 40 位 SHA"
+            exit 1
+          fi
+          echo "pin=$pin (from backend/THOMAS_CORE_PIN)"
           test -f backend/src/thomas_core/routes/invitation_routes.py
           python backend/scripts/validate_schema_gate.py
 
