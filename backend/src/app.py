@@ -227,6 +227,12 @@ def _dual_track_health_ids() -> dict:
         or None
     )
     env_stack = os.getenv("STACK_SHA", "").strip() or None
+    # 编排锁 tip（deploy-orchestrator）；与双轨 tip 正交 —— CN 不得用 stack_sha 冒充
+    orch_sha = (
+        os.getenv("ORCH_SHA", "").strip()
+        or os.getenv("KIT_SHA", "").strip()
+        or None
+    )
     # Track from DEPLOY_REGION / VULTR_TAG only — stray STACK_SHA on CN must not flip.
     is_vultr = region in ("SG", "US", "FRA") or bool(vultr_tag)
 
@@ -240,6 +246,7 @@ def _dual_track_health_ids() -> dict:
             "looma_sha_kind": "join_pin" if looma_sha else None,
             "vultr_tag": vultr_tag,
             "stack_sha": stack_sha,
+            "orch_sha": orch_sha,
         }
 
     # CN / looma：tip = looma_sha；拒绝带回 stack 标记冒充海外轨
@@ -250,6 +257,7 @@ def _dual_track_health_ids() -> dict:
         "looma_sha_kind": "deploy_tip" if tip else None,
         "vultr_tag": None,
         "stack_sha": None,
+        "orch_sha": orch_sha,
     }
 
 
@@ -401,6 +409,7 @@ def create_app(env="development"):
             looma_sha_kind=track_ids["looma_sha_kind"],
             vultr_tag=track_ids["vultr_tag"],
             stack_sha=track_ids["stack_sha"],
+            orch_sha=track_ids.get("orch_sha"),
             llm_provider=primary_llm,
             llm_provider_order=llm_order,
             llm_configured=llm_ready,

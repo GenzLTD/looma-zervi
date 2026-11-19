@@ -39,11 +39,13 @@ GFCC `contracts/gfcc/SOURCE.json` 消费者钉仍受 playbook（1.6.0）约束�
 | `looma_sha` | **部署 tip**（=`git_commit`） | **join PIN**（`contracts/looma-join.PIN.json`），**不是 tip** |
 | `looma_sha_kind` | `"deploy_tip"` | `"join_pin"` |
 | `stack_sha` / `vultr_tag` | **必须 null**（拒绝冒充海外栈） | tip / `stack-v*` |
+| `orch_sha` | 可选：deploy-orchestrator tip（`ORCH_SHA` / `KIT_SHA`） | 可选同左 |
 
 **探活断言：**
-1. 天翼：`deploy_track=looma` 且 `looma_sha == git_commit` 且 `stack_sha is null`
+1. 天翼：`deploy_track=looma` 且 `looma_sha == git_commit` 且 `stack_sha is null`（`orch_sha` 可有值，**不得**塞进 `stack_sha`）
 2. SG：`deploy_track=vultr` 且版本只认 `stack_sha` + `vultr_tag`（**不要**拿 `looma_sha` 与天翼比先后）
 3. `git_commit.txt` 由对应轨的 deploy 写入；CN 写 looma SHA，SG 写 Vultr `github.sha`
+4. D4/D5「对齐 orch tip」认 `orch_sha`，**禁止**把 CN `stack_sha` 写成 orch tip（Lock 4 / Dell v1.12 §15.4）
 
 - 验收：同区双登录同账；跨区负例（不并账）
 
