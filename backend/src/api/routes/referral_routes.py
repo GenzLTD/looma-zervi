@@ -6,6 +6,7 @@ Endpoints:
   POST /v1/referral/create          - Create a new invite code
   POST /v1/referral/use             - Consume an invite code
   GET  /v1/referral/my-codes        - List user's created invite codes
+  GET  /v1/referral/graph           - Current user's fission network (BFS <=3 degrees + funnel + hub)
   GET  /v1/referral/profile-view/<code> - Public: view personality profile by share code
 """
 from __future__ import annotations
@@ -215,6 +216,140 @@ def use_code():
         return jsonify(payload)
     except Exception as e:
         return jsonify(error="use_failed", message=str(e)), 500
+
+
+@referral_bp.route("/graph", methods=["GET"])
+@require_auth
+def referral_graph():
+    """Current user's fission network: honest six-degrees board.
+
+    Real edges only (invite_redemptions joined with invite_codes).
+    Degrees = number of intermediaries on the redemption chain (BFS shortest
+    path, measured not estimated). Downstream tree only; upstream shown
+    separately. Hub limited to the personal network; no site-wide ranking.
+    """
+    db = current_app._db
+    root = g.user_id
+
+    try:
+        with db.get_conn() as conn:
+            edge_rows = conn.execute(
+                """SELECT ic.created_by AS inviter_id, r.used_by AS used_by,
+                          r.code AS code, r.used_at AS used_at
+                   FROM invite_redemptions r
+                   INNER JOIN invite_codes ic ON ic.code = r.code
+                   WHERE ic.tier_grant != ?""",
+                (PROFILE_SHARE_GRANT,),
+            ).fetchall()
+            edges = [dict(e) for e in edge_rows]
+
+            code_rows = conn.execute(
+                """SELECT ic.code AS code,
+                          (SELECT COUNT(*) FROM invite_redemptions r
+                            WHERE r.code = ic.code) AS redemptions
+                   FROM invite_codes ic
+                   WHERE ic.created_by = ? AND ic.tier_grant != ?""",
+                (root, PROFILE_SHARE_GRANT),
+            ).fetchall()
+            own_codes = [dict(c) for c in code_rows]
+
+            user_rows = conn.execute("SELECT id, name, email FROM users").fetchall()
+
+        def display_name(user_id: str) -> str:
+            for u in user_rows:
+                if u["id"] == user_id:
+                    name = u["name"] or ""
+                    email = u["email"] or ""
+                    if name:
+                        return name
+                    if email and "@" in email:
+                        return email.split("@")[0]
+                    break
+            return f"星旅人{user_id[:4]}"
+
+        # Adjacency (fission edges, both directions)
+        adj_out: dict[str, list[dict]] = {}
+        adj_in: dict[str, list[dict]] = {}
+        for e in edges:
+            inviter, redeemer = e["inviter_id"], e["used_by"]
+            if not inviter or not redeemer:
+                continue
+            adj_out.setdefault(inviter, []).append(e)
+            adj_in.setdefault(redeemer, []).append(e)
+
+        upstream = [
+            {
+                "user_id": e["inviter_id"],
+                "name": display_name(e["inviter_id"]),
+                "via_code": e["code"],
+                "used_at": e["used_at"],
+            }
+            for e in adj_in.get(root, [])
+        ]
+
+        # BFS downstream, depth <= 3 (degree = intermediaries on the chain)
+        visited = {root}
+        frontier = [root]
+        degrees: dict[str, list[dict]] = {"one": [], "two": [], "three": []}
+        level_keys = ("one", "two", "three")
+        for depth in range(3):
+            next_frontier: list[str] = []
+            for u in frontier:
+                for e in adj_out.get(u, []):
+                    v = e["used_by"]
+                    if v in visited:
+                        continue
+                    visited.add(v)
+                    next_frontier.append(v)
+                    node = {
+                        "user_id": v,
+                        "name": display_name(v),
+                        "via_code": e["code"],
+                        "used_at": e["used_at"],
+                    }
+                    if depth > 0:
+                        node["via_inviter"] = display_name(u)
+                    degrees[level_keys[depth]].append(node)
+            frontier = next_frontier
+
+        # Hub: among direct members, who brought the most distinct people
+        hub = None
+        best = None
+        for node in degrees["one"]:
+            brought = {e["used_by"] for e in adj_out.get(node["user_id"], [])}
+            if len(brought) >= 2 and (best is None or len(brought) > best):
+                best = len(brought)
+                hub = {
+                    "user_id": node["user_id"],
+                    "name": node["name"],
+                    "brought_count": len(brought),
+                }
+
+        codes_created = len(own_codes)
+        codes_redeemed = sum(1 for c in own_codes if c["redemptions"] > 0)
+        redemptions = sum(c["redemptions"] for c in own_codes)
+        funnel = {
+            "codes_created": codes_created,
+            "codes_redeemed": codes_redeemed,
+            "codes_unredeemed": codes_created - codes_redeemed,
+            "redemptions": redemptions,
+            "redeem_rate": (codes_redeemed / codes_created) if codes_created else 0.0,
+        }
+
+        return jsonify(
+            root_user_id=root,
+            upstream=upstream,
+            degrees=degrees,
+            funnel=funnel,
+            hub=hub,
+            meta={
+                "coverage": "planetx_fission_network",
+                "measured": True,
+                "max_depth": 3,
+            },
+        )
+    except Exception as e:
+        return jsonify(error="graph_failed", message=str(e)), 500
 
 
 @referral_bp.route("/profile-view/<code>", methods=["GET"])
