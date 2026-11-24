@@ -18,6 +18,7 @@ EVENT_KIND_MANUAL = frozenset({
     "project_record",
     "check_in",
     "career_decision",
+    "identity_snapshot",
 })
 
 # kinds that may appear more than once for same source_ref
@@ -25,6 +26,7 @@ EVENT_KIND_ALLOW_DUPLICATE = frozenset({
     "check_in",
     "interaction_log",
     "match_scan",
+    "identity_snapshot",
 })
 
 SOURCE_SYSTEMS = frozenset({

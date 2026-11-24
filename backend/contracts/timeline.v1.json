@@ -19,6 +19,7 @@
       ],
       "phase1_stub": [
         "career_decision",
+        "identity_snapshot",
         "interview_session",
         "fleet_co_presence",
         "external_signal",
@@ -204,10 +205,17 @@
         ]
       },
       {
+        "method": "GET",
+        "path": "/v1/timeline/events",
+        "auth": "required",
+        "query": ["cursor", "limit", "kind", "since"],
+        "notes": "Alias of GET /v1/timeline. Same items/next_cursor/count."
+      },
+      {
         "method": "POST",
         "path": "/v1/timeline/events",
         "auth": "required",
-        "body": "manual event_kind only"
+        "body": "manual event_kind only: project_record, check_in, career_decision, identity_snapshot"
       },
       {
         "method": "PATCH",

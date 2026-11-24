@@ -14,6 +14,7 @@ def app():
     os.close(fd)
     os.environ["DATABASE_PATH"] = path
     os.environ["JWT_SECRET"] = "test-secret"
+    os.environ["THOMAS_CORE_MODE"] = "inprocess"
     application = create_app("testing")
     yield application
     os.unlink(path)
@@ -118,6 +119,40 @@ def test_manual_check_in_and_growth_low_confidence(client):
     assert "满分" in dims["action_density"]["hint"]
     assert dims["exploration"]["max"] == 5
     assert dims["expression"]["max"] == 5
+
+
+def test_identity_snapshot_and_events_list_alias(client):
+    token = _register(client, "tl_snap@test.com")
+    created = client.post(
+        "/v1/timeline/events",
+        headers=_auth(token),
+        json={
+            "event_kind": "identity_snapshot",
+            "title": "人格快照",
+            "summary": "一句宣言",
+            "payload": {
+                "manifesto": "一句宣言",
+                "value_tags": ["open_source"],
+                "interest_tags": ["writing"],
+            },
+        },
+    )
+    assert created.status_code == 201
+    assert created.get_json()["event_kind"] == "identity_snapshot"
+
+    again = client.post(
+        "/v1/timeline/events",
+        headers=_auth(token),
+        json={"event_kind": "identity_snapshot", "title": "人格快照", "summary": "第二版"},
+    )
+    assert again.status_code == 201
+
+    listing = client.get("/v1/timeline/events?limit=50", headers=_auth(token))
+    assert listing.status_code == 200
+    body = listing.get_json()
+    kinds = [item["event_kind"] for item in body["items"]]
+    assert kinds.count("identity_snapshot") == 2
+    assert body["count"] == len(body["items"])
 
 
 def test_soft_delete_hides_from_list(client):

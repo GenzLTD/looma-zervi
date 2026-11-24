@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, current_app, g, jsonify, request
 
 from src.thomas_core.auth.decorators import require_auth
-from src.timeline.constants import EVENT_KIND_MANUAL
+from src.timeline.constants import EVENT_KIND_ALLOW_DUPLICATE, EVENT_KIND_MANUAL
 from src.timeline.events import (
     compute_growth_stub,
     sanitize_payload,
@@ -57,10 +57,17 @@ def list_timeline():
     return jsonify(items=items, next_cursor=next_cursor, count=len(items))
 
 
+@timeline_bp.route("/events", methods=["GET"])
+@require_auth
+def list_timeline_events():
+    """Same list as GET /v1/timeline. iOS archive reads this path."""
+    return list_timeline()
+
+
 @timeline_bp.route("/events", methods=["POST"])
 @require_auth
 def create_timeline_event():
-    """Manual write: project_record / check_in / career_decision only."""
+    """Manual write: project_record / check_in / career_decision / identity_snapshot."""
     data = request.get_json() or {}
     event_kind = (data.get("event_kind") or "").strip()
     if event_kind not in EVENT_KIND_MANUAL:
@@ -89,7 +96,7 @@ def create_timeline_event():
         weight_role="evidence",
         visibility=visibility if visibility in ("private", "l1", "l2", "l3") else "private",
         occurred_at=occurred_at,
-        allow_duplicate=(event_kind == "check_in"),
+        allow_duplicate=(event_kind in EVENT_KIND_ALLOW_DUPLICATE),
     )
     return jsonify(serialize_timeline_row(row)), 201
 

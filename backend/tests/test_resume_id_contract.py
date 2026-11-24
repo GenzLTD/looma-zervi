@@ -272,3 +272,12 @@ def test_partial_and_ingest_preserve_markdown_for_analysis(client, app):
 
     # Cleanup
     client.delete(f"/v1/resume/{rid}", headers=headers)
+
+
+def test_templates_are_not_a_resume_id(client):
+    listed = client.get("/v1/resume/templates")
+    assert listed.status_code == 200
+    body = listed.get_json()
+    assert body["total"] == 6
+    assert {item["id"] for item in body["templates"]} >= {"standard-zh", "tech-en"}
+    assert all(item["locale"] in ("zh-CN", "en-US") for item in body["templates"])

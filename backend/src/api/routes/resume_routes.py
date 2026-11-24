@@ -9,6 +9,7 @@ Endpoints:
   POST /v1/resume/upload    - Upload resume file (PDF/DOCX), auto-parsed via MarkItDown + LLM
   POST /v1/resume/ingest    - Ingest pre-parsed markdown directly (DemoPeter thin-ingest)
   POST /v1/resume/improve   - Generate improvement suggestions for a parsed resume
+  GET  /v1/resume/templates - Static template catalog
   DELETE /v1/resume/<resume_id> - Delete a resume
 """
 import io
@@ -607,6 +608,67 @@ def analysis_resume():
         markdown=markdown_text,
         analysis=analysis,
     )
+
+
+# Static catalog from resume.v1.json templates_list. Must be registered
+# before /<resume_id>, otherwise GET /templates is captured as a delete.
+RESUME_TEMPLATES = (
+    {
+        "id": "standard-zh",
+        "name": "标准求职版",
+        "locale": "zh-CN",
+        "summary": "信息完整、结构均衡，适合大多数社招投递场景。",
+        "tags": ["通用", "社招"],
+        "preview_fields": ["name", "education", "experience", "skills", "expectation"],
+    },
+    {
+        "id": "tech-zh",
+        "name": "技术专员版",
+        "locale": "zh-CN",
+        "summary": "突出技能栈与项目亮点，弱化时间线，适合技术岗。",
+        "tags": ["技术", "项目导向"],
+        "preview_fields": ["name", "skills", "experience", "expectation"],
+    },
+    {
+        "id": "fresh-zh",
+        "name": "应届生版",
+        "locale": "zh-CN",
+        "summary": "教育背景前置，突出校园经历与实习成果。",
+        "tags": ["应届", "校招"],
+        "preview_fields": ["name", "education", "experience", "skills"],
+    },
+    {
+        "id": "onepage-zh",
+        "name": "简约一页版",
+        "locale": "zh-CN",
+        "summary": "一页纸原则，只留最强信号，适合快速筛选场景。",
+        "tags": ["一页", "高效"],
+        "preview_fields": ["name", "experience", "skills", "expectation"],
+    },
+    {
+        "id": "standard-en",
+        "name": "Standard Professional",
+        "locale": "en-US",
+        "summary": "Balanced structure for general job applications.",
+        "tags": ["general"],
+        "preview_fields": ["name", "education", "experience", "skills", "expectation"],
+    },
+    {
+        "id": "tech-en",
+        "name": "Engineering Focused",
+        "locale": "en-US",
+        "summary": "Skills-first layout highlighting projects and impact.",
+        "tags": ["engineering"],
+        "preview_fields": ["name", "skills", "experience", "expectation"],
+    },
+)
+
+
+@resume_bp.route("/templates", methods=["GET"])
+@optional_auth
+def list_resume_templates():
+    """Global read-only template catalog. Not a user resume id."""
+    return jsonify(templates=list(RESUME_TEMPLATES), total=len(RESUME_TEMPLATES))
 
 
 @resume_bp.route("/<resume_id>", methods=["DELETE"])
